@@ -109,31 +109,34 @@ async function uploadLotToAF(
       body: formData,
     });
 
-    // Check response
-    if (res.status === 302) {
-      const location = res.headers.get('location') || '';
-      // Redirect to login means session expired
+    // Get response details for debugging
+    const html = await res.text();
+    const status = res.status;
+    const location = res.headers.get('location') || '';
+
+    // Debug: return first 500 chars of response
+    const debug = html.substring(0, 500);
+
+    if (status === 302) {
       if (location.includes('Login') || location.includes('login') || location.includes('index.php')) {
         return { success: false, error: 'AF session expired. Please re-login.' };
       }
-      // Redirect to add_item or auctions is success
-      return { success: true };
+      return { success: true, debug: `302 -> ${location}` };
     }
 
-    if (res.status === 200) {
-      const html = await res.text();
-      // If we get the add_item form back, it likely succeeded and is showing the next item form
-      if (html.includes('Item Name') || html.includes('item_name')) {
-        return { success: true };
-      }
-      // If we get the login page back, session expired
+    if (status === 200) {
       if (html.includes('psEmail') || html.includes('psPassword')) {
         return { success: false, error: 'AF session expired. Please re-login.' };
       }
-      return { success: true };
+      // Check if the page shows a new empty form (= previous item was saved)
+      if (html.includes('Item Name') && html.includes('value=""')) {
+        return { success: true, debug: 'Got new empty form' };
+      }
+      // Return debug info so we can see what happened
+      return { success: false, error: `AF returned 200 but unclear if saved. Debug: ${debug}` };
     }
 
-    return { success: false, error: `Unexpected response: ${res.status}` };
+    return { success: false, error: `HTTP ${status}. Debug: ${debug}` };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
