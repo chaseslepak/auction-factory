@@ -17,22 +17,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'session_cookie required' }, { status: 400 });
   }
 
-  // Verify the cookie works by checking if we can access the admin
-  try {
-    const res = await fetch(`${AF_BASE}/auctions.php`, {
-      headers: { Cookie: session_cookie },
-      redirect: 'manual',
-    });
+  // Extract just the PHPSESSID from the cookie string
+  const phpMatch = session_cookie.match(/PHPSESSID=([^;]+)/);
+  const cleanCookie = phpMatch ? `PHPSESSID=${phpMatch[1]}` : session_cookie;
 
-    // 302 = redirect to login = invalid session
-    if (res.status === 302) {
+  // Verify the cookie works by loading the add_item page
+  try {
+    const res = await fetch(`${AF_BASE}/add_item.php`, {
+      headers: { Cookie: cleanCookie },
+    });
+    const html = await res.text();
+
+    // Check if we get the auction selector (= logged in) vs login page
+    if (html.includes('psEmail') || html.includes('psPassword')) {
       return NextResponse.json({ error: 'Invalid session cookie. Make sure you are logged into AF.' }, { status: 400 });
     }
 
-    // Store the cookie
+    if (!html.includes('Choose a auction')) {
+      return NextResponse.json({ error: 'Cookie connected but unexpected page. Try again.' }, { status: 400 });
+    }
+
+    // Store the clean cookie (just PHPSESSID)
     await supabase
       .from('af_session')
-      .upsert({ id: 1, session_cookie, updated_at: new Date().toISOString() });
+      .upsert({ id: 1, session_cookie: cleanCookie, updated_at: new Date().toISOString() });
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
