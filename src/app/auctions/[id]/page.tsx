@@ -19,6 +19,7 @@ export default function AuctionDetailPage() {
   const [afLinked, setAfLinked] = useState(false);
   const [showAfLink, setShowAfLink] = useState(false);
   const [afAuctionId, setAfAuctionId] = useState('');
+  const [afAuctions, setAfAuctions] = useState<{ id: string; name: string }[]>([]);
   const supabase = createClient();
 
   const fetchData = async () => {
@@ -48,6 +49,15 @@ export default function AuctionDetailPage() {
   useEffect(() => {
     fetchData();
   }, [id]);
+
+  const handleShowAfLink = async () => {
+    setShowAfLink(true);
+    try {
+      const res = await fetch('/api/af-auctions');
+      const data = await res.json();
+      if (data.auctions) setAfAuctions(data.auctions);
+    } catch {}
+  };
 
   const handleLinkAf = async () => {
     if (!afAuctionId.trim()) return;
@@ -157,27 +167,35 @@ export default function AuctionDetailPage() {
               {showAfLink ? (
                 <div className="space-y-2">
                   <p className="text-xs text-gray-500">
-                    Enter the AF auction ID (from the AF admin URL)
+                    Select the AF auction to upload lots to
                   </p>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={afAuctionId}
-                      onChange={(e) => setAfAuctionId(e.target.value)}
-                      placeholder="e.g. 2295466"
-                      className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-brand-blue"
-                    />
-                    <button
-                      onClick={handleLinkAf}
-                      className="px-4 py-2 gradient-btn text-white text-xs font-bold rounded-lg"
-                    >
-                      Link
-                    </button>
-                  </div>
+                  {afAuctions.length === 0 ? (
+                    <p className="text-xs text-gray-400">Loading AF auctions...</p>
+                  ) : (
+                    <div className="flex gap-2">
+                      <select
+                        value={afAuctionId}
+                        onChange={(e) => setAfAuctionId(e.target.value)}
+                        className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-brand-blue"
+                      >
+                        <option value="">Choose an auction...</option>
+                        {afAuctions.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleLinkAf}
+                        disabled={!afAuctionId}
+                        className="px-4 py-2 gradient-btn text-white text-xs font-bold rounded-lg disabled:opacity-50"
+                      >
+                        Link
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <button
-                  onClick={() => setShowAfLink(true)}
+                  onClick={handleShowAfLink}
                   className="w-full text-sm text-brand-blue font-bold"
                 >
                   Link AF Auction for Upload

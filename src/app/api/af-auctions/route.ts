@@ -24,7 +24,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const res = await fetch(`${AF_BASE}/auctions.php`, {
+    // Fetch the add_item page which has the auction dropdown
+    const res = await fetch(`${AF_BASE}/add_item.php`, {
       headers: { Cookie: session.session_cookie },
       redirect: 'manual',
     });
@@ -35,30 +36,15 @@ export async function GET(request: NextRequest) {
 
     const html = await res.text();
 
-    // Parse auction list from HTML
-    // AF auctions page typically has links like: add_item.php?auction_id=123
-    // or auction rows with IDs
+    // Parse auction dropdown: <option value="4805">Ohio - T&M #2</option>
     const auctions: { id: string; name: string }[] = [];
-    const regex = /auction_id=(\d+)[^>]*>([^<]*)</gi;
+    const regex = /<option value="(\d+)">([^<]+)<\/option>/gi;
     let match;
     while ((match = regex.exec(html)) !== null) {
       auctions.push({ id: match[1], name: match[2].trim() });
     }
 
-    // Also try to find auction names in table rows
-    // Pattern: links containing auction names with IDs
-    if (auctions.length === 0) {
-      // Try alternative pattern - look for any numbered links
-      const altRegex = /href="[^"]*?(\d{4,})[^"]*"[^>]*>([^<]+)</gi;
-      while ((match = altRegex.exec(html)) !== null) {
-        const name = match[2].trim();
-        if (name && !name.includes('http') && name.length > 2) {
-          auctions.push({ id: match[1], name });
-        }
-      }
-    }
-
-    return NextResponse.json({ auctions, raw_length: html.length });
+    return NextResponse.json({ auctions });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

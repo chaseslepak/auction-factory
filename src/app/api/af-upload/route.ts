@@ -36,8 +36,8 @@ async function uploadLotToAF(
   saveAction: 'next' | 'exit'
 ): Promise<{ success: boolean; error?: string; debug?: string }> {
   try {
-    // First, GET the add_item page to find hidden field values and the correct URL
-    const getUrl = `${AF_BASE}/add_item.php?auction_id=${afAuctionId}`;
+    // GET the add_item form using the correct URL with internal auction ID
+    const getUrl = `${AF_BASE}/add_item_2new.php?auction=${afAuctionId}`;
     const pageRes = await fetchWithCookie(getUrl, sessionCookie);
 
     if (pageRes.status === 302) {
@@ -156,8 +156,8 @@ async function uploadLotToAF(
       offset += part.length;
     }
 
-    // POST to AF add_item page
-    const url = `${AF_BASE}/add_item.php?auction_id=${afAuctionId}`;
+    // POST to AF add_item form (same URL as GET)
+    const url = `${AF_BASE}/add_item_2new.php?auction=${afAuctionId}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: {
