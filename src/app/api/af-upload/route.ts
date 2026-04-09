@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
-// Condition rating map: our 1-10 to AF's dropdown values
+// Condition rating map: our 1-10 to AF's actual dropdown values
 const CONDITION_MAP: Record<number, string> = {
   10: '10 - New in box',
-  9: '9 - Like new',
+  9: '9 - Like New',
   8: '8 - Excellent',
-  7: '7 - Very Good',
-  6: '6 - Good',
-  5: '5 - Average',
-  4: '4 - Below Average',
-  3: '3 - Fair',
-  2: '2 - Poor',
-  1: '1 - Parts Only',
+  7: '7 - Good',
+  6: '6 - Average',
+  5: '5 - Well used',
+  4: '4 - Functions',
+  3: '3 - Needs parts',
+  2: '2 - Repairable',
+  1: '1 - Broken',
 };
 
 const AF_BASE = 'https://www.auctionfactory.com/admin';
@@ -36,38 +36,72 @@ async function uploadLotToAF(
   saveAction: 'next' | 'exit'
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Build multipart form data
+    // First, GET the add_item page to find hidden field values
+    const pageRes = await fetchWithCookie(
+      `${AF_BASE}/add_item.php?auction_id=${afAuctionId}`,
+      sessionCookie
+    );
+
+    if (pageRes.status === 302) {
+      return { success: false, error: 'AF session expired. Please re-login.' };
+    }
+
+    const pageHtml = await pageRes.text();
+
+    // Extract hidden field values from the form
+    const getHidden = (name: string) => {
+      const match = pageHtml.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`));
+      return match ? match[1] : '';
+    };
+
+    const auctionInternal = getHidden('auction');
+    const endDate = getHidden('end_date');
+    const endTime = getHidden('end_time');
+    const autoExtend = getHidden('auto_extend');
+    const staggered = getHidden('staggered');
+
+    // Build multipart form data with correct AF field names
     const formData = new FormData();
 
-    // Core fields from the AF form
-    formData.append('item_name', lot.item_name || '');
-    formData.append('item_description', lot.auction_description || '');
-    formData.append('condition', CONDITION_MAP[lot.condition_rating] || '5 - Average');
+    // Hidden fields (required by AF)
+    formData.append('auction', auctionInternal);
+    formData.append('auction_id', afAuctionId);
+    formData.append('end_date', endDate);
+    formData.append('end_time', endTime);
+    formData.append('auto_extend', autoExtend);
+    formData.append('staggered', staggered);
+
+    // Visible fields — using actual AF field names
+    formData.append('title', lot.item_name || '');          // "Item Name"
+    formData.append('name', lot.auction_description || ''); // "Item Description" (textarea)
+    formData.append('condition', CONDITION_MAP[lot.condition_rating] || '5 - Well used');
     formData.append('make', lot.brand || '');
     formData.append('model', lot.model || '');
     formData.append('qty', String(lot.quantity || 1));
     formData.append('original_price', String(lot.estimated_retail_new || ''));
-    formData.append('starting_bid', '1.00');
+    formData.append('start', '1.00');
     formData.append('reserve', '0.00');
-    formData.append('buy_it_now', '0.00');
+    formData.append('buyitnow', '0.00');
     formData.append('taxable', 'yes');
     formData.append('width', '');
     formData.append('depth', '');
     formData.append('height', '');
     formData.append('youtube', '');
 
-    // Save action
+    // Save action button — try both possible field names
     if (saveAction === 'next') {
-      formData.append('next_item', 'Next Item');
+      formData.append('Next Item', 'Next Item');
+      formData.append('submit', 'Next Item');
     } else {
-      formData.append('save_exit', 'Save & Exit');
+      formData.append('Save & Exit', 'Save & Exit');
+      formData.append('submit', 'Save & Exit');
     }
 
     // Download and attach photos
     for (let i = 0; i < photos.length; i++) {
       const photoRes = await fetch(photos[i].url);
       const blob = await photoRes.blob();
-      formData.append('photos[]', blob, `photo_${i}.jpg`);
+      formData.append('file[]', blob, `photo_${i}.jpg`);
     }
 
     // POST to AF add_item page
