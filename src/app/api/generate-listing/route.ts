@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
     if (notes) contextText += `\n- Staff notes: ${notes}`;
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250514',
+      model: 'claude-3-5-sonnet-20241022',
       max_tokens: 2000,
       messages: [
         {
@@ -130,9 +130,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(listing);
   } catch (err: any) {
     console.error('Generate listing error:', err);
+    const status = err?.status || 500;
+    const message = err?.error?.message || err?.message || 'Internal server error';
     return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
+      { error: message, status },
+      { status }
     );
   }
 }
