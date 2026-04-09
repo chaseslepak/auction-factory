@@ -243,9 +243,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify session is still valid
-  const checkRes = await fetchWithCookie(`${AF_BASE}/auctions.php`, session.session_cookie);
-  if (checkRes.status === 302 || checkRes.status === 401) {
+  // Verify session is still valid by checking if we get the form
+  const checkRes = await fetch(`${AF_BASE}/add_item_2new.php?auction=${mapping.af_auction_id}`, {
+    headers: { Cookie: session.session_cookie },
+    redirect: 'manual',
+  });
+  const checkHtml = await checkRes.text();
+  if (checkHtml.includes('psEmail') || checkHtml.includes('psPassword') || !checkHtml.includes('Item Name')) {
     return NextResponse.json(
       { error: 'AF session expired. Please re-login to Auction Factory.' },
       { status: 401 }
