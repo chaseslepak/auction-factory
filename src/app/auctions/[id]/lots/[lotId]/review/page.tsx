@@ -1,0 +1,363 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+import type { LotWithPhotos, GenerateListingResponse } from '@/lib/types';
+import Header from '@/components/Header';
+import GradientButton from '@/components/GradientButton';
+import ConfidenceChip from '@/components/ConfidenceChip';
+
+export default function LotReviewPage() {
+  const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
+  const router = useRouter();
+  const supabase = createClient();
+  const isNew = lotId === 'new';
+
+  // New lot state
+  const [listing, setListing] = useState<GenerateListingResponse | null>(null);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [condition, setCondition] = useState(5);
+  const [quantity, setQuantity] = useState(1);
+  const [notes, setNotes] = useState('');
+  const [nextLotNumber, setNextLotNumber] = useState(1);
+
+  // Existing lot state
+  const [existingLot, setExistingLot] = useState<LotWithPhotos | null>(null);
+
+  // Shared state
+  const [mode, setMode] = useState<'single' | 'range'>('single');
+  const [rangeCount, setRangeCount] = useState(2);
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isNew) {
+      const pending = sessionStorage.getItem('pending-lot');
+      if (!pending) {
+        router.push(`/auctions/${auctionId}/new-lot`);
+        return;
+      }
+      const data = JSON.parse(pending);
+      setListing(data.listing);
+      setPhotos(data.photos);
+      setCondition(data.condition);
+      setQuantity(data.quantity);
+      setNotes(data.notes);
+      setNextLotNumber(data.nextLotNumber);
+    } else {
+      const fetchLot = async () => {
+        const { data } = await supabase
+          .from('lots')
+          .select('*, lot_photos(*)')
+          .eq('id', lotId)
+          .single();
+        if (data) setExistingLot(data as LotWithPhotos);
+      };
+      fetchLot();
+    }
+  }, [isNew, lotId, auctionId]);
+
+  const getPhotoUrl = (path: string) => {
+    const { data } = supabase.storage.from('lot-photos').getPublicUrl(path);
+    return data.publicUrl;
+  };
+
+  const handleCopy = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSave = async () => {
+    if (!listing) return;
+    setSaving(true);
+    setError(null);
+
+    try {
+      const lotsToCreate = mode === 'single' ? 1 : rangeCount;
+
+      for (let i = 0; i < lotsToCreate; i++) {
+        const lotNumber = nextLotNumber + i;
+
+        // Insert lot row
+        const { data: lotData, error: lotError } = await supabase
+          .from('lots')
+          .insert({
+            auction_id: auctionId,
+            lot_number: lotNumber,
+            item_name: listing.item_name,
+            brand: listing.brand,
+            model: listing.model,
+            category: listing.category,
+            confidence: listing.confidence,
+            condition_rating: condition,
+            quantity,
+            estimated_retail_new: listing.estimated_retail_new,
+            listed_price: listing.listed_price,
+            key_features: listing.key_features,
+            auction_description: listing.auction_description,
+            notes,
+          })
+          .select()
+          .single();
+
+        if (lotError) throw lotError;
+
+        // Upload photos to storage and create lot_photos records
+        for (let j = 0; j < photos.length; j++) {
+          const base64 = photos[j].replace(/^data:image\/\w+;base64,/, '');
+          const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+          const blob = new Blob([buffer], { type: 'image/jpeg' });
+
+          const storagePath = `${auctionId}/${lotData.id}/${j}.jpg`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('lot-photos')
+            .upload(storagePath, blob, { contentType: 'image/jpeg' });
+
+          if (uploadError) throw uploadError;
+
+          await supabase.from('lot_photos').insert({
+            lot_id: lotData.id,
+            storage_path: storagePath,
+            display_order: j,
+          });
+        }
+      }
+
+      // Clear pending data
+      sessionStorage.removeItem('pending-lot');
+      router.push(`/auctions/${auctionId}`);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Determine what to display
+  const displayListing = isNew
+    ? listing
+    : existingLot
+      ? {
+          item_name: existingLot.item_name || '',
+          brand: existingLot.brand || '',
+          model: existingLot.model || '',
+          category: existingLot.category || '',
+          confidence: existingLot.confidence || 'medium',
+          estimated_retail_new: existingLot.estimated_retail_new || 0,
+          listed_price: existingLot.listed_price || 0,
+          key_features: existingLot.key_features || [],
+          auction_description: existingLot.auction_description || '',
+        }
+      : null;
+
+  const displayPhotos = isNew
+    ? photos
+    : existingLot?.lot_photos.map((p) => getPhotoUrl(p.storage_path)) || [];
+
+  if (!displayListing) {
+    return (
+      <div className="min-h-screen bg-brand-bg">
+        <Header title="Loading..." backHref={`/auctions/${auctionId}`} />
+        <p className="text-center text-gray-400 py-12">Loading...</p>
+      </div>
+    );
+  }
+
+  const displayQuantity = isNew ? quantity : existingLot?.quantity || 1;
+  const displayConfidence = (displayListing.confidence || 'medium') as 'high' | 'medium' | 'low';
+
+  return (
+    <div className="min-h-screen bg-brand-bg pb-28">
+      <Header
+        title={isNew ? `Lot #${nextLotNumber} Review` : `Lot #${existingLot?.lot_number}`}
+        backHref={isNew ? `/auctions/${auctionId}/new-lot` : `/auctions/${auctionId}`}
+      />
+
+      <div className="p-4 space-y-4">
+        {/* Photos */}
+        {displayPhotos.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {displayPhotos.map((photo, i) => (
+              <div
+                key={i}
+                className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200"
+              >
+                <img
+                  src={photo}
+                  alt={`Photo ${i + 1}`}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Item summary card */}
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-start justify-between mb-2">
+            <h2 className="font-black text-brand-navy text-lg">
+              {displayListing.item_name}
+            </h2>
+            <ConfidenceChip confidence={displayConfidence} />
+          </div>
+
+          <div className="space-y-1 text-sm text-gray-600">
+            {displayListing.brand && displayListing.brand !== 'Unknown' && (
+              <p>
+                <span className="font-medium text-gray-400">Brand:</span>{' '}
+                {displayListing.brand}
+              </p>
+            )}
+            {displayListing.model && displayListing.model !== 'Unknown' && (
+              <p>
+                <span className="font-medium text-gray-400">Model:</span>{' '}
+                {displayListing.model}
+              </p>
+            )}
+            {displayListing.category && (
+              <p>
+                <span className="font-medium text-gray-400">Category:</span>{' '}
+                {displayListing.category}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-3 flex items-center gap-4">
+            <div>
+              <p className="text-xs text-gray-400">Est. Retail</p>
+              <p className="font-bold text-brand-green">
+                ${Number(displayListing.estimated_retail_new).toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Listed Price</p>
+              <p className="font-bold text-brand-green">
+                ${Number(displayListing.listed_price).toLocaleString()}
+              </p>
+            </div>
+            {displayQuantity > 1 && (
+              <div>
+                <p className="text-xs text-gray-400">Quantity</p>
+                <p className="font-bold text-brand-blue">{displayQuantity}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Auction description card */}
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide">
+              Auction Listing
+            </h3>
+            <button
+              onClick={() => handleCopy(displayListing.auction_description)}
+              className="text-xs font-bold text-brand-blue px-3 py-1 rounded-full border border-brand-blue/20 hover:bg-brand-blue/5"
+            >
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
+            {displayListing.auction_description}
+          </pre>
+        </div>
+
+        {/* Key features */}
+        {displayListing.key_features && displayListing.key_features.length > 0 && (
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-2">
+              Key Features
+            </h3>
+            <ul className="space-y-1">
+              {displayListing.key_features.map((f: string, i: number) => (
+                <li key={i} className="text-sm text-gray-600 flex items-start gap-2">
+                  <span className="text-brand-green mt-0.5">&#8226;</span>
+                  {f}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Lot assignment toggle (new lots only) */}
+        {isNew && (
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-3">
+              Lot Assignment
+            </h3>
+            <div className="flex rounded-lg overflow-hidden border border-gray-200">
+              <button
+                onClick={() => setMode('single')}
+                className={`flex-1 py-2 text-sm font-bold uppercase tracking-wide transition-colors ${
+                  mode === 'single'
+                    ? 'gradient-btn text-white'
+                    : 'bg-white text-gray-400'
+                }`}
+              >
+                Single Lot
+              </button>
+              <button
+                onClick={() => setMode('range')}
+                className={`flex-1 py-2 text-sm font-bold uppercase tracking-wide transition-colors ${
+                  mode === 'range'
+                    ? 'gradient-btn text-white'
+                    : 'bg-white text-gray-400'
+                }`}
+              >
+                Range / Dupes
+              </button>
+            </div>
+            {mode === 'range' && (
+              <div className="mt-3 flex items-center gap-3">
+                <label className="text-sm text-gray-600">
+                  Create
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  max={50}
+                  value={rangeCount}
+                  onChange={(e) =>
+                    setRangeCount(Math.max(2, Math.min(50, Number(e.target.value))))
+                  }
+                  className="w-20 px-3 py-2 rounded-lg border border-gray-200 text-center font-bold focus:outline-none focus:border-brand-blue"
+                />
+                <label className="text-sm text-gray-600">
+                  identical lots (#{nextLotNumber}&ndash;#
+                  {nextLotNumber + rangeCount - 1})
+                </label>
+              </div>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <p className="text-red-500 text-sm text-center">{error}</p>
+        )}
+      </div>
+
+      {/* Bottom actions */}
+      {isNew && (
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-brand-bg via-brand-bg to-transparent pt-8">
+          <div className="flex gap-3">
+            <button
+              onClick={() => router.push(`/auctions/${auctionId}/new-lot`)}
+              className="flex-1 py-4 rounded-full border-2 border-gray-300 font-black text-sm text-gray-500 uppercase tracking-wide"
+            >
+              Redo
+            </button>
+            <div className="flex-1">
+              <GradientButton onClick={handleSave} loading={saving}>
+                Save Lot{mode === 'range' ? 's' : ''}
+              </GradientButton>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
