@@ -204,13 +204,25 @@ export default function AuctionDetailPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              <button
-                onClick={handleUploadToAf}
-                disabled={uploading}
-                className="w-full py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
-              >
-                {uploading ? 'Uploading...' : 'Upload to AF'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleUploadToAf}
+                  disabled={uploading}
+                  className="flex-1 py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
+                >
+                  {uploading ? 'Uploading...' : 'Upload to AF'}
+                </button>
+                <button
+                  onClick={async () => {
+                    await supabase.from('af_auction_map').delete().eq('auction_id', id);
+                    setAfLinked(false);
+                    setAfAuctionId('');
+                  }}
+                  className="px-3 py-3 rounded-xl border border-gray-300 text-gray-400 text-xs"
+                >
+                  Unlink
+                </button>
+              </div>
               {uploadMsg && (
                 <p className={`text-xs text-center ${uploadMsg.type === 'success' ? 'text-brand-green' : 'text-red-500'}`}>
                   {uploadMsg.text}
