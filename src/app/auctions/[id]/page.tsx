@@ -93,18 +93,16 @@ export default function AuctionDetailPage() {
       });
 
       const data = await res.json();
-      console.log('AF Upload response:', JSON.stringify(data, null, 2));
       if (data.error) {
         setUploadMsg({ type: 'error', text: data.error });
       } else {
         const succeeded = data.results.filter((r: any) => r.success).length;
         const failed = data.results.filter((r: any) => !r.success).length;
-        const debugInfo = data.results.map((r: any) =>
-          `Lot ${r.lot_number}: ${r.success ? 'OK' : r.error}${r.debug ? ` [${r.debug}]` : ''}`
-        ).join(' | ');
         setUploadMsg({
           type: failed === 0 ? 'success' : 'error',
-          text: `${succeeded} uploaded${failed > 0 ? `, ${failed} failed` : ''} — ${debugInfo}`,
+          text: failed === 0
+            ? `${succeeded} lot${succeeded !== 1 ? 's' : ''} uploaded to AF!`
+            : `${succeeded} uploaded, ${failed} failed`,
         });
         fetchData();
       }

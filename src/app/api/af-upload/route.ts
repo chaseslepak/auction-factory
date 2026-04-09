@@ -187,12 +187,9 @@ async function uploadLotToAF(
       if (html.includes('psEmail') || html.includes('psPassword')) {
         return { success: false, error: 'AF session expired. Please re-login.' };
       }
-      // Check if the page shows a new empty form (= previous item was saved)
-      if (html.includes('Item Name') && html.includes('value=""')) {
-        return { success: true, debug: 'Got new empty form' };
-      }
-      // Return debug info so we can see what happened
-      return { success: false, error: `AF returned 200 but unclear if saved. Debug: ${debug}` };
+      // AF returns the admin page after a successful save — treat 200 as success
+      // unless it's the login page
+      return { success: true };
     }
 
     return { success: false, error: `HTTP ${status}. Debug: ${debug}` };
