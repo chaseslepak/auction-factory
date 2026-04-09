@@ -93,9 +93,9 @@ async function uploadLotToAF(
     addField('reserve', '0.00');
     addField('buyitnow', '0.00');
     addField('taxable', 'yes');
-    addField('width', '');
-    addField('depth', '');
-    addField('height', '');
+    addField('width', lot.width || '');
+    addField('depth', lot.depth || '');
+    addField('height', lot.height || '');
     addField('youtube', '');
 
     // Save action button

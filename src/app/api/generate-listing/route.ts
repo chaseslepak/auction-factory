@@ -14,12 +14,15 @@ CAREFULLY EXAMINE every photo provided. Look for:
 From the photos, identify the equipment and return ONLY a JSON object (no markdown, no preamble, no explanation):
 
 {
-  "item_name": "Brief product name with brand and model if visible",
+  "item_name": "Brief product name with brand and model if visible — if condition is 10, PREPEND 'NEW' to the name (e.g. 'NEW Hoshizaki Ice Machine KM-340MAJ')",
   "brand": "Manufacturer or 'Unknown'",
   "model": "Model number or 'Unknown'",
   "category": "e.g. Refrigeration, Cooking, Prep, Smallwares, Bar, Shelving",
   "confidence": "high | medium | low",
   "estimated_retail_new": 1234,
+  "width": "Estimated width in inches if determinable from photos, or empty string",
+  "depth": "Estimated depth in inches if determinable from photos, or empty string",
+  "height": "Estimated height in inches if determinable from photos, or empty string",
   "key_features": ["feature 1","feature 2","feature 3","feature 4","feature 5"],
   "auction_description": "Full Auction Factory listing in exact format below"
 }
@@ -40,6 +43,19 @@ CONDITION: [Describe what you actually observe in the photos: scratches, dents, 
 
 [IF quantity > 1, append exactly this line at the very end:]
 Bid X [quantity]
+
+CONDITION 10 (NEW) ITEMS — SPECIAL HANDLING:
+- PREPEND "NEW" to the item_name (e.g. "NEW Hoshizaki Ice Machine KM-340MAJ")
+- Opening description MUST emphasize this is BRAND NEW, never used, still in original packaging if visible
+- Use enthusiastic language: "Brand new!", "Factory sealed!", "Never used!", "Still in original packaging!"
+- Highlight the incredible value vs. retail price
+- CONDITION line should say something like: "BRAND NEW — Factory sealed, never used. Original packaging intact."
+
+DIMENSIONS:
+- Examine photos carefully for size — look for spec labels, compare to known objects nearby
+- If you can identify the exact model, use known manufacturer specs for width/depth/height
+- Provide dimensions in inches as just the number (e.g. "24" not "24 inches")
+- If you truly cannot determine dimensions, use empty string ""
 
 ABSOLUTE RULES:
 - DO NOT include any location, pickup, shipping, delivery, "why wait", warranty, or auction policy disclaimers anywhere — those are added at the auction level, not the lot level

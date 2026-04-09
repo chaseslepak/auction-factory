@@ -56,6 +56,9 @@ export interface GenerateListingResponse {
   confidence: 'high' | 'medium' | 'low';
   estimated_retail_new: number;
   listed_price: number;
+  width: string;
+  depth: string;
+  height: string;
   key_features: string[];
   auction_description: string;
 }
