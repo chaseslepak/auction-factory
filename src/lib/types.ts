@@ -60,5 +60,6 @@ export interface GenerateListingResponse {
   depth: string;
   height: string;
   key_features: string[];
+  stock_image_url: string;
   auction_description: string;
 }

@@ -109,12 +109,39 @@ export default function LotReviewPage() {
         if (lotError) throw lotError;
 
         // Upload photos to storage and create lot_photos records
+        let photoIndex = 0;
+
+        // If stock image URL is available, download and make it the first photo
+        if (listing.stock_image_url) {
+          try {
+            const stockRes = await fetch(listing.stock_image_url);
+            if (stockRes.ok) {
+              const stockBlob = await stockRes.blob();
+              const storagePath = `${auctionId}/${lotData.id}/stock_0.jpg`;
+              const { error: stockUploadError } = await supabase.storage
+                .from('lot-photos')
+                .upload(storagePath, stockBlob, { contentType: 'image/jpeg' });
+              if (!stockUploadError) {
+                await supabase.from('lot_photos').insert({
+                  lot_id: lotData.id,
+                  storage_path: storagePath,
+                  display_order: 0,
+                });
+                photoIndex = 1;
+              }
+            }
+          } catch {
+            // Stock image download failed, continue with user photos
+          }
+        }
+
+        // Upload user photos
         for (let j = 0; j < photos.length; j++) {
           const base64 = photos[j].replace(/^data:image\/\w+;base64,/, '');
           const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
           const blob = new Blob([buffer], { type: 'image/jpeg' });
 
-          const storagePath = `${auctionId}/${lotData.id}/${j}.jpg`;
+          const storagePath = `${auctionId}/${lotData.id}/${photoIndex + j}.jpg`;
 
           const { error: uploadError } = await supabase.storage
             .from('lot-photos')
@@ -125,7 +152,7 @@ export default function LotReviewPage() {
           await supabase.from('lot_photos').insert({
             lot_id: lotData.id,
             storage_path: storagePath,
-            display_order: j,
+            display_order: photoIndex + j,
           });
         }
       }

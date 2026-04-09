@@ -24,6 +24,7 @@ From the photos, identify the equipment and return ONLY a JSON object (no markdo
   "depth": "Estimated depth in inches if determinable from photos, or empty string",
   "height": "Estimated height in inches if determinable from photos, or empty string",
   "key_features": ["feature 1","feature 2","feature 3","feature 4","feature 5"],
+  "stock_image_url": "If condition is 10 AND you can identify the exact brand+model with HIGH confidence, provide a URL to the manufacturer's or major retailer's stock/product image for this exact item. Otherwise empty string.",
   "auction_description": "Full Auction Factory listing in exact format below"
 }
 
@@ -50,6 +51,7 @@ CONDITION 10 (NEW) ITEMS — SPECIAL HANDLING:
 - Use enthusiastic language: "Brand new!", "Factory sealed!", "Never used!", "Still in original packaging!"
 - Highlight the incredible value vs. retail price
 - CONDITION line should say something like: "BRAND NEW — Factory sealed, never used. Original packaging intact."
+- STOCK IMAGE: If you can identify the exact brand AND model number with HIGH confidence, provide a stock_image_url — use the manufacturer's product page image URL or a major retailer (WebstaurantStore, Amazon, KaTom) product image URL for that exact make/model. This will be used as the primary listing photo. If you're not 100% sure of the exact model, leave stock_image_url as empty string.
 
 DIMENSIONS:
 - Examine photos carefully for size — look for spec labels, compare to known objects nearby
