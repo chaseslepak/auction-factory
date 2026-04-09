@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
+import AfKeepAlive from '@/components/AfKeepAlive';
 import './globals.css';
 
 const inter = localFont({
@@ -52,6 +53,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} font-sans bg-brand-bg min-h-screen`}>
         {children}
+        <AfKeepAlive />
         <script
           dangerouslySetInnerHTML={{
             __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js')}`,
