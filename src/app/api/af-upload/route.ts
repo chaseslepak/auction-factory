@@ -244,14 +244,19 @@ export async function POST(request: NextRequest) {
   }
 
   // Verify session is still valid by checking if we get the form
-  const checkRes = await fetch(`${AF_BASE}/add_item_2new.php?auction=${mapping.af_auction_id}`, {
-    headers: { Cookie: session.session_cookie },
-    redirect: 'manual',
+  const cookieUsed = session.session_cookie;
+  const checkUrl = `${AF_BASE}/add_item_2new.php?auction=${mapping.af_auction_id}`;
+  const checkRes = await fetch(checkUrl, {
+    headers: { Cookie: cookieUsed },
   });
   const checkHtml = await checkRes.text();
-  if (checkHtml.includes('psEmail') || checkHtml.includes('psPassword') || !checkHtml.includes('Item Name')) {
+  const hasLogin = checkHtml.includes('psEmail') || checkHtml.includes('psPassword');
+  const hasForm = checkHtml.includes('Item Name');
+  if (hasLogin || !hasForm) {
     return NextResponse.json(
-      { error: 'AF session expired. Please re-login to Auction Factory.' },
+      {
+        error: `AF session check failed. Cookie: ${cookieUsed.substring(0, 30)}..., URL: ${checkUrl}, Status: ${checkRes.status}, HasLogin: ${hasLogin}, HasForm: ${hasForm}, First200: ${checkHtml.substring(0, 200)}`
+      },
       { status: 401 }
     );
   }
