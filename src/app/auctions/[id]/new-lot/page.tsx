@@ -7,6 +7,7 @@ import Header from '@/components/Header';
 import PhotoGrid from '@/components/PhotoGrid';
 import ConditionSlider from '@/components/ConditionSlider';
 import GradientButton from '@/components/GradientButton';
+import SpeechInput from '@/components/SpeechInput';
 
 export default function NewLotPage() {
   const { id } = useParams<{ id: string }>();
@@ -133,12 +134,11 @@ export default function NewLotPage() {
           <label className="block text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">
             Notes
           </label>
-          <textarea
+          <SpeechInput
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Any extra details for the AI..."
+            onChange={setNotes}
+            placeholder="Tap the mic or type notes for the AI..."
             rows={3}
-            className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:border-brand-blue resize-none"
           />
         </div>
 
