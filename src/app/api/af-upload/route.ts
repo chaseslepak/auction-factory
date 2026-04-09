@@ -88,13 +88,11 @@ async function uploadLotToAF(
     formData.append('height', '');
     formData.append('youtube', '');
 
-    // Save action button — try both possible field names
+    // Save action button — exact names from AF form
     if (saveAction === 'next') {
-      formData.append('Next Item', 'Next Item');
-      formData.append('submit', 'Next Item');
+      formData.append('next', 'Next Item');
     } else {
-      formData.append('Save & Exit', 'Save & Exit');
-      formData.append('submit', 'Save & Exit');
+      formData.append('exit', 'Save & Exit');
     }
 
     // Download and attach photos
