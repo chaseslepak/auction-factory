@@ -1,5 +1,18 @@
 'use client';
 
+const CONDITIONS = [
+  { value: 10, label: '10 - New in box' },
+  { value: 9, label: '9 - Like New' },
+  { value: 8, label: '8 - Excellent' },
+  { value: 7, label: '7 - Good' },
+  { value: 6, label: '6 - Average' },
+  { value: 5, label: '5 - Well used' },
+  { value: 4, label: '4 - Functions' },
+  { value: 3, label: '3 - Needs parts' },
+  { value: 2, label: '2 - Repairable' },
+  { value: 1, label: '1 - Broken' },
+];
+
 export default function ConditionSlider({
   value,
   onChange,
@@ -9,24 +22,20 @@ export default function ConditionSlider({
 }) {
   return (
     <div>
-      <div className="flex justify-between items-center mb-2">
-        <label className="text-sm font-bold text-gray-700 uppercase tracking-wide">
-          Condition
-        </label>
-        <span className="text-sm font-black text-brand-green">{value}/10</span>
-      </div>
-      <input
-        type="range"
-        min={1}
-        max={10}
+      <label className="block text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">
+        Condition
+      </label>
+      <select
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full"
-      />
-      <div className="flex justify-between text-xs text-gray-400 mt-1">
-        <span>Poor</span>
-        <span>Excellent</span>
-      </div>
+        className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:border-brand-blue text-sm font-medium"
+      >
+        {CONDITIONS.map((c) => (
+          <option key={c.value} value={c.value}>
+            {c.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
