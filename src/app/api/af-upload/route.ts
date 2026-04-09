@@ -36,11 +36,9 @@ async function uploadLotToAF(
   saveAction: 'next' | 'exit'
 ): Promise<{ success: boolean; error?: string; debug?: string }> {
   try {
-    // First, GET the add_item page to find hidden field values
-    const pageRes = await fetchWithCookie(
-      `${AF_BASE}/add_item.php?auction_id=${afAuctionId}`,
-      sessionCookie
-    );
+    // First, GET the add_item page to find hidden field values and the correct URL
+    const getUrl = `${AF_BASE}/add_item.php?auction_id=${afAuctionId}`;
+    const pageRes = await fetchWithCookie(getUrl, sessionCookie);
 
     if (pageRes.status === 302) {
       return { success: false, error: 'AF session expired. Please re-login.' };
@@ -60,53 +58,114 @@ async function uploadLotToAF(
     const autoExtend = getHidden('auto_extend');
     const staggered = getHidden('staggered');
 
-    // Build multipart form data with correct AF field names
-    const formData = new FormData();
-
-    // Hidden fields (required by AF)
-    formData.append('auction', auctionInternal);
-    formData.append('auction_id', afAuctionId);
-    formData.append('end_date', endDate);
-    formData.append('end_time', endTime);
-    formData.append('auto_extend', autoExtend);
-    formData.append('staggered', staggered);
-
-    // Visible fields — using actual AF field names
-    formData.append('title', lot.item_name || '');          // "Item Name"
-    formData.append('name', lot.auction_description || ''); // "Item Description" (textarea)
-    formData.append('condition', CONDITION_MAP[lot.condition_rating] || '5 - Well used');
-    formData.append('make', lot.brand || '');
-    formData.append('model', lot.model || '');
-    formData.append('qty', String(lot.quantity || 1));
-    formData.append('original_price', String(lot.estimated_retail_new || ''));
-    formData.append('start', '1.00');
-    formData.append('reserve', '0.00');
-    formData.append('buyitnow', '0.00');
-    formData.append('taxable', 'yes');
-    formData.append('width', '');
-    formData.append('depth', '');
-    formData.append('height', '');
-    formData.append('youtube', '');
-
-    // Save action button — exact names from AF form
-    if (saveAction === 'next') {
-      formData.append('next', 'Next Item');
-    } else {
-      formData.append('exit', 'Save & Exit');
+    if (!auctionInternal) {
+      return { success: false, error: `Could not find auction hidden field. Page may not be the add_item form. First 200 chars: ${pageHtml.substring(0, 200)}` };
     }
 
-    // Download and attach photos
+    // Build the POST body as URLSearchParams first (no photos) to test basic submission
+    // Then we'll add photos via multipart
+    const boundary = '----FormBoundary' + Math.random().toString(36).substring(2);
+    let body = '';
+
+    const addField = (name: string, value: string) => {
+      body += `--${boundary}\r\n`;
+      body += `Content-Disposition: form-data; name="${name}"\r\n\r\n`;
+      body += `${value}\r\n`;
+    };
+
+    // Hidden fields
+    addField('auction', auctionInternal);
+    addField('auction_id', afAuctionId);
+    addField('end_date', endDate);
+    addField('end_time', endTime);
+    addField('auto_extend', autoExtend);
+    addField('staggered', staggered);
+
+    // Visible fields
+    addField('title', lot.item_name || '');
+    addField('name', lot.auction_description || '');
+    addField('condition', CONDITION_MAP[lot.condition_rating] || '5 - Well used');
+    addField('make', lot.brand || '');
+    addField('model', lot.model || '');
+    addField('qty', String(lot.quantity || 1));
+    addField('original_price', String(lot.estimated_retail_new || ''));
+    addField('start', '1.00');
+    addField('reserve', '0.00');
+    addField('buyitnow', '0.00');
+    addField('taxable', 'yes');
+    addField('width', '');
+    addField('depth', '');
+    addField('height', '');
+    addField('youtube', '');
+
+    // Save action button
+    if (saveAction === 'next') {
+      addField('next', 'Next Item');
+    } else {
+      addField('exit', 'Save & Exit');
+    }
+
+    // Download and attach photos as binary parts
+    const photoParts: { name: string; filename: string; data: Buffer; contentType: string }[] = [];
     for (let i = 0; i < photos.length; i++) {
       const photoRes = await fetch(photos[i].url);
-      const blob = await photoRes.blob();
-      formData.append('file[]', blob, `photo_${i}.jpg`);
+      const arrayBuf = await photoRes.arrayBuffer();
+      photoParts.push({
+        name: 'file[]',
+        filename: `photo_${i}.jpg`,
+        data: Buffer.from(arrayBuf),
+        contentType: 'image/jpeg',
+      });
+    }
+
+    // Build the final multipart body with binary photo data
+    const textEncoder = new TextEncoder();
+    const parts: Uint8Array[] = [];
+
+    // Add text fields
+    parts.push(textEncoder.encode(body));
+
+    // Add photo files
+    for (const photo of photoParts) {
+      let filePart = `--${boundary}\r\n`;
+      filePart += `Content-Disposition: form-data; name="${photo.name}"; filename="${photo.filename}"\r\n`;
+      filePart += `Content-Type: ${photo.contentType}\r\n\r\n`;
+      parts.push(textEncoder.encode(filePart));
+      parts.push(new Uint8Array(photo.data));
+      parts.push(textEncoder.encode('\r\n'));
+    }
+
+    // If no photos, still send an empty file field
+    if (photoParts.length === 0) {
+      let emptyFile = `--${boundary}\r\n`;
+      emptyFile += `Content-Disposition: form-data; name="file[]"; filename=""\r\n`;
+      emptyFile += `Content-Type: application/octet-stream\r\n\r\n`;
+      parts.push(textEncoder.encode(emptyFile));
+      parts.push(textEncoder.encode('\r\n'));
+    }
+
+    // Close boundary
+    parts.push(textEncoder.encode(`--${boundary}--\r\n`));
+
+    // Combine all parts into a single buffer
+    const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
+    const fullBody = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const part of parts) {
+      fullBody.set(part, offset);
+      offset += part.length;
     }
 
     // POST to AF add_item page
     const url = `${AF_BASE}/add_item.php?auction_id=${afAuctionId}`;
-    const res = await fetchWithCookie(url, sessionCookie, {
+    const res = await fetch(url, {
       method: 'POST',
-      body: formData,
+      headers: {
+        Cookie: sessionCookie,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body: fullBody,
+      redirect: 'follow',
     });
 
     // Get response details for debugging
