@@ -19,7 +19,7 @@ From the photos, identify the equipment and return ONLY a JSON object (no markdo
   "model": "Model number or 'Unknown'",
   "category": "e.g. Refrigeration, Cooking, Prep, Smallwares, Bar, Shelving",
   "confidence": "high | medium | low",
-  "estimated_retail_new": 1234,
+  "estimated_retail_new": 1234 (REQUIRED — this must ALWAYS be a number greater than 0. Research the item thoroughly. Find the highest available retail price for this exact item brand new, then use that number. If you cannot find an exact match, estimate based on similar items in the same category. NEVER return 0 or leave blank.),
   "width": "Estimated width in inches if determinable from photos, or empty string",
   "depth": "Estimated depth in inches if determinable from photos, or empty string",
   "height": "Estimated height in inches if determinable from photos, or empty string",
@@ -32,7 +32,7 @@ AUCTION DESCRIPTION FORMAT (exact line breaks):
 [1-2 sentence description — reference what you actually see in the photos. If item looks new/sealed, say so. If it shows wear, be upfront. Emphasize retail value.]
 
 FEATURES:
-Retail Price: $[estimated_retail_new × 1.25, rounded — do NOT mention the markup]
+Retail Price: $[estimated_retail_new × 1.10, rounded — this is 10% above the highest retail you found. Do NOT mention the markup.]
 • [feature — based on what you can see/verify in photos]
 • [feature]
 • [feature]
@@ -61,7 +61,7 @@ ABSOLUTE RULES:
 - DO NOT include any location, pickup, shipping, delivery, "why wait", warranty, or auction policy disclaimers anywhere — those are added at the auction level, not the lot level
 - NO warranty mentions, ever
 - Use "•" (bullet character) for bullets, not hyphens or asterisks
-- Retail price = estimated_retail_new × 1.25, rounded, never reference the markup
+- Retail price in the listing = estimated_retail_new × 1.10, rounded. Never reference the markup. The estimated_retail_new MUST be the highest retail price you can find for this item brand new — NEVER return 0
 - If you cannot identify the item confidently, set confidence to "low" and say so honestly in the description
 - Be honest about condition — describe what you SEE in the photos, don't just restate the rating number
 - For Gridmann items: describe as "new in box," retail $250
@@ -146,9 +146,9 @@ export async function POST(request: NextRequest) {
 
     const listing = JSON.parse(jsonMatch[0]);
 
-    // Compute listed price (retail × 1.25)
+    // Compute listed price (retail + 10%)
     const retailNew = Number(listing.estimated_retail_new) || 0;
-    listing.listed_price = Math.round(retailNew * 1.25);
+    listing.listed_price = Math.round(retailNew * 1.10);
 
     return NextResponse.json(listing);
   } catch (err: any) {
