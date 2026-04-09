@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
-
 const SYSTEM_PROMPT = `You are a restaurant equipment identification expert for Auction Factory Ohio in Cleveland, OH.
 
 From the photos provided, identify the equipment and return ONLY a JSON object (no markdown, no preamble, no explanation):
@@ -60,6 +58,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'Anthropic API key not configured' },
+        { status: 500 }
+      );
+    }
+    const anthropic = new Anthropic({ apiKey });
+
     const { images, condition, quantity, notes, auction_name } =
       await request.json();
 
