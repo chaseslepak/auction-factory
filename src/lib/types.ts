@@ -25,6 +25,8 @@ export interface Lot {
   notes: string | null;
   created_by: string;
   created_at: string;
+  af_upload_status: 'queued' | 'uploading' | 'uploaded' | 'failed' | null;
+  af_upload_error: string | null;
 }
 
 export interface LotPhoto {

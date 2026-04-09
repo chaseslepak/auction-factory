@@ -14,26 +14,92 @@ export default function AuctionDetailPage() {
   const [auction, setAuction] = useState<Auction | null>(null);
   const [lots, setLots] = useState<LotWithPhotos[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [afLinked, setAfLinked] = useState(false);
+  const [showAfLink, setShowAfLink] = useState(false);
+  const [afAuctionId, setAfAuctionId] = useState('');
   const supabase = createClient();
 
   const fetchData = async () => {
-    const [auctionRes, lotsRes] = await Promise.all([
+    const [auctionRes, lotsRes, afMapRes] = await Promise.all([
       supabase.from('auctions').select('*').eq('id', id).single(),
       supabase
         .from('lots')
         .select('*, lot_photos(*)')
         .eq('auction_id', id)
         .order('lot_number', { ascending: true }),
+      supabase
+        .from('af_auction_map')
+        .select('af_auction_id')
+        .eq('auction_id', id)
+        .single(),
     ]);
 
     if (auctionRes.data) setAuction(auctionRes.data);
     if (lotsRes.data) setLots(lotsRes.data as LotWithPhotos[]);
+    if (afMapRes.data) {
+      setAfLinked(true);
+      setAfAuctionId(afMapRes.data.af_auction_id);
+    }
     setLoading(false);
   };
 
   useEffect(() => {
     fetchData();
   }, [id]);
+
+  const handleLinkAf = async () => {
+    if (!afAuctionId.trim()) return;
+    await supabase.from('af_auction_map').upsert({
+      auction_id: id,
+      af_auction_id: afAuctionId.trim(),
+    });
+    setAfLinked(true);
+    setShowAfLink(false);
+  };
+
+  const handleUploadToAf = async () => {
+    const unuploaded = lots.filter(
+      (l) => l.af_upload_status !== 'uploaded'
+    );
+    if (unuploaded.length === 0) {
+      setUploadMsg({ type: 'error', text: 'All lots already uploaded.' });
+      return;
+    }
+    if (!confirm(`Upload ${unuploaded.length} lot(s) to Auction Factory?`)) return;
+
+    setUploading(true);
+    setUploadMsg(null);
+
+    try {
+      const res = await fetch('/api/af-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auction_id: id,
+          lot_ids: unuploaded.map((l) => l.id),
+        }),
+      });
+
+      const data = await res.json();
+      if (data.error) {
+        setUploadMsg({ type: 'error', text: data.error });
+      } else {
+        const succeeded = data.results.filter((r: any) => r.success).length;
+        const failed = data.results.filter((r: any) => !r.success).length;
+        setUploadMsg({
+          type: failed === 0 ? 'success' : 'error',
+          text: `${succeeded} uploaded${failed > 0 ? `, ${failed} failed` : ''}`,
+        });
+        fetchData();
+      }
+    } catch (err: any) {
+      setUploadMsg({ type: 'error', text: err.message });
+    }
+
+    setUploading(false);
+  };
 
   const deleteLot = async (lotId: string) => {
     if (!confirm('Delete this lot?')) return;
@@ -70,11 +136,68 @@ export default function AuctionDetailPage() {
         backHref="/auctions"
       />
 
-      <div className="px-4 py-2">
+      <div className="px-4 py-2 flex items-center justify-between">
         <p className="text-sm text-gray-400">
           {lots.length} lot{lots.length !== 1 ? 's' : ''}
         </p>
+        <Link href="/settings" className="text-xs text-brand-blue font-medium">
+          Settings
+        </Link>
       </div>
+
+      {/* AF Upload Section */}
+      {lots.length > 0 && (
+        <div className="px-4 mb-2">
+          {!afLinked ? (
+            <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
+              {showAfLink ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500">
+                    Enter the AF auction ID (from the AF admin URL)
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={afAuctionId}
+                      onChange={(e) => setAfAuctionId(e.target.value)}
+                      placeholder="e.g. 2295466"
+                      className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-brand-blue"
+                    />
+                    <button
+                      onClick={handleLinkAf}
+                      className="px-4 py-2 gradient-btn text-white text-xs font-bold rounded-lg"
+                    >
+                      Link
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAfLink(true)}
+                  className="w-full text-sm text-brand-blue font-bold"
+                >
+                  Link AF Auction for Upload
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <button
+                onClick={handleUploadToAf}
+                disabled={uploading}
+                className="w-full py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
+              >
+                {uploading ? 'Uploading...' : 'Upload to AF'}
+              </button>
+              {uploadMsg && (
+                <p className={`text-xs text-center ${uploadMsg.type === 'success' ? 'text-brand-green' : 'text-red-500'}`}>
+                  {uploadMsg.text}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="p-4 space-y-3">
         {lots.length === 0 ? (
@@ -126,6 +249,16 @@ export default function AuctionDetailPage() {
                       </span>
                     )}
                     <ConfidenceChip confidence={lot.confidence} />
+                    {(lot as any).af_upload_status === 'uploaded' && (
+                      <span className="bg-green-100 text-green-700 text-xs font-bold px-1.5 py-0.5 rounded">
+                        AF
+                      </span>
+                    )}
+                    {(lot as any).af_upload_status === 'failed' && (
+                      <span className="bg-red-100 text-red-700 text-xs font-bold px-1.5 py-0.5 rounded">
+                        Failed
+                      </span>
+                    )}
                   </div>
                 </div>
               </Link>
