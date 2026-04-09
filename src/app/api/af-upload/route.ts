@@ -34,7 +34,7 @@ async function uploadLotToAF(
   afAuctionId: string,
   sessionCookie: string,
   saveAction: 'next' | 'exit'
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; debug?: string }> {
   try {
     // First, GET the add_item page to find hidden field values
     const pageRes = await fetchWithCookie(
