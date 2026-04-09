@@ -152,6 +152,50 @@ export async function POST(request: NextRequest) {
     const retailNew = Number(listing.estimated_retail_new) || 0;
     listing.listed_price = Math.round(retailNew * 1.10);
 
+    // For new-in-box items with known brand+model, search for stock image
+    if (
+      condition === 10 &&
+      listing.brand &&
+      listing.brand !== 'Unknown' &&
+      listing.model &&
+      listing.model !== 'Unknown' &&
+      listing.confidence === 'high'
+    ) {
+      try {
+        const searchQuery = `${listing.brand} ${listing.model}`.trim();
+        // Search WebstaurantStore for the product image
+        const searchUrl = `https://www.webstaurantstore.com/search/${encodeURIComponent(searchQuery)}.html`;
+        const searchRes = await fetch(searchUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        });
+        const searchHtml = await searchRes.text();
+
+        // Extract first product image URL
+        const imgMatch = searchHtml.match(/https:\/\/www\.webstaurantstore\.com\/images\/products\/[^"'\s]+\.(jpg|png|webp)/i);
+        if (imgMatch) {
+          listing.stock_image_url = imgMatch[0];
+        } else {
+          // Try KaTom
+          const katomUrl = `https://www.katom.com/search.html?w=${encodeURIComponent(searchQuery)}`;
+          const katomRes = await fetch(katomUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+          });
+          const katomHtml = await katomRes.text();
+          const katomImg = katomHtml.match(/https:\/\/[^"'\s]*katom[^"'\s]*\.(jpg|png|webp)/i);
+          if (katomImg) {
+            listing.stock_image_url = katomImg[0];
+          }
+        }
+      } catch {
+        // Stock image search failed, continue without it
+      }
+    }
+
+    // Ensure stock_image_url exists in response
+    if (!listing.stock_image_url) {
+      listing.stock_image_url = '';
+    }
+
     return NextResponse.json(listing);
   } catch (err: any) {
     console.error('Generate listing error:', err);
