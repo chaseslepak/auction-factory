@@ -18,19 +18,24 @@ function LoginForm() {
     setLoading(true);
     setError(null);
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    try {
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
 
-    setLoading(false);
-    if (signInError) {
-      setError(signInError.message);
-    } else {
-      setSent(true);
+      if (signInError) {
+        setError(signInError.message);
+      } else {
+        setSent(true);
+      }
+    } catch (err: any) {
+      setError(`Request failed: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
