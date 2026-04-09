@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
     if (notes) contextText += `\n- Staff notes: ${notes}`;
 
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-sonnet-4-5-20250929',
       max_tokens: 2000,
       messages: [
         {
