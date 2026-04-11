@@ -307,8 +307,8 @@ export async function POST(request: NextRequest) {
 
     try {
     // Get public URLs for photos, sorted by display_order (stock image = 0, first)
-    // Use Supabase image transform to get smaller/compressed versions for faster AF upload
-    const MAX_PHOTOS = 8; // Limit to first 8 photos per lot
+    // AF recommends 400px max width. Use Supabase image transform to pre-resize.
+    const MAX_PHOTOS = 10;
     const photos = (lot.lot_photos || [])
       .slice()
       .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0))
@@ -316,8 +316,8 @@ export async function POST(request: NextRequest) {
       .map((p: any) => {
         const { data } = supabase.storage.from('lot-photos').getPublicUrl(p.storage_path, {
           transform: {
-            width: 800,
-            quality: 75,
+            width: 400,
+            quality: 80,
           },
         });
         return {
