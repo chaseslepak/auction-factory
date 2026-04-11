@@ -170,7 +170,7 @@ async function uploadLotToAF(
     // POST to AF add_item form (same URL as GET) with 20s timeout
     const url = `${AF_BASE}/add_item_2new.php?auction=${afAuctionId}`;
     const postController = new AbortController();
-    const postTimeoutId = setTimeout(() => postController.abort(), 20000);
+    const postTimeoutId = setTimeout(() => postController.abort(), 40000);
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -307,13 +307,24 @@ export async function POST(request: NextRequest) {
 
     try {
     // Get public URLs for photos, sorted by display_order (stock image = 0, first)
+    // Use Supabase image transform to get smaller/compressed versions for faster AF upload
+    const MAX_PHOTOS = 8; // Limit to first 8 photos per lot
     const photos = (lot.lot_photos || [])
       .slice()
       .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0))
-      .map((p: any) => ({
-        url: supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl,
-        storage_path: p.storage_path,
-      }));
+      .slice(0, MAX_PHOTOS)
+      .map((p: any) => {
+        const { data } = supabase.storage.from('lot-photos').getPublicUrl(p.storage_path, {
+          transform: {
+            width: 800,
+            quality: 75,
+          },
+        });
+        return {
+          url: data.publicUrl,
+          storage_path: p.storage_path,
+        };
+      });
 
     // Retry up to 2 times on transient failures
     let result = await uploadLotToAF(
