@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
+// Increase Vercel function timeout (max 60s on Hobby plan)
+export const maxDuration = 60;
+
 // Condition rating map: our 1-10 to AF's actual dropdown values
 const CONDITION_MAP: Record<number, string> = {
   10: '10 - New in box',

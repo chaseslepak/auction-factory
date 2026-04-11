@@ -82,30 +82,63 @@ export default function AuctionDetailPage() {
     setUploading(true);
     setUploadMsg(null);
 
-    try {
-      const res = await fetch('/api/af-upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          auction_id: id,
-          lot_ids: unuploaded.map((l) => l.id),
-        }),
-      });
+    const BATCH_SIZE = 5;
+    const batches: string[][] = [];
+    for (let i = 0; i < unuploaded.length; i += BATCH_SIZE) {
+      batches.push(unuploaded.slice(i, i + BATCH_SIZE).map((l) => l.id));
+    }
 
-      const data = await res.json();
-      if (data.error) {
-        setUploadMsg({ type: 'error', text: data.error });
-      } else {
+    let totalSucceeded = 0;
+    let totalFailed = 0;
+    let lastError: string | null = null;
+
+    try {
+      for (let i = 0; i < batches.length; i++) {
+        setUploadMsg({
+          type: 'success',
+          text: `Uploading batch ${i + 1}/${batches.length} (${totalSucceeded}/${unuploaded.length} done)...`,
+        });
+
+        const res = await fetch('/api/af-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            auction_id: id,
+            lot_ids: batches[i],
+          }),
+        });
+
+        const data = await res.json();
+        if (data.error) {
+          lastError = data.error;
+          totalFailed += batches[i].length;
+          // If it's a session expired error, stop — no point continuing
+          if (data.error.includes('session expired') || data.error.includes('Please re-login')) {
+            break;
+          }
+          continue;
+        }
+
         const succeeded = data.results.filter((r: any) => r.success).length;
         const failed = data.results.filter((r: any) => !r.success).length;
-        setUploadMsg({
-          type: failed === 0 ? 'success' : 'error',
-          text: failed === 0
-            ? `${succeeded} lot${succeeded !== 1 ? 's' : ''} uploaded to AF!`
-            : `${succeeded} uploaded, ${failed} failed`,
-        });
+        totalSucceeded += succeeded;
+        totalFailed += failed;
+
+        // Refresh lots after each batch to show progress
         fetchData();
       }
+
+      if (lastError && totalSucceeded === 0) {
+        setUploadMsg({ type: 'error', text: lastError });
+      } else {
+        setUploadMsg({
+          type: totalFailed === 0 ? 'success' : 'error',
+          text: totalFailed === 0
+            ? `${totalSucceeded} lot${totalSucceeded !== 1 ? 's' : ''} uploaded to AF!`
+            : `${totalSucceeded} uploaded, ${totalFailed} failed${lastError ? `: ${lastError}` : ''}`,
+        });
+      }
+      fetchData();
     } catch (err: any) {
       setUploadMsg({ type: 'error', text: err.message });
     }
