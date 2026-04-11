@@ -358,9 +358,16 @@ export default function AuctionDetailPage() {
                 </button>
                 <button
                   onClick={async () => {
+                    if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;
                     await supabase.from('af_auction_map').delete().eq('auction_id', id);
+                    // Reset upload status for all lots in this auction
+                    await supabase
+                      .from('lots')
+                      .update({ af_upload_status: null, af_upload_error: null })
+                      .eq('auction_id', id);
                     setAfLinked(false);
                     setAfAuctionId('');
+                    fetchData();
                   }}
                   className="px-3 py-3 rounded-xl border border-gray-300 text-gray-400 text-xs"
                 >
