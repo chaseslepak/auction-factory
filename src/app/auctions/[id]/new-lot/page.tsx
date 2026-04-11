@@ -32,6 +32,7 @@ export default function NewLotPage() {
           .from('lots')
           .select('lot_number')
           .eq('auction_id', id)
+          .is('deleted_at', null)
           .order('lot_number', { ascending: false })
           .limit(1),
       ]);
