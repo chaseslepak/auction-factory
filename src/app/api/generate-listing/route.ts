@@ -162,6 +162,79 @@ async function findAndVerifyStockImage(
   }
 }
 
+// Use Claude's native web_search tool to research retail pricing across multiple sites
+async function researchRetailPrice(
+  anthropic: Anthropic,
+  brand: string,
+  model: string,
+  itemName: string
+): Promise<number> {
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      tools: [
+        {
+          type: 'web_search_20250305' as any,
+          name: 'web_search',
+          max_uses: 3,
+        },
+      ] as any,
+      messages: [
+        {
+          role: 'user',
+          content: `Find the current retail price for this exact restaurant/commercial kitchen equipment from multiple retailers:
+
+Brand: ${brand}
+Model: ${model}
+Item: ${itemName}
+
+Search across WebstaurantStore, KaTom, Central Restaurant, CKitchen, Tundra Restaurant Supply, and other major US restaurant equipment retailers. Find at least 3-5 different retailer prices if possible.
+
+Return ONLY a JSON object with this format (no markdown, no explanation):
+{
+  "prices": [
+    { "retailer": "WebstaurantStore", "price": 1234, "url": "..." },
+    { "retailer": "KaTom", "price": 1299, "url": "..." }
+  ],
+  "highest": 1299
+}
+
+If you can't find real prices, return {"prices": [], "highest": 0}. Only include prices you can verify from actual search results — do not make up prices.`,
+        },
+      ],
+    });
+
+    // Extract text from response (skip tool use blocks)
+    let fullText = '';
+    for (const block of response.content) {
+      if (block.type === 'text') {
+        fullText += block.text;
+      }
+    }
+
+    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return 0;
+
+    const data = JSON.parse(jsonMatch[0]);
+    const highest = Number(data.highest) || 0;
+
+    // Sanity check: also pick max from prices array
+    let maxFromArray = 0;
+    if (Array.isArray(data.prices)) {
+      for (const p of data.prices) {
+        const price = Number(p.price) || 0;
+        if (price > maxFromArray) maxFromArray = price;
+      }
+    }
+
+    return Math.max(highest, maxFromArray);
+  } catch (err) {
+    console.error('Web search pricing failed:', err);
+    return 0;
+  }
+}
+
 const SYSTEM_PROMPT = `You are a restaurant equipment identification expert for Auction Factory Ohio in Cleveland, OH.
 
 CAREFULLY EXAMINE every photo provided. Look for:
@@ -308,10 +381,11 @@ export async function POST(request: NextRequest) {
 
     const listing = JSON.parse(jsonMatch[0]);
 
-    // Search for stock image AND real retail price from WebstaurantStore
+    // Search for stock image AND real retail price
     const hasBrand = listing.brand && listing.brand !== 'Unknown' && listing.brand.trim() !== '';
     const hasModel = listing.model && listing.model !== 'Unknown' && listing.model.trim() !== '';
 
+    let webstaurantPrice = 0;
     if (hasBrand && hasModel) {
       const found = await findAndVerifyStockImage(
         anthropic,
@@ -322,16 +396,26 @@ export async function POST(request: NextRequest) {
       );
       if (found) {
         listing.stock_image_url = found.imageUrl;
-        // Use the real price from WebstaurantStore if we found one
-        // (and it's higher than the AI estimate, per the "highest available" rule)
-        if (found.price > 0) {
-          const aiEstimate = Number(listing.estimated_retail_new) || 0;
-          listing.estimated_retail_new = Math.max(aiEstimate, Math.round(found.price));
-        }
+        webstaurantPrice = found.price || 0;
       }
     }
 
-    // Compute listed price (retail + 10%) — AFTER potential price update
+    // Use Claude web search to find prices across the internet (5+ sites)
+    let webSearchMaxPrice = 0;
+    if (hasBrand && hasModel) {
+      try {
+        const maxFound = await researchRetailPrice(anthropic, listing.brand, listing.model, listing.item_name);
+        if (maxFound > 0) webSearchMaxPrice = maxFound;
+      } catch (e) {
+        console.error('Price research error:', e);
+      }
+    }
+
+    // Take the highest of: AI estimate, WebstaurantStore price, web search max
+    const aiEstimate = Number(listing.estimated_retail_new) || 0;
+    listing.estimated_retail_new = Math.max(aiEstimate, webstaurantPrice, webSearchMaxPrice);
+
+    // Compute listed price (retail + 10%)
     const retailNew = Number(listing.estimated_retail_new) || 0;
     listing.listed_price = Math.round(retailNew * 1.10);
 

@@ -4,6 +4,77 @@ import Anthropic from '@anthropic-ai/sdk';
 
 export const maxDuration = 60;
 
+// Use Claude's web_search tool to find retail pricing across multiple sites
+async function researchRetailPrice(
+  anthropic: Anthropic,
+  brand: string,
+  model: string,
+  itemName: string
+): Promise<number> {
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      tools: [
+        {
+          type: 'web_search_20250305' as any,
+          name: 'web_search',
+          max_uses: 3,
+        },
+      ] as any,
+      messages: [
+        {
+          role: 'user',
+          content: `Find the current retail price for this exact restaurant/commercial kitchen equipment from multiple retailers:
+
+Brand: ${brand}
+Model: ${model}
+Item: ${itemName}
+
+Search across WebstaurantStore, KaTom, Central Restaurant, CKitchen, Tundra Restaurant Supply, and other major US restaurant equipment retailers. Find at least 3-5 different retailer prices if possible.
+
+Return ONLY a JSON object with this format (no markdown, no explanation):
+{
+  "prices": [
+    { "retailer": "WebstaurantStore", "price": 1234 },
+    { "retailer": "KaTom", "price": 1299 }
+  ],
+  "highest": 1299
+}
+
+If you can't find real prices, return {"prices": [], "highest": 0}. Only include prices you can verify from actual search results — do not make up prices.`,
+        },
+      ],
+    });
+
+    let fullText = '';
+    for (const block of response.content) {
+      if (block.type === 'text') {
+        fullText += block.text;
+      }
+    }
+
+    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return 0;
+
+    const data = JSON.parse(jsonMatch[0]);
+    const highest = Number(data.highest) || 0;
+
+    let maxFromArray = 0;
+    if (Array.isArray(data.prices)) {
+      for (const p of data.prices) {
+        const price = Number(p.price) || 0;
+        if (price > maxFromArray) maxFromArray = price;
+      }
+    }
+
+    return Math.max(highest, maxFromArray);
+  } catch (err) {
+    console.error('Web search pricing failed:', err);
+    return 0;
+  }
+}
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 interface StockCandidate {
@@ -296,20 +367,29 @@ async function processRefresh(request: NextRequest) {
             display_order: 0,
           });
 
-          // Update retail pricing if the WebstaurantStore price is higher
-          if (found.price > 0) {
-            const currentRetail = Number(lot.estimated_retail_new) || 0;
-            if (found.price > currentRetail) {
-              const newRetail = Math.round(found.price);
-              const newListed = Math.round(newRetail * 1.10);
-              await supabase
-                .from('lots')
-                .update({
-                  estimated_retail_new: newRetail,
-                  listed_price: newListed,
-                })
-                .eq('id', lot.id);
-            }
+          // Find the highest retail price from multiple sources
+          const currentRetail = Number(lot.estimated_retail_new) || 0;
+          const webstaurantPrice = found.price || 0;
+
+          // Also do a web search to find prices from other retailers
+          const webSearchPrice = await researchRetailPrice(
+            anthropic,
+            lot.brand || '',
+            lot.model || '',
+            lot.item_name || ''
+          );
+
+          const maxPrice = Math.max(currentRetail, webstaurantPrice, webSearchPrice);
+          if (maxPrice > currentRetail) {
+            const newRetail = Math.round(maxPrice);
+            const newListed = Math.round(newRetail * 1.10);
+            await supabase
+              .from('lots')
+              .update({
+                estimated_retail_new: newRetail,
+                listed_price: newListed,
+              })
+              .eq('id', lot.id);
           }
 
           updated++;
