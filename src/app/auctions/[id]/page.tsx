@@ -437,6 +437,35 @@ export default function AuctionDetailPage() {
   const [bulkCategory, setBulkCategory] = useState('');
   const [bulkCondition, setBulkCondition] = useState('');
 
+  const bulkDeepRescan = async () => {
+    if (selectedLots.size === 0) return;
+    if (!confirm(`Deep rescan ${selectedLots.size} lots? This uses Claude Opus 4.6 for more accurate identification, stock images, and pricing. Runs in the background.`)) return;
+
+    // Create deep_rescan jobs for each selected lot
+    const jobs = Array.from(selectedLots).map((lotId) => ({
+      type: 'deep_rescan',
+      status: 'pending',
+      auction_id: id,
+      lot_id: lotId,
+    }));
+
+    const { error } = await supabase.from('jobs').insert(jobs);
+    if (error) {
+      setUploadMsg({ type: 'error', text: `Failed to enqueue: ${error.message}` });
+      return;
+    }
+
+    // Kick processor
+    fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
+
+    setUploadMsg({
+      type: 'success',
+      text: `Queued ${jobs.length} lots for deep rescan. Progress shows in Admin > Background Jobs.`,
+    });
+    setSelectedLots(new Set());
+    setBulkMode(false);
+  };
+
   const applyBulkEdit = async () => {
     if (selectedLots.size === 0) return;
     const updates: any = {};
@@ -678,11 +707,17 @@ export default function AuctionDetailPage() {
             </button>
           </div>
           {bulkMode && selectedLots.size > 0 && (
-            <div className="flex gap-2 items-center bg-brand-blue/5 rounded-lg p-2">
+            <div className="flex gap-2 items-center bg-brand-blue/5 rounded-lg p-2 flex-wrap">
               <span className="text-xs font-bold text-brand-blue">{selectedLots.size} selected</span>
               <button
+                onClick={bulkDeepRescan}
+                className="ml-auto px-3 py-1 rounded text-xs font-bold text-purple-600 border border-purple-300"
+              >
+                Deep Rescan
+              </button>
+              <button
                 onClick={() => setBulkEditOpen(true)}
-                className="ml-auto px-3 py-1 rounded text-xs font-bold text-brand-blue border border-brand-blue/30"
+                className="px-3 py-1 rounded text-xs font-bold text-brand-blue border border-brand-blue/30"
               >
                 Edit
               </button>

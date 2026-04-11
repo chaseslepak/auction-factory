@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { processStockImageJob } from '@/lib/stock-image-processor';
+import { processDeepRescanJob } from '@/lib/deep-rescan-processor';
 
 export const maxDuration = 60;
 
@@ -46,12 +47,12 @@ export async function POST(request: NextRequest) {
 
     // Process as many jobs as we can fit within the time budget
     while (Date.now() - startTime < TIME_BUDGET_MS) {
-      // Claim the next pending job
+      // Claim the next pending job (any type)
       const { data: pendingJobs } = await supabase
         .from('jobs')
         .select('*')
         .eq('status', 'pending')
-        .eq('type', 'refresh_stock_images')
+        .in('type', ['refresh_stock_images', 'deep_rescan'])
         .order('created_at', { ascending: true })
         .limit(1);
 
@@ -75,13 +76,21 @@ export async function POST(request: NextRequest) {
       if (!claimed) continue; // Someone else grabbed it
 
       try {
-        // Race the job processing against a hard timeout
+        // Pick processor based on job type
+        const processor =
+          job.type === 'deep_rescan'
+            ? processDeepRescanJob(supabase, anthropic, job.lot_id)
+            : processStockImageJob(supabase, anthropic, job.lot_id);
+
+        // Deep rescan gets a longer timeout (uses Opus)
+        const jobTimeout = job.type === 'deep_rescan' ? 55000 : PER_JOB_TIMEOUT_MS;
+
         const result = await Promise.race([
-          processStockImageJob(supabase, anthropic, job.lot_id),
+          processor,
           new Promise<{ success: boolean; found: boolean; error?: string }>((resolve) =>
             setTimeout(
-              () => resolve({ success: false, found: false, error: 'Per-job timeout (40s)' }),
-              PER_JOB_TIMEOUT_MS
+              () => resolve({ success: false, found: false, error: 'Per-job timeout' }),
+              jobTimeout
             )
           ),
         ]);
@@ -118,7 +127,7 @@ export async function POST(request: NextRequest) {
       .from('jobs')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending')
-      .eq('type', 'refresh_stock_images');
+      .in('type', ['refresh_stock_images', 'deep_rescan']);
 
     // Self-invoke: await the fetch briefly to ensure it's dispatched
     // We don't wait for the full response, just long enough to guarantee
