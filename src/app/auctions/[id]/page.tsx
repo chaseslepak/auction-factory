@@ -16,6 +16,7 @@ export default function AuctionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [afLinked, setAfLinked] = useState(false);
   const [showAfLink, setShowAfLink] = useState(false);
   const [afAuctionId, setAfAuctionId] = useState('');
@@ -67,6 +68,34 @@ export default function AuctionDetailPage() {
     });
     setAfLinked(true);
     setShowAfLink(false);
+  };
+
+  const handleRefreshStockImages = async () => {
+    if (!confirm('Search for stock images for all lots with known brand+model that dont have one yet? (Skips already-uploaded lots)')) return;
+    setRefreshing(true);
+    setUploadMsg(null);
+    try {
+      const res = await fetch('/api/refresh-stock-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auction_id: id }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setUploadMsg({ type: 'error', text: data.error });
+      } else {
+        setUploadMsg({
+          type: data.updated > 0 ? 'success' : 'error',
+          text: data.updated > 0
+            ? `Added stock images to ${data.updated} lot(s)`
+            : data.message || `Scanned ${data.candidates}, none found`,
+        });
+        fetchData();
+      }
+    } catch (err: any) {
+      setUploadMsg({ type: 'error', text: err.message });
+    }
+    setRefreshing(false);
   };
 
   const handleUploadToAf = async () => {
@@ -235,6 +264,13 @@ export default function AuctionDetailPage() {
             </div>
           ) : (
             <div className="space-y-2">
+              <button
+                onClick={handleRefreshStockImages}
+                disabled={refreshing || uploading}
+                className="w-full py-2 rounded-xl border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+              >
+                {refreshing ? 'Searching for stock images...' : 'Find Stock Images'}
+              </button>
               <div className="flex gap-2">
                 <button
                   onClick={handleUploadToAf}
