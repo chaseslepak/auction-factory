@@ -317,7 +317,65 @@ export default function LotReviewPage() {
 
   const displayPhotos = isNew
     ? photos
-    : existingLot?.lot_photos.map((p) => getPhotoUrl(p.storage_path)) || [];
+    : (existingLot?.lot_photos || [])
+        .slice()
+        .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+        .map((p) => getPhotoUrl(p.storage_path));
+
+  const existingPhotoData = !isNew
+    ? (existingLot?.lot_photos || [])
+        .slice()
+        .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+    : [];
+
+  const handleDeletePhoto = async (photoId: string) => {
+    if (!confirm('Delete this photo?')) return;
+    await fetch('/api/lot-photos', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photo_id: photoId }),
+    });
+    // Refresh
+    const { data } = await supabase
+      .from('lots')
+      .select('*, lot_photos(*)')
+      .eq('id', lotId)
+      .single();
+    if (data) setExistingLot(data as LotWithPhotos);
+  };
+
+  const handleAddPhotos = async (files: FileList | null) => {
+    if (!files || !existingLot) return;
+    const { processImage } = await import('@/lib/image-utils');
+    const maxOrder = Math.max(0, ...(existingLot.lot_photos || []).map((p) => p.display_order));
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const dataUrl = await processImage(files[i]);
+        const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const blob = new Blob([buffer], { type: 'image/jpeg' });
+        const storagePath = `${auctionId}/${existingLot.id}/extra_${Date.now()}_${i}.jpg`;
+        await supabase.storage.from('lot-photos').upload(storagePath, blob, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+        await supabase.from('lot_photos').insert({
+          lot_id: existingLot.id,
+          storage_path: storagePath,
+          display_order: maxOrder + 1 + i,
+        });
+      } catch (err) {
+        console.error('Failed to add photo:', err);
+      }
+    }
+    // Refresh
+    const { data } = await supabase
+      .from('lots')
+      .select('*, lot_photos(*)')
+      .eq('id', lotId)
+      .single();
+    if (data) setExistingLot(data as LotWithPhotos);
+  };
 
   if (!displayListing) {
     return (
@@ -340,20 +398,42 @@ export default function LotReviewPage() {
 
       <div className="p-4 space-y-4">
         {/* Photos */}
-        {displayPhotos.length > 0 && (
+        {(displayPhotos.length > 0 || (editMode && !isNew)) && (
           <div className="flex gap-2 overflow-x-auto pb-2">
             {displayPhotos.map((photo, i) => (
               <div
                 key={i}
-                className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200"
+                className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200 relative"
               >
                 <img
                   src={photo}
                   alt={`Photo ${i + 1}`}
                   className="w-full h-full object-cover"
                 />
+                {editMode && !isNew && existingPhotoData[i] && (
+                  <button
+                    onClick={() => handleDeletePhoto(existingPhotoData[i].id)}
+                    className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center"
+                  >
+                    &times;
+                  </button>
+                )}
               </div>
             ))}
+            {editMode && !isNew && (
+              <label className="w-20 h-20 flex-shrink-0 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:border-brand-blue hover:text-brand-blue">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => handleAddPhotos(e.target.files)}
+                />
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </label>
+            )}
           </div>
         )}
 

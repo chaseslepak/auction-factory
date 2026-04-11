@@ -293,13 +293,29 @@ export async function POST(request: NextRequest) {
         storage_path: p.storage_path,
       }));
 
-    const result = await uploadLotToAF(
+    // Retry up to 2 times on transient failures
+    let result = await uploadLotToAF(
       lot,
       photos,
       mapping.af_auction_id,
       session.session_cookie,
       isLast ? 'exit' : 'next'
     );
+    let retryCount = 0;
+    while (!result.success && retryCount < 2) {
+      // Don't retry session expired errors
+      if (result.error?.includes('session expired')) break;
+      // Wait before retry
+      await new Promise((r) => setTimeout(r, 1000 * (retryCount + 1)));
+      result = await uploadLotToAF(
+        lot,
+        photos,
+        mapping.af_auction_id,
+        session.session_cookie,
+        isLast ? 'exit' : 'next'
+      );
+      retryCount++;
+    }
 
     // Update lot status
     await supabase
