@@ -160,6 +160,18 @@ async function findAndVerifyStockImage(
 }
 
 export async function POST(request: NextRequest) {
+  try {
+    return await processRefresh(request);
+  } catch (err: any) {
+    console.error('Refresh stock images fatal error:', err);
+    return NextResponse.json(
+      { error: `Server error: ${err?.message || 'unknown'}` },
+      { status: 500 }
+    );
+  }
+}
+
+async function processRefresh(request: NextRequest) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -241,14 +253,19 @@ export async function POST(request: NextRequest) {
 
       if (found) {
         // Download the stock image
-        const imgRes = await fetch(found.imageUrl);
-        if (!imgRes.ok) {
+        let imgBytes: Uint8Array;
+        try {
+          const imgRes = await fetch(found.imageUrl);
+          if (!imgRes.ok) {
+            results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
+            continue;
+          }
+          imgBytes = new Uint8Array(await imgRes.arrayBuffer());
+        } catch (e: any) {
+          console.error('Image download failed:', e?.message);
           results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
           continue;
         }
-
-        const buffer = await imgRes.arrayBuffer();
-        const blob = new Blob([buffer], { type: 'image/jpeg' });
 
         // Shift existing photos up by 1
         const existingPhotos = (lot.lot_photos || []).sort((a: any, b: any) => a.display_order - b.display_order);
@@ -263,10 +280,14 @@ export async function POST(request: NextRequest) {
         const storagePath = `${lot.auction_id}/${lot.id}/stock_0.jpg`;
         const { error: uploadError } = await supabase.storage
           .from('lot-photos')
-          .upload(storagePath, blob, {
+          .upload(storagePath, imgBytes, {
             contentType: 'image/jpeg',
             upsert: true,
           });
+
+        if (uploadError) {
+          console.error('Storage upload error:', uploadError.message);
+        }
 
         if (!uploadError) {
           await supabase.from('lot_photos').insert({
@@ -299,7 +320,8 @@ export async function POST(request: NextRequest) {
       } else {
         results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
       }
-    } catch {
+    } catch (err: any) {
+      console.error('Lot processing error:', err?.message, 'lot:', lot.id);
       results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
     }
   }
