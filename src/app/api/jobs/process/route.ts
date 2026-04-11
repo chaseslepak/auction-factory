@@ -111,32 +111,34 @@ export async function POST(request: NextRequest) {
       .eq('status', 'pending')
       .eq('type', 'refresh_stock_images');
 
-    // Self-invoke to continue processing if there are more jobs
+    // Self-invoke: await the fetch briefly to ensure it's dispatched
+    // We don't wait for the full response, just long enough to guarantee
+    // the HTTP request was sent before this function returns
     if (pendingCount && pendingCount > 0) {
       const origin = request.nextUrl.origin;
-      const secret = process.env.INTERNAL_JOB_SECRET || 'default-secret';
-      // Use waitUntil from @vercel/functions to ensure the fetch actually runs
+      const selfInvokeUrl = `${origin}/api/jobs/process`;
+
       try {
+        // Try waitUntil first (preferred)
         const { waitUntil } = await import('@vercel/functions');
         waitUntil(
-          fetch(`${origin}/api/jobs/process`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-internal-secret': secret,
-            },
-          }).catch(() => {})
+          fetch(selfInvokeUrl, { method: 'POST' }).then(() => {}).catch(() => {})
         );
       } catch {
-        // Fallback: fire a fetch without awaiting
-        fetch(`${origin}/api/jobs/process`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-internal-secret': secret,
-          },
-        }).catch(() => {});
-        await new Promise((r) => setTimeout(r, 200));
+        // Fallback: race the fetch with a short timeout
+        // The fetch gets dispatched to the network before the timeout hits
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        try {
+          await fetch(selfInvokeUrl, {
+            method: 'POST',
+            signal: controller.signal,
+          });
+        } catch {
+          // Aborted is expected — we just wanted to dispatch
+        } finally {
+          clearTimeout(timeoutId);
+        }
       }
     }
 
