@@ -321,31 +321,24 @@ export async function POST(request: NextRequest) {
     const lot = lots[i];
     const isLast = i === lots.length - 1;
 
-    // Small delay between requests to avoid looking like a bot
+    // Delay between requests to avoid AF rate limiting (3s)
     if (i > 0) {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 3000));
     }
 
     try {
     // Get public URLs for photos, sorted by display_order (stock image = 0, first)
-    // AF recommends 400px max width. Use Supabase image transform to pre-resize.
+    // Note: Supabase image transform requires pro plan. Using regular URLs.
+    // Photos are already resized client-side to ~1024px by image-utils.ts.
     const MAX_PHOTOS = 10;
     const photos = (lot.lot_photos || [])
       .slice()
       .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0))
       .slice(0, MAX_PHOTOS)
-      .map((p: any) => {
-        const { data } = supabase.storage.from('lot-photos').getPublicUrl(p.storage_path, {
-          transform: {
-            width: 400,
-            quality: 80,
-          },
-        });
-        return {
-          url: data.publicUrl,
-          storage_path: p.storage_path,
-        };
-      });
+      .map((p: any) => ({
+        url: supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl,
+        storage_path: p.storage_path,
+      }));
 
     // Retry up to 2 times on transient failures
     let result = await uploadLotToAF(
