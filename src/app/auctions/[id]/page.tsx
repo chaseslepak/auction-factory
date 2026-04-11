@@ -165,7 +165,7 @@ export default function AuctionDetailPage() {
     let totalCandidates = 0;
     let offset = 0;
     let batchNum = 0;
-    const BATCH_SIZE = 3;
+    const BATCH_SIZE = 2;
 
     try {
       while (true) {

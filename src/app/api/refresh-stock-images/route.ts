@@ -376,12 +376,21 @@ async function processRefresh(request: NextRequest) {
             display_order: 0,
           });
 
-          // Update retail pricing from WebstaurantStore if it's higher than current
+          // Find the highest retail price from multiple sources
           const currentRetail = Number(lot.estimated_retail_new) || 0;
           const webstaurantPrice = found.price || 0;
 
-          if (webstaurantPrice > currentRetail) {
-            const newRetail = Math.round(webstaurantPrice);
+          // Web search for prices across multiple retailers
+          const webSearchPrice = await researchRetailPrice(
+            anthropic,
+            lot.brand || '',
+            lot.model || '',
+            lot.item_name || ''
+          );
+
+          const maxPrice = Math.max(currentRetail, webstaurantPrice, webSearchPrice);
+          if (maxPrice > currentRetail) {
+            const newRetail = Math.round(maxPrice);
             const newListed = Math.round(newRetail * 1.10);
             await supabase
               .from('lots')
@@ -398,6 +407,25 @@ async function processRefresh(request: NextRequest) {
           results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
         }
       } else {
+        // No stock image found, but still try web search for pricing
+        const currentRetail = Number(lot.estimated_retail_new) || 0;
+        const webSearchPrice = await researchRetailPrice(
+          anthropic,
+          lot.brand || '',
+          lot.model || '',
+          lot.item_name || ''
+        );
+        if (webSearchPrice > currentRetail) {
+          const newRetail = Math.round(webSearchPrice);
+          const newListed = Math.round(newRetail * 1.10);
+          await supabase
+            .from('lots')
+            .update({
+              estimated_retail_new: newRetail,
+              listed_price: newListed,
+            })
+            .eq('id', lot.id);
+        }
         results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
       }
     } catch (err: any) {
