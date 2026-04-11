@@ -23,6 +23,27 @@ const AF_BASE = 'https://www.auctionfactory.com/admin';
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+// Sanitize text content to avoid mod_security blocks.
+// AF's server (Apache + mod_security) may block requests containing
+// characters/patterns that look like code injection attempts.
+function sanitizeForAF(text: string): string {
+  if (!text) return '';
+  return text
+    // Remove HTML tags
+    .replace(/<[^>]*>/g, '')
+    // Remove script/SQL-like patterns
+    .replace(/\bunion\s+select\b/gi, 'union-select')
+    .replace(/\bselect\s+\*\s+from\b/gi, 'select-from')
+    .replace(/<script/gi, '[script]')
+    .replace(/javascript:/gi, 'js-')
+    // Remove bytes that could be interpreted as null or control chars
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    // Normalize quotes (smart quotes can sometimes trip up parsers)
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .trim();
+}
+
 async function fetchWithCookie(url: string, cookie: string, options: RequestInit = {}) {
   return fetch(url, {
     ...options,
@@ -90,12 +111,12 @@ async function uploadLotToAF(
     addField('auto_extend', autoExtend);
     addField('staggered', staggered);
 
-    // Visible fields
-    addField('title', lot.item_name || '');
-    addField('name', lot.auction_description || '');
+    // Visible fields — sanitized to avoid mod_security blocks
+    addField('title', sanitizeForAF(lot.item_name || ''));
+    addField('name', sanitizeForAF(lot.auction_description || ''));
     addField('condition', CONDITION_MAP[lot.condition_rating] || '5 - Well used');
-    addField('make', lot.brand || '');
-    addField('model', lot.model || '');
+    addField('make', sanitizeForAF(lot.brand || ''));
+    addField('model', sanitizeForAF(lot.model || ''));
     addField('qty', String(lot.quantity || 1));
     addField('original_price', String(lot.estimated_retail_new || ''));
     addField('start', '1.00');
