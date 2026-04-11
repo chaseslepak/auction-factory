@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 // Runs in the background on EVERY page of the app.
 // Polls for pending jobs and kicks the processor to keep the chain alive.
 // This way, as long as ANY tab of the app is open, jobs keep processing.
-const POLL_INTERVAL = 15000; // 15 seconds
+const POLL_INTERVAL = 8000; // 8 seconds
 
 export default function GlobalJobPoller() {
   useEffect(() => {
@@ -14,26 +14,22 @@ export default function GlobalJobPoller() {
 
     const checkAndKick = async () => {
       try {
-        // Check if there are any pending or stuck-processing jobs
-        const { data } = await supabase
+        // Reset stuck 'processing' jobs first (> 90s old)
+        const ninetySecondsAgo = new Date(Date.now() - 90000).toISOString();
+        await supabase
           .from('jobs')
-          .select('id, status, started_at')
-          .in('status', ['pending', 'processing']);
+          .update({ status: 'pending' })
+          .eq('status', 'processing')
+          .lt('started_at', ninetySecondsAgo);
 
-        if (!data || data.length === 0) return;
+        // Now check for pending jobs
+        const { count } = await supabase
+          .from('jobs')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'pending');
 
-        const pending = data.filter((j) => j.status === 'pending').length;
-        const processing = data.filter((j) => j.status === 'processing').length;
-
-        // Kick if there are pending jobs OR if processing jobs look stuck (> 90s old)
-        const now = Date.now();
-        const stuckProcessing = data.filter((j) => {
-          if (j.status !== 'processing' || !j.started_at) return false;
-          const elapsed = now - new Date(j.started_at).getTime();
-          return elapsed > 90000;
-        }).length;
-
-        if (pending > 0 || stuckProcessing > 0) {
+        if (count && count > 0) {
+          // Always kick if there are pending jobs
           fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
         }
       } catch {}
