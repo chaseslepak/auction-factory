@@ -275,80 +275,44 @@ export default function AuctionDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const handleRetryFailed = async () => {
-    const failedLots = lots
+  const handleResetFromFailed = async () => {
+    // Find the lowest lot number with failed status
+    const failed = lots
       .filter((l: any) => l.af_upload_status === 'failed')
-      .slice()
       .sort((a, b) => a.lot_number - b.lot_number);
-    if (failedLots.length === 0) {
-      setUploadMsg({ type: 'error', text: 'No failed lots to retry.' });
+
+    if (failed.length === 0) {
+      setUploadMsg({ type: 'error', text: 'No failed lots.' });
       return;
     }
+
+    const firstFailedNum = failed[0].lot_number;
+
+    // Find all lots with lot_number >= firstFailedNum (to preserve order)
+    const lotsToReset = lots
+      .filter((l) => l.lot_number >= firstFailedNum)
+      .sort((a, b) => a.lot_number - b.lot_number);
+
     const confirmed = confirm(
-      `Retry ${failedLots.length} failed lot(s)?\n\n` +
-      `These will be added to the END of your AF auction (not at their original positions).\n\n` +
-      `After this completes, you MUST manually delete these placeholders from AF admin:\n` +
-      failedLots.map((l) => `• "PLACEHOLDER - LOT #${l.lot_number} - UPLOAD FAILED, DO NOT BID"`).join('\n')
+      `First failed lot is #${firstFailedNum}.\n\n` +
+      `This will reset lot #${firstFailedNum} and all ${lotsToReset.length - 1} lots after it so they can be uploaded again IN ORDER.\n\n` +
+      `IMPORTANT: You must delete all AF lots from #${firstFailedNum} and above in AF admin BEFORE running this retry.\n\n` +
+      `Have you already deleted AF lots ${firstFailedNum}+ in AF admin?`
     );
     if (!confirmed) return;
 
-    // Reset status so they can be uploaded again
+    // Reset status for all lots from firstFailedNum onward
     await supabase
       .from('lots')
       .update({ af_upload_status: null, af_upload_error: null })
-      .in('id', failedLots.map((l) => l.id));
+      .in('id', lotsToReset.map((l) => l.id));
 
     await fetchData();
 
-    // Trigger upload for these specific lots
-    setUploading(true);
-    setUploadMsg(null);
-    setUploadProgress({ current: 0, total: failedLots.length });
-
-    const BATCH_SIZE = 1;
-    const batches: string[][] = [];
-    for (let i = 0; i < failedLots.length; i += BATCH_SIZE) {
-      batches.push(failedLots.slice(i, i + BATCH_SIZE).map((l) => l.id));
-    }
-
-    let totalSucceeded = 0;
-    let totalFailed = 0;
-
-    try {
-      for (let i = 0; i < batches.length; i++) {
-        const res = await fetch('/api/af-upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            auction_id: id,
-            lot_ids: batches[i],
-          }),
-        });
-        const data = await res.json();
-        if (data.error) {
-          totalFailed += batches[i].length;
-          continue;
-        }
-        const succeeded = data.results.filter((r: any) => r.success).length;
-        const failed = data.results.filter((r: any) => !r.success).length;
-        totalSucceeded += succeeded;
-        totalFailed += failed;
-        setUploadProgress({ current: totalSucceeded + totalFailed, total: failedLots.length });
-        fetchData();
-      }
-
-      setUploadMsg({
-        type: totalSucceeded > 0 ? 'success' : 'error',
-        text: totalSucceeded > 0
-          ? `${totalSucceeded} re-uploaded! Now delete the placeholders from AF admin.`
-          : `Still failing: ${totalFailed} lot(s)`,
-      });
-    } catch (err: any) {
-      setUploadMsg({ type: 'error', text: err.message });
-    }
-
-    setUploading(false);
-    setUploadProgress({ current: 0, total: 0 });
+    setUploadMsg({
+      type: 'success',
+      text: `Reset ${lotsToReset.length} lots. Now click "Upload to AF" to push them in order.`,
+    });
   };
 
   const handleUploadToAf = async () => {
@@ -738,11 +702,11 @@ export default function AuctionDetailPage() {
               </div>
               {lots.some((l: any) => l.af_upload_status === 'failed') && (
                 <button
-                  onClick={handleRetryFailed}
+                  onClick={handleResetFromFailed}
                   disabled={uploading}
                   className="w-full py-2 rounded-xl border-2 border-orange-400 text-orange-500 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
                 >
-                  Retry Failed Lots ({lots.filter((l: any) => l.af_upload_status === 'failed').length})
+                  Reset from First Failed Lot (maintains order)
                 </button>
               )}
               {uploading && uploadProgress.total > 0 && (
