@@ -233,7 +233,12 @@ async function uploadLotToAF(
     // 403 Forbidden = AF blocked this specific request (mod_security).
     // Session might still be valid — treat as a per-lot failure, not a session issue.
     if (status === 403 || html.includes('Forbidden') || html.includes("don't have permission")) {
-      return { success: false, error: `FORBIDDEN_BY_AF: ${status}` };
+      // Log what we sent so we can diagnose which field triggered the block
+      const itemName = (lot.item_name || '').substring(0, 80);
+      return {
+        success: false,
+        error: `FORBIDDEN_BY_AF: ${status} - item: ${itemName}`,
+      };
     }
 
     if (status === 200) {
