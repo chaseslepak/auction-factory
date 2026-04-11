@@ -209,6 +209,11 @@ async function uploadLotToAF(
 
     return { success: false, error: `HTTP ${status}. Debug: ${debug}` };
   } catch (err: any) {
+    // AbortError = timeout. The upload MAY have succeeded on AF's side.
+    // Don't retry, don't post placeholder — let user verify manually.
+    if (err.name === 'AbortError' || err.message?.includes('aborted')) {
+      return { success: false, error: 'TIMEOUT_UNCERTAIN: upload may have succeeded on AF' };
+    }
     return { success: false, error: err.message };
   }
 }
@@ -322,6 +327,8 @@ export async function POST(request: NextRequest) {
     while (!result.success && retryCount < 2) {
       // Don't retry session expired errors
       if (result.error?.includes('session expired')) break;
+      // Don't retry timeouts — the upload may have succeeded on AF's side
+      if (result.error?.includes('TIMEOUT_UNCERTAIN')) break;
       // Wait before retry
       await new Promise((r) => setTimeout(r, 1000 * (retryCount + 1)));
       result = await uploadLotToAF(
@@ -334,9 +341,12 @@ export async function POST(request: NextRequest) {
       retryCount++;
     }
 
-    // If upload still failed (not a session error), post a placeholder lot to AF
-    // to preserve the lot numbering. This way lot 3 stays as lot 3 even if lot 2 failed.
-    if (!result.success && !result.error?.includes('session expired')) {
+    // Post placeholder only for DEFINITIVE failures (not timeouts or session errors)
+    // Timeouts may have succeeded on AF — we can't be sure, so don't add a placeholder
+    // that would create a duplicate.
+    const isTimeout = result.error?.includes('TIMEOUT_UNCERTAIN');
+    const isSessionError = result.error?.includes('session expired');
+    if (!result.success && !isSessionError && !isTimeout) {
       const placeholderLot = {
         item_name: `PLACEHOLDER - LOT #${lot.lot_number} - UPLOAD FAILED, DO NOT BID`,
         auction_description:
@@ -356,7 +366,6 @@ export async function POST(request: NextRequest) {
         isLast ? 'exit' : 'next'
       );
       if (placeholderResult.success) {
-        // Placeholder uploaded successfully — log it but keep the original lot as failed
         result = {
           success: false,
           error: `Upload failed: ${result.error || 'unknown'}. Placeholder posted to AF to hold position.`,
@@ -365,11 +374,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Update lot status
+    // Timeouts get 'uploaded' status with a note — we assume they succeeded
+    // since AF is usually slow, not broken. User can verify and delete if duplicate.
+    const isTimeoutResult = result.error?.includes('TIMEOUT_UNCERTAIN');
     await supabase
       .from('lots')
       .update({
-        af_upload_status: result.success ? 'uploaded' : 'failed',
-        af_upload_error: result.error || null,
+        af_upload_status: result.success || isTimeoutResult ? 'uploaded' : 'failed',
+        af_upload_error: isTimeoutResult
+          ? 'Upload timed out — may have succeeded, verify on AF'
+          : result.error || null,
       })
       .eq('id', lot.id);
 
