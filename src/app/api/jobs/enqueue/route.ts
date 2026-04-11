@@ -69,13 +69,13 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Delete any existing pending/processing jobs for these lots (avoid duplicates)
+  // Delete ALL existing jobs for this auction so the new batch starts fresh
+  // (otherwise old completed jobs show up in the progress count)
   await supabase
     .from('jobs')
     .delete()
     .eq('type', job_type)
-    .eq('auction_id', auction_id)
-    .in('status', ['pending', 'processing']);
+    .eq('auction_id', auction_id);
 
   // Insert new jobs
   const jobsToInsert = candidates.map((lot: any) => ({
