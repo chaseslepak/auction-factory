@@ -375,35 +375,65 @@ export default function AuctionDetailPage() {
     try {
       for (let i = 0; i < batches.length; i++) {
 
-        const res = await fetch('/api/af-upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            auction_id: id,
-            lot_ids: batches[i],
-          }),
-        });
+        try {
+          const res = await fetch('/api/af-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              auction_id: id,
+              lot_ids: batches[i],
+            }),
+          });
 
-        const data = await res.json();
-        if (data.error) {
-          lastError = data.error;
-          totalFailed += batches[i].length;
-          // If it's a session expired error, stop — no point continuing
-          if (data.error.includes('session expired') || data.error.includes('Please re-login')) {
-            break;
+          // Parse response safely — don't let one bad batch kill the whole loop
+          const responseText = await res.text();
+          let data: any;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            // Server returned HTML (timeout/500) — mark this batch as failed and continue
+            lastError = `Server error on batch ${i + 1} (status ${res.status})`;
+            totalFailed += batches[i].length;
+            await supabase
+              .from('lots')
+              .update({ af_upload_status: 'failed', af_upload_error: 'Server timeout or error' })
+              .in('id', batches[i]);
+            setUploadProgress({ current: totalSucceeded + totalFailed, total: unuploaded.length });
+            continue;
           }
-          continue;
+
+          if (data.error) {
+            lastError = data.error;
+            totalFailed += batches[i].length;
+            // Only stop on session expired — everything else, keep going
+            if (data.error.includes('session expired') || data.error.includes('Please re-login')) {
+              break;
+            }
+            continue;
+          }
+
+          const succeeded = data.results.filter((r: any) => r.success).length;
+          const failed = data.results.filter((r: any) => !r.success).length;
+          totalSucceeded += succeeded;
+          totalFailed += failed;
+
+          setUploadProgress({ current: totalSucceeded + totalFailed, total: unuploaded.length });
+          fetchData();
+        } catch (batchErr: any) {
+          // Network error or other exception — mark batch as failed and continue
+          lastError = batchErr.message || 'Batch error';
+          totalFailed += batches[i].length;
+          try {
+            await supabase
+              .from('lots')
+              .update({
+                af_upload_status: 'failed',
+                af_upload_error: batchErr.message || 'Network error',
+              })
+              .in('id', batches[i]);
+          } catch {}
+          setUploadProgress({ current: totalSucceeded + totalFailed, total: unuploaded.length });
         }
-
-        const succeeded = data.results.filter((r: any) => r.success).length;
-        const failed = data.results.filter((r: any) => !r.success).length;
-        totalSucceeded += succeeded;
-        totalFailed += failed;
-
-        setUploadProgress({ current: totalSucceeded + totalFailed, total: unuploaded.length });
-
-        // Refresh lots after each batch to show progress
-        fetchData();
       }
 
       if (lastError && totalSucceeded === 0) {
