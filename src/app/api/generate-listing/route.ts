@@ -152,42 +152,46 @@ export async function POST(request: NextRequest) {
     const retailNew = Number(listing.estimated_retail_new) || 0;
     listing.listed_price = Math.round(retailNew * 1.10);
 
-    // For new-in-box items with known brand+model, search for stock image
-    if (
-      condition === 10 &&
-      listing.brand &&
-      listing.brand !== 'Unknown' &&
-      listing.model &&
-      listing.model !== 'Unknown' &&
-      listing.confidence === 'high'
-    ) {
-      try {
-        const searchQuery = `${listing.brand} ${listing.model}`.trim();
-        // Search WebstaurantStore for the product image
-        const searchUrl = `https://www.webstaurantstore.com/search/${encodeURIComponent(searchQuery)}.html`;
-        const searchRes = await fetch(searchUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-        });
-        const searchHtml = await searchRes.text();
+    // Search for stock image when we have a known brand+model
+    // (Relaxed criteria: any condition, any confidence, as long as brand+model are known)
+    const hasBrand = listing.brand && listing.brand !== 'Unknown' && listing.brand.trim() !== '';
+    const hasModel = listing.model && listing.model !== 'Unknown' && listing.model.trim() !== '';
 
-        // Extract first product image URL
-        const imgMatch = searchHtml.match(/https:\/\/www\.webstaurantstore\.com\/images\/products\/[^"'\s]+\.(jpg|png|webp)/i);
-        if (imgMatch) {
-          listing.stock_image_url = imgMatch[0];
-        } else {
-          // Try KaTom
-          const katomUrl = `https://www.katom.com/search.html?w=${encodeURIComponent(searchQuery)}`;
-          const katomRes = await fetch(katomUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-          });
-          const katomHtml = await katomRes.text();
-          const katomImg = katomHtml.match(/https:\/\/[^"'\s]*katom[^"'\s]*\.(jpg|png|webp)/i);
-          if (katomImg) {
-            listing.stock_image_url = katomImg[0];
+    if (hasBrand && hasModel) {
+      const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      const searchQueries = [
+        `${listing.brand} ${listing.model}`.trim(),
+        listing.model.trim(), // Fallback: model number alone
+      ];
+
+      for (const searchQuery of searchQueries) {
+        if (listing.stock_image_url) break;
+
+        // Try WebstaurantStore first
+        try {
+          const searchUrl = `https://www.webstaurantstore.com/search/${encodeURIComponent(searchQuery)}.html`;
+          const searchRes = await fetch(searchUrl, { headers: { 'User-Agent': UA } });
+          const searchHtml = await searchRes.text();
+
+          // Look for product images (relative path format)
+          const imgMatch = searchHtml.match(/src="(\/images\/products\/[^"]+\.(jpg|png|webp))"/i);
+          if (imgMatch) {
+            listing.stock_image_url = `https://www.webstaurantstore.com${imgMatch[1]}`;
+            break;
           }
-        }
-      } catch {
-        // Stock image search failed, continue without it
+        } catch {}
+
+        // Try KaTom
+        try {
+          const katomUrl = `https://www.katom.com/search.html?w=${encodeURIComponent(searchQuery)}`;
+          const katomRes = await fetch(katomUrl, { headers: { 'User-Agent': UA } });
+          const katomHtml = await katomRes.text();
+          const katomImg = katomHtml.match(/src="(https:\/\/[^"]*katom[^"]*\.(jpg|png|webp))"/i);
+          if (katomImg) {
+            listing.stock_image_url = katomImg[1];
+            break;
+          }
+        } catch {}
       }
     }
 
