@@ -66,7 +66,28 @@ export default function LotReviewPage() {
           .select('*, lot_photos(*)')
           .eq('id', lotId)
           .single();
-        if (data) setExistingLot(data as LotWithPhotos);
+        if (data) {
+          setExistingLot(data as LotWithPhotos);
+          // Also populate the listing state for edit mode
+          setListing({
+            item_name: data.item_name || '',
+            brand: data.brand || '',
+            model: data.model || '',
+            category: data.category || '',
+            confidence: (data.confidence || 'medium') as 'high' | 'medium' | 'low',
+            estimated_retail_new: Number(data.estimated_retail_new) || 0,
+            listed_price: Number(data.listed_price) || 0,
+            width: data.width || '',
+            depth: data.depth || '',
+            height: data.height || '',
+            key_features: data.key_features || [],
+            stock_image_url: '',
+            auction_description: data.auction_description || '',
+          });
+          setCondition(data.condition_rating || 5);
+          setQuantity(data.quantity || 1);
+          setNotes(data.notes || '');
+        }
       };
       fetchLot();
     }
@@ -81,6 +102,91 @@ export default function LotReviewPage() {
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const [reuploading, setReuploading] = useState(false);
+
+  const handleUpdateExisting = async () => {
+    if (!listing || !existingLot) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const { error: updateError } = await supabase
+        .from('lots')
+        .update({
+          item_name: listing.item_name,
+          brand: listing.brand,
+          model: listing.model,
+          category: listing.category,
+          confidence: listing.confidence,
+          condition_rating: condition,
+          quantity,
+          estimated_retail_new: listing.estimated_retail_new,
+          listed_price: listing.listed_price,
+          width: listing.width || null,
+          depth: listing.depth || null,
+          height: listing.height || null,
+          key_features: listing.key_features,
+          auction_description: listing.auction_description,
+          notes,
+        })
+        .eq('id', existingLot.id);
+
+      if (updateError) throw updateError;
+
+      setEditMode(false);
+      // Refresh the lot
+      const { data } = await supabase
+        .from('lots')
+        .select('*, lot_photos(*)')
+        .eq('id', lotId)
+        .single();
+      if (data) setExistingLot(data as LotWithPhotos);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReuploadLot = async () => {
+    if (!existingLot) return;
+    if (!confirm('Re-upload this lot to AF? This creates a NEW lot on AF — delete the old one manually from AF admin.')) return;
+    setReuploading(true);
+    setError(null);
+    try {
+      // Reset upload status
+      await supabase
+        .from('lots')
+        .update({ af_upload_status: null, af_upload_error: null })
+        .eq('id', existingLot.id);
+
+      // Upload
+      const res = await fetch('/api/af-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auction_id: auctionId,
+          lot_ids: [existingLot.id],
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        const result = data.results?.[0];
+        if (result?.success) {
+          alert('Re-uploaded! Remember to delete the old lot from AF admin.');
+          router.push(`/auctions/${auctionId}`);
+        } else {
+          setError(result?.error || 'Upload failed');
+        }
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setReuploading(false);
+    }
   };
 
   const handleSave = async () => {
@@ -244,8 +350,8 @@ export default function LotReviewPage() {
           </div>
         )}
 
-        {/* Edit toggle (only for new lots) */}
-        {isNew && (
+        {/* Edit toggle */}
+        {listing && (
           <button
             onClick={() => setEditMode(!editMode)}
             className={`w-full py-2 rounded-lg border-2 font-bold text-sm uppercase tracking-wide transition-colors ${
@@ -261,7 +367,7 @@ export default function LotReviewPage() {
         {/* Item summary card */}
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="flex items-start justify-between mb-2 gap-2">
-            {editMode && isNew && listing ? (
+            {editMode && listing ? (
               <input
                 type="text"
                 value={listing.item_name}
@@ -277,7 +383,7 @@ export default function LotReviewPage() {
           </div>
 
           <div className="space-y-2 text-sm text-gray-600">
-            {editMode && isNew && listing ? (
+            {editMode && listing ? (
               <>
                 <div>
                   <label className="text-xs font-medium text-gray-400 uppercase">Brand</label>
@@ -334,7 +440,7 @@ export default function LotReviewPage() {
           <div className="mt-3 flex items-center gap-4">
             <div>
               <p className="text-xs text-gray-400">Est. Retail</p>
-              {editMode && isNew && listing ? (
+              {editMode && listing ? (
                 <div className="flex items-center">
                   <span className="font-bold text-brand-green mr-1">$</span>
                   <input
@@ -378,7 +484,7 @@ export default function LotReviewPage() {
               {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
-          {editMode && isNew && listing ? (
+          {editMode && listing ? (
             <textarea
               value={listing.auction_description}
               onChange={(e) => updateListingField('auction_description', e.target.value)}
@@ -475,7 +581,7 @@ export default function LotReviewPage() {
       </div>
 
       {/* Bottom actions */}
-      {isNew && (
+      {isNew ? (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-brand-bg via-brand-bg to-transparent pt-8">
           <div className="flex gap-3">
             <button
@@ -490,6 +596,52 @@ export default function LotReviewPage() {
               </GradientButton>
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-brand-bg via-brand-bg to-transparent pt-8">
+          {editMode ? (
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setEditMode(false);
+                  // Reset listing to original lot data
+                  if (existingLot) {
+                    setListing({
+                      item_name: existingLot.item_name || '',
+                      brand: existingLot.brand || '',
+                      model: existingLot.model || '',
+                      category: existingLot.category || '',
+                      confidence: (existingLot.confidence || 'medium') as 'high' | 'medium' | 'low',
+                      estimated_retail_new: Number(existingLot.estimated_retail_new) || 0,
+                      listed_price: Number(existingLot.listed_price) || 0,
+                      width: (existingLot as any).width || '',
+                      depth: (existingLot as any).depth || '',
+                      height: (existingLot as any).height || '',
+                      key_features: existingLot.key_features || [],
+                      stock_image_url: '',
+                      auction_description: existingLot.auction_description || '',
+                    });
+                  }
+                }}
+                className="flex-1 py-4 rounded-full border-2 border-gray-300 font-black text-sm text-gray-500 uppercase tracking-wide"
+              >
+                Cancel
+              </button>
+              <div className="flex-1">
+                <GradientButton onClick={handleUpdateExisting} loading={saving}>
+                  Save Changes
+                </GradientButton>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleReuploadLot}
+              disabled={reuploading}
+              className="w-full py-4 rounded-full border-2 border-orange-400 text-orange-500 font-black text-sm uppercase tracking-wide disabled:opacity-50"
+            >
+              {reuploading ? 'Re-uploading...' : 'Re-upload to AF'}
+            </button>
+          )}
         </div>
       )}
     </div>
