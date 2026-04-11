@@ -198,6 +198,11 @@ async function uploadLotToAF(
       return { success: true, debug: `302 -> ${location}` };
     }
 
+    // 403 Forbidden or response contains "Forbidden" = session dead
+    if (status === 403 || html.includes('Forbidden') || html.includes("don't have permission")) {
+      return { success: false, error: 'AF session expired. Please re-login.' };
+    }
+
     if (status === 200) {
       if (html.includes('psEmail') || html.includes('psPassword')) {
         return { success: false, error: 'AF session expired. Please re-login.' };
