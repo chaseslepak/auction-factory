@@ -225,6 +225,11 @@ export default function AuctionDetailPage() {
       setRefreshProgress({ current: done, total });
 
       if (data.active) {
+        // If nothing has been processed yet AND nothing is currently processing,
+        // the processor is stuck — kick it
+        if (done === 0 && (data.processing || 0) === 0 && (data.pending || 0) > 0) {
+          fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
+        }
         // Still processing, poll again in 3 seconds
         setTimeout(pollJobStatus, 3000);
       } else {
