@@ -288,6 +288,15 @@ export default function LotReviewPage() {
       for (let i = 0; i < lotsToCreate; i++) {
         const lotNumber = nextLotNumber + i;
 
+        // Hard-delete any soft-deleted lot with this auction_id + lot_number
+        // to free up the unique constraint slot
+        await supabase
+          .from('lots')
+          .delete()
+          .eq('auction_id', auctionId)
+          .eq('lot_number', lotNumber)
+          .not('deleted_at', 'is', null);
+
         // Insert lot row
         const { data: lotData, error: lotError } = await supabase
           .from('lots')
