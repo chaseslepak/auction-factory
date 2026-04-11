@@ -26,9 +26,9 @@ const BROWSER_UA =
 // Sanitize text content to avoid mod_security blocks.
 // AF's server (Apache + mod_security) may block requests containing
 // characters/patterns that look like code injection attempts.
-function sanitizeForAF(text: string): string {
+function sanitizeForAF(text: string, maxLength?: number): string {
   if (!text) return '';
-  return text
+  let result = text
     // Remove HTML tags
     .replace(/<[^>]*>/g, '')
     // Remove script/SQL-like patterns
@@ -38,10 +38,19 @@ function sanitizeForAF(text: string): string {
     .replace(/javascript:/gi, 'js-')
     // Remove bytes that could be interpreted as null or control chars
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-    // Normalize quotes (smart quotes can sometimes trip up parsers)
+    // Normalize smart quotes and dashes
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    // Normalize bullet characters — keep the standard one
+    .replace(/[\u2022\u25AA\u25CF\u2043]/g, '•')
     .trim();
+
+  if (maxLength && result.length > maxLength) {
+    result = result.substring(0, maxLength - 3) + '...';
+  }
+
+  return result;
 }
 
 async function fetchWithCookie(url: string, cookie: string, options: RequestInit = {}) {
@@ -111,12 +120,12 @@ async function uploadLotToAF(
     addField('auto_extend', autoExtend);
     addField('staggered', staggered);
 
-    // Visible fields — sanitized to avoid mod_security blocks
-    addField('title', sanitizeForAF(lot.item_name || ''));
-    addField('name', sanitizeForAF(lot.auction_description || ''));
+    // Visible fields — sanitized + length-limited to match AF form maxlength
+    addField('title', sanitizeForAF(lot.item_name || '', 255));
+    addField('name', sanitizeForAF(lot.auction_description || '', 4000));
     addField('condition', CONDITION_MAP[lot.condition_rating] || '5 - Well used');
-    addField('make', sanitizeForAF(lot.brand || ''));
-    addField('model', sanitizeForAF(lot.model || ''));
+    addField('make', sanitizeForAF(lot.brand || '', 255));
+    addField('model', sanitizeForAF(lot.model || '', 255));
     addField('qty', String(lot.quantity || 1));
     addField('original_price', String(lot.estimated_retail_new || ''));
     addField('start', '1.00');

@@ -281,9 +281,14 @@ DIMENSIONS:
 - If you truly cannot determine dimensions, use empty string ""
 
 ABSOLUTE RULES:
+- item_name MUST be under 200 characters (AF form has 255 char limit)
+- auction_description MUST be under 3500 characters
 - DO NOT include any location, pickup, shipping, delivery, "why wait", warranty, or auction policy disclaimers anywhere — those are added at the auction level, not the lot level
 - NO warranty mentions, ever
+- NO HTML tags, NO script tags, NO suspicious patterns
 - Use "•" (bullet character) for bullets, not hyphens or asterisks
+- Use straight quotes (' and ") not smart quotes
+- Use regular dashes (-) not em-dashes (—)
 - Retail price in the listing = estimated_retail_new × 1.10, rounded. Never reference the markup. The estimated_retail_new MUST be the highest retail price you can find for this item brand new — NEVER return 0
 - If you cannot identify the item confidently, set confidence to "low" and say so honestly in the description
 - Be honest about condition — describe what you SEE in the photos, don't just restate the rating number
