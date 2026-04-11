@@ -160,60 +160,101 @@ export default function AuctionDetailPage() {
   };
 
   const handleRefreshStockImages = async () => {
-    if (!confirm('Search for stock images and pricing for all lots with known brand+model?')) return;
+    if (!confirm('Search for stock images and pricing for all lots with known brand+model?\n\nThis runs in the background — you can close this tab and come back later.')) return;
     setRefreshing(true);
     setUploadMsg(null);
     setRefreshProgress({ current: 0, total: 0 });
 
-    let totalUpdated = 0;
-    let totalCandidates = 0;
-    let offset = 0;
-    let batchNum = 0;
-    const BATCH_SIZE = 1;
-
     try {
-      while (true) {
-        batchNum++;
-        const res = await fetch('/api/refresh-stock-images', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ auction_id: id, offset, batchSize: BATCH_SIZE }),
-        });
+      // Enqueue all candidate lots as background jobs
+      const enqueueRes = await fetch('/api/jobs/enqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auction_id: id }),
+      });
 
-        // Always read as text first, then try to parse
-        const responseText = await res.text();
-        let data: any;
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          throw new Error(`Server returned non-JSON (status ${res.status}): ${responseText.substring(0, 150)}`);
-        }
+      const enqueueText = await enqueueRes.text();
+      let enqueueData: any;
+      try {
+        enqueueData = JSON.parse(enqueueText);
+      } catch {
+        throw new Error(`Server returned non-JSON: ${enqueueText.substring(0, 150)}`);
+      }
 
-        if (!res.ok || data.error) {
-          throw new Error(data.error || `Server error ${res.status}`);
-        }
+      if (!enqueueRes.ok || enqueueData.error) {
+        throw new Error(enqueueData.error || `Server error ${enqueueRes.status}`);
+      }
 
-        totalUpdated += data.updated || 0;
-        totalCandidates = data.totalCandidates || 0;
-        offset = data.nextOffset || offset;
-
-        setRefreshProgress({ current: offset, total: totalCandidates });
-
-        if (!data.hasMore) break;
-        if (batchNum > 50) break; // safety limit
+      if (enqueueData.enqueued === 0) {
+        setUploadMsg({ type: 'error', text: enqueueData.message });
+        setRefreshing(false);
+        return;
       }
 
       setUploadMsg({
-        type: totalUpdated > 0 ? 'success' : 'error',
-        text: `Done! ${totalUpdated} stock images / prices updated (${totalCandidates} processed)`,
+        type: 'success',
+        text: `Queued ${enqueueData.enqueued} lots — processing in background. Safe to close tab.`,
       });
-      fetchData();
+
+      // Start polling for progress
+      pollJobStatus();
     } catch (err: any) {
-      setUploadMsg({ type: 'error', text: `Batch ${batchNum} failed: ${err.message}` });
+      setUploadMsg({ type: 'error', text: err.message });
+      setRefreshing(false);
     }
-    setRefreshing(false);
-    setRefreshProgress({ current: 0, total: 0 });
   };
+
+  const pollJobStatus = async () => {
+    try {
+      const res = await fetch(`/api/jobs/status?auction_id=${id}`);
+      if (!res.ok) {
+        setRefreshing(false);
+        return;
+      }
+      const data = await res.json();
+
+      const done = (data.completed || 0) + (data.failed || 0);
+      const total = data.total || 0;
+
+      setRefreshProgress({ current: done, total });
+
+      if (data.active) {
+        // Still processing, poll again in 3 seconds
+        setTimeout(pollJobStatus, 3000);
+      } else {
+        // All done
+        setRefreshing(false);
+        if (total > 0) {
+          setUploadMsg({
+            type: 'success',
+            text: `Done! ${data.found || 0} stock images found, ${total} lots processed`,
+          });
+          fetchData();
+          // Clean up completed jobs
+          fetch(`/api/jobs/status?auction_id=${id}`, { method: 'DELETE' }).catch(() => {});
+        }
+      }
+    } catch {
+      setRefreshing(false);
+    }
+  };
+
+  // On mount, check if there are active jobs and resume polling
+  useEffect(() => {
+    const checkActiveJobs = async () => {
+      try {
+        const res = await fetch(`/api/jobs/status?auction_id=${id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.active) {
+          setRefreshing(true);
+          pollJobStatus();
+        }
+      } catch {}
+    };
+    if (id) checkActiveJobs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const handleUploadToAf = async () => {
     const unuploaded = lots.filter(
