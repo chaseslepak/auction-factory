@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 
 const sections = [
+  { href: '/admin/jobs', title: 'Jobs', desc: 'View background job status, errors, retry failed' },
   { href: '/admin/trash', title: 'Trash', desc: 'Restore or permanently delete removed lots' },
   { href: '/admin/users', title: 'Users', desc: 'Manage authorized emails' },
   { href: '/admin/activity', title: 'Activity Log', desc: 'See what happened and when' },

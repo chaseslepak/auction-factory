@@ -760,6 +760,13 @@ export default function AuctionDetailPage() {
               </p>
             </div>
           </div>
+          <a
+            href={`/api/export?auction_id=${id}&format=csv`}
+            download
+            className="mt-2 block text-center text-xs font-bold text-brand-blue py-1"
+          >
+            Export to CSV
+          </a>
         </div>
       )}
 

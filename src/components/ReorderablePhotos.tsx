@@ -13,12 +13,14 @@ export default function ReorderablePhotos({
   onReorder,
   onDelete,
   onAdd,
+  onZoom,
   canEdit,
 }: {
   photos: Photo[];
   onReorder: (newOrder: string[]) => void;
   onDelete?: (photoId: string) => void;
   onAdd?: (files: FileList | null) => void;
+  onZoom?: (url: string) => void;
   canEdit?: boolean;
 }) {
   const [dragging, setDragging] = useState<number | null>(null);
@@ -78,7 +80,17 @@ export default function ReorderablePhotos({
             dragging === i ? 'opacity-50' : ''
           } ${dragOver === i ? 'ring-2 ring-brand-blue' : ''}`}
         >
-          <img src={photo.url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
+          <img
+            src={photo.url}
+            alt={`Photo ${i + 1}`}
+            className="w-full h-full object-cover cursor-zoom-in"
+            onClick={(e) => {
+              if (!canEdit && onZoom) {
+                e.stopPropagation();
+                onZoom(photo.url);
+              }
+            }}
+          />
           {i === 0 && (
             <div className="absolute bottom-0 left-0 right-0 bg-brand-green text-white text-xs font-bold text-center py-0.5">
               PRIMARY

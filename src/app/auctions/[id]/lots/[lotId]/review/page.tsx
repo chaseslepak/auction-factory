@@ -10,6 +10,7 @@ import ConfidenceChip from '@/components/ConfidenceChip';
 import ProgressBar from '@/components/ProgressBar';
 import IndeterminateBar from '@/components/IndeterminateBar';
 import ReorderablePhotos from '@/components/ReorderablePhotos';
+import ImageZoom from '@/components/ImageZoom';
 
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
@@ -42,6 +43,7 @@ export default function LotReviewPage() {
   const [existingLot, setExistingLot] = useState<LotWithPhotos | null>(null);
   const [editHistory, setEditHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
 
   // Shared state
   const [mode, setMode] = useState<'single' | 'range'>('single');
@@ -502,6 +504,7 @@ export default function LotReviewPage() {
               onReorder={handleReorderPhotos}
               onDelete={handleDeletePhoto}
               onAdd={handleAddPhotos}
+              onZoom={setZoomImage}
               canEdit={editMode}
             />
           )
@@ -900,6 +903,8 @@ export default function LotReviewPage() {
           )}
         </div>
       )}
+
+      <ImageZoom src={zoomImage} onClose={() => setZoomImage(null)} />
     </div>
   );
 }
