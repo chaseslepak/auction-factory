@@ -797,7 +797,10 @@ export default function AuctionDetailPage() {
                       </span>
                     )}
                     {(lot as any).af_upload_status === 'failed' && (
-                      <span className="bg-red-100 text-red-700 text-xs font-bold px-1.5 py-0.5 rounded">
+                      <span
+                        className="bg-red-100 text-red-700 text-xs font-bold px-1.5 py-0.5 rounded"
+                        title={(lot as any).af_upload_error || 'Upload failed'}
+                      >
                         Failed
                       </span>
                     )}

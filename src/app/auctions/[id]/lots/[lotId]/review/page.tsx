@@ -40,6 +40,8 @@ export default function LotReviewPage() {
 
   // Existing lot state
   const [existingLot, setExistingLot] = useState<LotWithPhotos | null>(null);
+  const [editHistory, setEditHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Shared state
   const [mode, setMode] = useState<'single' | 'range'>('single');
@@ -112,6 +114,15 @@ export default function LotReviewPage() {
           setCondition(data.condition_rating || 5);
           setQuantity(data.quantity || 1);
           setNotes(data.notes || '');
+
+          // Load edit history
+          const { data: edits } = await supabase
+            .from('lot_edits')
+            .select('*')
+            .eq('lot_id', lotId)
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (edits) setEditHistory(edits);
         }
       };
       fetchLot();
@@ -536,18 +547,56 @@ export default function LotReviewPage() {
           </div>
         )}
 
-        {/* Edit toggle */}
+        {/* Edit toggle + history */}
         {listing && (
-          <button
-            onClick={() => setEditMode(!editMode)}
-            className={`w-full py-2 rounded-lg border-2 font-bold text-sm uppercase tracking-wide transition-colors ${
-              editMode
-                ? 'border-brand-green text-brand-green bg-brand-green/5'
-                : 'border-gray-200 text-gray-500'
-            }`}
-          >
-            {editMode ? 'Done Editing' : 'Edit Listing'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setEditMode(!editMode)}
+              className={`flex-1 py-2 rounded-lg border-2 font-bold text-sm uppercase tracking-wide transition-colors ${
+                editMode
+                  ? 'border-brand-green text-brand-green bg-brand-green/5'
+                  : 'border-gray-200 text-gray-500'
+              }`}
+            >
+              {editMode ? 'Done Editing' : 'Edit Listing'}
+            </button>
+            {!isNew && editHistory.length > 0 && (
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="px-4 py-2 rounded-lg border-2 border-gray-200 text-gray-500 font-bold text-xs uppercase"
+              >
+                History ({editHistory.length})
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Edit history drawer */}
+        {showHistory && editHistory.length > 0 && (
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-3">
+              Edit History
+            </h3>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {editHistory.map((edit) => (
+                <div key={edit.id} className="text-xs border-b border-gray-100 pb-2 last:border-b-0">
+                  <div className="flex justify-between text-gray-400">
+                    <span>{edit.user_email}</span>
+                    <span>{new Date(edit.created_at).toLocaleString()}</span>
+                  </div>
+                  <div className="mt-0.5">
+                    <span className="font-bold text-brand-navy">{edit.field}:</span>
+                    <span className="text-red-500 line-through ml-1">
+                      {edit.old_value?.substring(0, 50) || '(empty)'}
+                    </span>
+                    <span className="text-brand-green ml-1">
+                      → {edit.new_value?.substring(0, 50) || '(empty)'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Item summary card */}
