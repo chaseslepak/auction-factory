@@ -67,16 +67,14 @@ export async function POST(request: NextRequest) {
     const hasStockImage = (lot.lot_photos || []).some((p: any) =>
       p.storage_path.includes('/stock_')
     );
-    // Also skip if already uploaded to AF
-    const alreadyUploaded = lot.af_upload_status === 'uploaded';
-    return hasBrand && hasModel && !hasStockImage && !alreadyUploaded;
+    return hasBrand && hasModel && !hasStockImage;
   });
 
   if (candidates.length === 0) {
     return NextResponse.json({
       scanned: lots.length,
       updated: 0,
-      message: 'No eligible lots found (need brand+model, no existing stock image, and not yet uploaded to AF)',
+      message: 'No eligible lots found (need brand+model and no existing stock image)',
     });
   }
 

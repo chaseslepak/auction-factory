@@ -70,6 +70,83 @@ export default function AuctionDetailPage() {
     setShowAfLink(false);
   };
 
+  const handleReuploadToAf = async () => {
+    const uploaded = lots.filter((l) => l.af_upload_status === 'uploaded');
+    if (uploaded.length === 0) {
+      setUploadMsg({ type: 'error', text: 'No uploaded lots to re-upload.' });
+      return;
+    }
+    if (!confirm(`Re-upload ${uploaded.length} lot(s) to Auction Factory? This creates NEW lots on AF — you must manually delete the old ones in the AF admin.`)) return;
+
+    setUploading(true);
+    setUploadMsg(null);
+
+    // Reset their upload status so the upload route will process them
+    await supabase
+      .from('lots')
+      .update({ af_upload_status: null, af_upload_error: null })
+      .in('id', uploaded.map((l) => l.id));
+
+    // Refresh lots state
+    await fetchData();
+
+    const BATCH_SIZE = 5;
+    const batches: string[][] = [];
+    for (let i = 0; i < uploaded.length; i += BATCH_SIZE) {
+      batches.push(uploaded.slice(i, i + BATCH_SIZE).map((l) => l.id));
+    }
+
+    let totalSucceeded = 0;
+    let totalFailed = 0;
+    let lastError: string | null = null;
+
+    try {
+      for (let i = 0; i < batches.length; i++) {
+        setUploadMsg({
+          type: 'success',
+          text: `Re-uploading batch ${i + 1}/${batches.length} (${totalSucceeded}/${uploaded.length} done)...`,
+        });
+
+        const res = await fetch('/api/af-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            auction_id: id,
+            lot_ids: batches[i],
+          }),
+        });
+
+        const data = await res.json();
+        if (data.error) {
+          lastError = data.error;
+          totalFailed += batches[i].length;
+          if (data.error.includes('session expired') || data.error.includes('Please re-login')) {
+            break;
+          }
+          continue;
+        }
+
+        const succeeded = data.results.filter((r: any) => r.success).length;
+        const failed = data.results.filter((r: any) => !r.success).length;
+        totalSucceeded += succeeded;
+        totalFailed += failed;
+        fetchData();
+      }
+
+      setUploadMsg({
+        type: totalFailed === 0 ? 'success' : 'error',
+        text: totalFailed === 0
+          ? `${totalSucceeded} lot(s) re-uploaded! Delete old ones in AF admin.`
+          : `${totalSucceeded} re-uploaded, ${totalFailed} failed${lastError ? `: ${lastError}` : ''}`,
+      });
+      fetchData();
+    } catch (err: any) {
+      setUploadMsg({ type: 'error', text: err.message });
+    }
+
+    setUploading(false);
+  };
+
   const handleRefreshStockImages = async () => {
     if (!confirm('Search for stock images for all lots with known brand+model that dont have one yet? (Skips already-uploaded lots)')) return;
     setRefreshing(true);
@@ -290,6 +367,15 @@ export default function AuctionDetailPage() {
                   Unlink
                 </button>
               </div>
+              {lots.some((l) => (l as any).af_upload_status === 'uploaded') && (
+                <button
+                  onClick={handleReuploadToAf}
+                  disabled={uploading}
+                  className="w-full py-2 rounded-xl border-2 border-orange-400 text-orange-500 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                >
+                  Re-upload Existing to AF (creates duplicates)
+                </button>
+              )}
               {uploadMsg && (
                 <p className={`text-xs text-center ${uploadMsg.type === 'success' ? 'text-brand-green' : 'text-red-500'}`}>
                   {uploadMsg.text}
