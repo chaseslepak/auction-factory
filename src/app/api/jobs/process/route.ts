@@ -5,8 +5,8 @@ import { processStockImageJob } from '@/lib/stock-image-processor';
 
 export const maxDuration = 60;
 
-// Process only N jobs per invocation to avoid timeouts
-const MAX_JOBS_PER_INVOCATION = 1;
+// Process as many jobs as we can fit into a time budget
+const TIME_BUDGET_MS = 45000; // 45 seconds — leaves headroom for 60s timeout
 
 // This endpoint processes pending jobs from the queue.
 // Can be called by:
@@ -16,7 +16,6 @@ const MAX_JOBS_PER_INVOCATION = 1;
 // 4. Manually via the client
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  const TIME_LIMIT = 50000; // 50 seconds max
 
   // Use service role client to bypass RLS
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -44,8 +43,8 @@ export async function POST(request: NextRequest) {
       .eq('status', 'processing')
       .lt('started_at', twoMinutesAgo);
 
-    // Process up to MAX_JOBS_PER_INVOCATION jobs per call
-    while (processed < MAX_JOBS_PER_INVOCATION && Date.now() - startTime < TIME_LIMIT) {
+    // Process as many jobs as we can fit within the time budget
+    while (Date.now() - startTime < TIME_BUDGET_MS) {
       // Claim the next pending job
       const { data: pendingJobs } = await supabase
         .from('jobs')
