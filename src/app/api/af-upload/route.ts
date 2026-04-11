@@ -209,17 +209,16 @@ async function uploadLotToAF(
       return { success: true, debug: `302 -> ${location}` };
     }
 
-    // 403 Forbidden or response contains "Forbidden" = session dead
+    // 403 Forbidden = AF blocked this specific request (mod_security).
+    // Session might still be valid — treat as a per-lot failure, not a session issue.
     if (status === 403 || html.includes('Forbidden') || html.includes("don't have permission")) {
-      return { success: false, error: 'AF session expired. Please re-login.' };
+      return { success: false, error: `FORBIDDEN_BY_AF: ${status}` };
     }
 
     if (status === 200) {
       if (html.includes('psEmail') || html.includes('psPassword')) {
         return { success: false, error: 'AF session expired. Please re-login.' };
       }
-      // AF returns the admin page after a successful save — treat 200 as success
-      // unless it's the login page
       return { success: true };
     }
 
@@ -354,6 +353,8 @@ export async function POST(request: NextRequest) {
       if (result.error?.includes('session expired')) break;
       // Don't retry timeouts — the upload may have succeeded on AF's side
       if (result.error?.includes('TIMEOUT_UNCERTAIN')) break;
+      // Don't retry Forbidden — same data will fail again, go straight to placeholder
+      if (result.error?.includes('FORBIDDEN_BY_AF')) break;
       // Wait before retry
       await new Promise((r) => setTimeout(r, 1000 * (retryCount + 1)));
       result = await uploadLotToAF(
