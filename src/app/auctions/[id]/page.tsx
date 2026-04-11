@@ -210,7 +210,7 @@ export default function AuctionDetailPage() {
     }
   };
 
-  const pollJobStatus = async () => {
+  const pollJobStatus = async (lastDone = -1, stallCount = 0) => {
     try {
       const res = await fetch(`/api/jobs/status?auction_id=${id}`);
       if (!res.ok) {
@@ -225,13 +225,21 @@ export default function AuctionDetailPage() {
       setRefreshProgress({ current: done, total });
 
       if (data.active) {
-        // If nothing has been processed yet AND nothing is currently processing,
-        // the processor is stuck — kick it
-        if (done === 0 && (data.processing || 0) === 0 && (data.pending || 0) > 0) {
+        // Detect stall: if nothing changed since last poll, kick the processor
+        const isStalled = done === lastDone;
+        const newStallCount = isStalled ? stallCount + 1 : 0;
+
+        // Kick every 2 stalls (6 seconds) if progress is stuck
+        if (newStallCount >= 2) {
           fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
         }
+        // Also always kick if there are pending jobs but nothing processing
+        if ((data.pending || 0) > 0 && (data.processing || 0) === 0) {
+          fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
+        }
+
         // Still processing, poll again in 3 seconds
-        setTimeout(pollJobStatus, 3000);
+        setTimeout(() => pollJobStatus(done, newStallCount), 3000);
       } else {
         // All done
         setRefreshing(false);

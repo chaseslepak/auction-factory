@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { encrypt, decrypt } from '@/lib/crypto';
 
 const AF_BASE = 'https://www.auctionfactory.com/admin';
 
@@ -37,10 +38,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Cookie connected but unexpected page. Try again.' }, { status: 400 });
     }
 
-    // Store the clean cookie (just PHPSESSID)
+    // Encrypt the cookie before storing
+    let toStore = cleanCookie;
+    try {
+      toStore = encrypt(cleanCookie);
+    } catch {
+      // If encryption fails (e.g. no secret configured), fall back to plaintext
+    }
+
     await supabase
       .from('af_session')
-      .upsert({ id: 1, session_cookie: cleanCookie, updated_at: new Date().toISOString() });
+      .upsert({ id: 1, session_cookie: toStore, updated_at: new Date().toISOString() });
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
@@ -74,8 +82,13 @@ export async function GET(request: NextRequest) {
       .eq('id', 1)
       .single();
 
+    let cookie = full!.session_cookie;
+    try {
+      cookie = decrypt(cookie);
+    } catch {}
+
     const res = await fetch(`${AF_BASE}/auctions.php`, {
-      headers: { Cookie: full!.session_cookie },
+      headers: { Cookie: cookie },
       redirect: 'manual',
     });
 

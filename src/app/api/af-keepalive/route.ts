@@ -46,9 +46,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Decrypt cookie if encrypted
+    let cookie = session.session_cookie;
+    try {
+      const { decrypt } = await import('@/lib/crypto');
+      cookie = decrypt(cookie);
+    } catch {}
+
     // Ping AF admin to keep session alive
     const res = await fetch(`${AF_BASE}/auctions.php`, {
-      headers: { Cookie: session.session_cookie },
+      headers: { Cookie: cookie },
       redirect: 'manual',
     });
 

@@ -24,9 +24,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Decrypt cookie if encrypted
+    let cookie = session.session_cookie;
+    try {
+      const { decrypt } = await import('@/lib/crypto');
+      cookie = decrypt(cookie);
+    } catch {}
+
     // Fetch the add_item page which has the auction dropdown
     const res = await fetch(`${AF_BASE}/add_item.php`, {
-      headers: { Cookie: session.session_cookie },
+      headers: { Cookie: cookie },
       redirect: 'manual',
     });
 

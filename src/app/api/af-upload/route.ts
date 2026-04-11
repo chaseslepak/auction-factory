@@ -243,8 +243,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify session is still valid by checking if we get the form
-  const cookieUsed = session.session_cookie;
+  // Decrypt cookie if encrypted
+  let cookieUsed = session.session_cookie;
+  try {
+    const { decrypt } = await import('@/lib/crypto');
+    cookieUsed = decrypt(cookieUsed);
+  } catch {}
   const checkUrl = `${AF_BASE}/add_item_2new.php?auction=${mapping.af_auction_id}`;
   const checkRes = await fetch(checkUrl, {
     headers: { Cookie: cookieUsed },
@@ -298,7 +302,7 @@ export async function POST(request: NextRequest) {
       lot,
       photos,
       mapping.af_auction_id,
-      session.session_cookie,
+      cookieUsed,
       isLast ? 'exit' : 'next'
     );
     let retryCount = 0;
@@ -311,7 +315,7 @@ export async function POST(request: NextRequest) {
         lot,
         photos,
         mapping.af_auction_id,
-        session.session_cookie,
+        cookieUsed,
         isLast ? 'exit' : 'next'
       );
       retryCount++;
