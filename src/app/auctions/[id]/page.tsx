@@ -275,6 +275,79 @@ export default function AuctionDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  const handleRetryFailed = async () => {
+    const failedLots = lots.filter((l: any) => l.af_upload_status === 'failed');
+    if (failedLots.length === 0) {
+      setUploadMsg({ type: 'error', text: 'No failed lots to retry.' });
+      return;
+    }
+    const confirmed = confirm(
+      `Retry ${failedLots.length} failed lot(s)?\n\n` +
+      `These will be added to the END of your AF auction (not at their original positions).\n\n` +
+      `After this completes, you MUST manually delete these placeholders from AF admin:\n` +
+      failedLots.map((l) => `• "PLACEHOLDER - LOT #${l.lot_number} - UPLOAD FAILED, DO NOT BID"`).join('\n')
+    );
+    if (!confirmed) return;
+
+    // Reset status so they can be uploaded again
+    await supabase
+      .from('lots')
+      .update({ af_upload_status: null, af_upload_error: null })
+      .in('id', failedLots.map((l) => l.id));
+
+    await fetchData();
+
+    // Trigger upload for these specific lots
+    setUploading(true);
+    setUploadMsg(null);
+    setUploadProgress({ current: 0, total: failedLots.length });
+
+    const BATCH_SIZE = 5;
+    const batches: string[][] = [];
+    for (let i = 0; i < failedLots.length; i += BATCH_SIZE) {
+      batches.push(failedLots.slice(i, i + BATCH_SIZE).map((l) => l.id));
+    }
+
+    let totalSucceeded = 0;
+    let totalFailed = 0;
+
+    try {
+      for (let i = 0; i < batches.length; i++) {
+        const res = await fetch('/api/af-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            auction_id: id,
+            lot_ids: batches[i],
+          }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          totalFailed += batches[i].length;
+          continue;
+        }
+        const succeeded = data.results.filter((r: any) => r.success).length;
+        const failed = data.results.filter((r: any) => !r.success).length;
+        totalSucceeded += succeeded;
+        totalFailed += failed;
+        setUploadProgress({ current: totalSucceeded + totalFailed, total: failedLots.length });
+        fetchData();
+      }
+
+      setUploadMsg({
+        type: totalSucceeded > 0 ? 'success' : 'error',
+        text: totalSucceeded > 0
+          ? `${totalSucceeded} re-uploaded! Now delete the placeholders from AF admin.`
+          : `Still failing: ${totalFailed} lot(s)`,
+      });
+    } catch (err: any) {
+      setUploadMsg({ type: 'error', text: err.message });
+    }
+
+    setUploading(false);
+    setUploadProgress({ current: 0, total: 0 });
+  };
+
   const handleUploadToAf = async () => {
     const unuploaded = lots.filter(
       (l) => l.af_upload_status !== 'uploaded'
@@ -628,6 +701,15 @@ export default function AuctionDetailPage() {
                   Unlink
                 </button>
               </div>
+              {lots.some((l: any) => l.af_upload_status === 'failed') && (
+                <button
+                  onClick={handleRetryFailed}
+                  disabled={uploading}
+                  className="w-full py-2 rounded-xl border-2 border-orange-400 text-orange-500 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                >
+                  Retry Failed Lots ({lots.filter((l: any) => l.af_upload_status === 'failed').length})
+                </button>
+              )}
               {uploading && uploadProgress.total > 0 && (
                 <ProgressBar
                   current={uploadProgress.current}
