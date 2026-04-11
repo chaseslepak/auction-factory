@@ -885,22 +885,7 @@ export default function LotReviewPage() {
                 </GradientButton>
               </div>
             </div>
-          ) : (
-            <>
-              {reuploading && (
-                <div className="mb-3">
-                  <IndeterminateBar label="Re-uploading to Auction Factory..." />
-                </div>
-              )}
-              <button
-                onClick={handleReuploadLot}
-                disabled={reuploading}
-                className="w-full py-4 rounded-full border-2 border-orange-400 text-orange-500 font-black text-sm uppercase tracking-wide disabled:opacity-50"
-              >
-                {reuploading ? 'Re-uploading...' : 'Re-upload to AF'}
-              </button>
-            </>
-          )}
+          ) : null}
         </div>
       )}
 

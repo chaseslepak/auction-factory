@@ -628,15 +628,6 @@ export default function AuctionDetailPage() {
                   Unlink
                 </button>
               </div>
-              {lots.some((l) => (l as any).af_upload_status === 'uploaded') && (
-                <button
-                  onClick={handleReuploadToAf}
-                  disabled={uploading}
-                  className="w-full py-2 rounded-xl border-2 border-orange-400 text-orange-500 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
-                >
-                  Re-upload Existing to AF (creates duplicates)
-                </button>
-              )}
               {uploading && uploadProgress.total > 0 && (
                 <ProgressBar
                   current={uploadProgress.current}
