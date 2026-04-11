@@ -5,8 +5,9 @@ import { processStockImageJob } from '@/lib/stock-image-processor';
 
 export const maxDuration = 60;
 
-// Process as many jobs as we can fit into a time budget
-const TIME_BUDGET_MS = 45000; // 45 seconds — leaves headroom for 60s timeout
+// Strict per-job time limit — if exceeded, mark as failed and move on
+const PER_JOB_TIMEOUT_MS = 40000; // 40 seconds max per job
+const TIME_BUDGET_MS = 45000; // Leave headroom before function timeout
 
 // This endpoint processes pending jobs from the queue.
 // Can be called by:
@@ -74,7 +75,16 @@ export async function POST(request: NextRequest) {
       if (!claimed) continue; // Someone else grabbed it
 
       try {
-        const result = await processStockImageJob(supabase, anthropic, job.lot_id);
+        // Race the job processing against a hard timeout
+        const result = await Promise.race([
+          processStockImageJob(supabase, anthropic, job.lot_id),
+          new Promise<{ success: boolean; found: boolean; error?: string }>((resolve) =>
+            setTimeout(
+              () => resolve({ success: false, found: false, error: 'Per-job timeout (40s)' }),
+              PER_JOB_TIMEOUT_MS
+            )
+          ),
+        ]);
 
         await supabase
           .from('jobs')

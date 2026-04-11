@@ -48,7 +48,7 @@ export async function researchRetailPrice(
   itemName: string
 ): Promise<number> {
   try {
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 25000));
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000));
     const apiPromise = anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 512,
