@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { logApiUsage } from '@/lib/api-usage';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -352,6 +353,15 @@ export async function POST(request: NextRequest) {
           ],
         },
       ],
+    });
+
+    // Track API usage cost
+    await logApiUsage(supabase, {
+      service: 'anthropic',
+      operation: 'identify_item',
+      model: 'claude-opus-4-6',
+      input_tokens: response.usage?.input_tokens,
+      output_tokens: response.usage?.output_tokens,
     });
 
     // Extract JSON from response

@@ -48,6 +48,8 @@ export default function LotReviewPage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [duplicates, setDuplicates] = useState<any[]>([]);
+
   useEffect(() => {
     if (isNew) {
       const pending = sessionStorage.getItem('pending-lot');
@@ -62,6 +64,25 @@ export default function LotReviewPage() {
       setQuantity(data.quantity);
       setNotes(data.notes);
       setNextLotNumber(data.nextLotNumber);
+
+      // Check for duplicates in this auction by brand+model
+      const checkDuplicates = async () => {
+        const brand = data.listing?.brand;
+        const model = data.listing?.model;
+        if (brand && brand !== 'Unknown' && model && model !== 'Unknown') {
+          const { data: similar } = await supabase
+            .from('lots')
+            .select('id, lot_number, item_name, brand, model')
+            .eq('auction_id', auctionId)
+            .is('deleted_at', null)
+            .eq('brand', brand)
+            .eq('model', model);
+          if (similar && similar.length > 0) {
+            setDuplicates(similar);
+          }
+        }
+      };
+      checkDuplicates();
     } else {
       const fetchLot = async () => {
         const { data } = await supabase
@@ -114,6 +135,27 @@ export default function LotReviewPage() {
     setSaving(true);
     setError(null);
     try {
+      // Track changed fields for edit history
+      const { data: { user } } = await supabase.auth.getUser();
+      const userEmail = user?.email || 'unknown';
+      const changes: { field: string; oldV: string; newV: string }[] = [];
+
+      const fieldsToCompare = [
+        ['item_name', existingLot.item_name, listing.item_name],
+        ['brand', existingLot.brand, listing.brand],
+        ['model', existingLot.model, listing.model],
+        ['category', existingLot.category, listing.category],
+        ['condition_rating', String(existingLot.condition_rating || ''), String(condition)],
+        ['estimated_retail_new', String(existingLot.estimated_retail_new || ''), String(listing.estimated_retail_new)],
+        ['auction_description', existingLot.auction_description, listing.auction_description],
+      ];
+
+      for (const [field, oldV, newV] of fieldsToCompare) {
+        if ((oldV || '') !== (newV || '')) {
+          changes.push({ field: field!, oldV: oldV || '', newV: newV || '' });
+        }
+      }
+
       const { error: updateError } = await supabase
         .from('lots')
         .update({
@@ -136,6 +178,28 @@ export default function LotReviewPage() {
         .eq('id', existingLot.id);
 
       if (updateError) throw updateError;
+
+      // Log edit history
+      if (changes.length > 0) {
+        const editRows = changes.map((c) => ({
+          lot_id: existingLot.id,
+          user_email: userEmail,
+          field: c.field,
+          old_value: c.oldV.substring(0, 500),
+          new_value: c.newV.substring(0, 500),
+        }));
+        await supabase.from('lot_edits').insert(editRows);
+
+        // Log activity
+        await supabase.from('activity_log').insert({
+          user_email: userEmail,
+          action: 'edited',
+          entity_type: 'lot',
+          entity_id: existingLot.id,
+          auction_id: existingLot.auction_id,
+          details: { fields: changes.map((c) => c.field) },
+        });
+      }
 
       setEditMode(false);
       // Refresh the lot
@@ -434,6 +498,32 @@ export default function LotReviewPage() {
                 </svg>
               </label>
             )}
+          </div>
+        )}
+
+        {/* Duplicate warning */}
+        {isNew && duplicates.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-400 rounded-xl p-4">
+            <div className="flex items-start gap-2">
+              <svg className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-yellow-900">
+                  Possible duplicate{duplicates.length > 1 ? 's' : ''} in this auction
+                </p>
+                <p className="text-xs text-yellow-800 mt-1">
+                  Same brand + model found in:
+                </p>
+                <ul className="text-xs text-yellow-800 mt-1 space-y-0.5">
+                  {duplicates.slice(0, 5).map((dup: any) => (
+                    <li key={dup.id}>
+                      • Lot #{dup.lot_number}: {dup.item_name}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           </div>
         )}
 
