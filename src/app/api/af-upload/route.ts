@@ -321,6 +321,36 @@ export async function POST(request: NextRequest) {
       retryCount++;
     }
 
+    // If upload still failed (not a session error), post a placeholder lot to AF
+    // to preserve the lot numbering. This way lot 3 stays as lot 3 even if lot 2 failed.
+    if (!result.success && !result.error?.includes('session expired')) {
+      const placeholderLot = {
+        item_name: `PLACEHOLDER - LOT #${lot.lot_number} - UPLOAD FAILED, DO NOT BID`,
+        auction_description:
+          'This lot failed to upload and is a placeholder to preserve lot numbering. It will be fixed or removed before auction goes live. DO NOT BID ON THIS LOT.',
+        brand: '',
+        model: '',
+        category: '',
+        condition_rating: 5,
+        quantity: 1,
+        estimated_retail_new: 1,
+      };
+      const placeholderResult = await uploadLotToAF(
+        placeholderLot,
+        [], // No photos
+        mapping.af_auction_id,
+        cookieUsed,
+        isLast ? 'exit' : 'next'
+      );
+      if (placeholderResult.success) {
+        // Placeholder uploaded successfully — log it but keep the original lot as failed
+        result = {
+          success: false,
+          error: `Upload failed: ${result.error || 'unknown'}. Placeholder posted to AF to hold position.`,
+        };
+      }
+    }
+
     // Update lot status
     await supabase
       .from('lots')
