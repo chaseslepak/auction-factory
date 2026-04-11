@@ -8,10 +8,11 @@ import Header from '@/components/Header';
 import GradientButton from '@/components/GradientButton';
 
 export default function AuctionsPage() {
-  const [auctions, setAuctions] = useState<(Auction & { lot_count: number })[]>([]);
+  const [auctions, setAuctions] = useState<(Auction & { lot_count: number; archived_at?: string | null })[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [showArchived, setShowArchived] = useState(false);
   const supabase = createClient();
 
   const fetchAuctions = async () => {
@@ -45,46 +46,81 @@ export default function AuctionsPage() {
     fetchAuctions();
   };
 
+  const toggleArchive = async (auctionId: string, isArchived: boolean) => {
+    await supabase
+      .from('auctions')
+      .update({ archived_at: isArchived ? null : new Date().toISOString() })
+      .eq('id', auctionId);
+    fetchAuctions();
+  };
+
+  const visibleAuctions = auctions.filter((a) => showArchived ? !!a.archived_at : !a.archived_at);
+  const archivedCount = auctions.filter((a) => !!a.archived_at).length;
+
   return (
     <div className="min-h-screen bg-brand-bg">
       <Header title="Auctions" />
 
+      <div className="px-4 py-2 flex items-center justify-between">
+        <button
+          onClick={() => setShowArchived(!showArchived)}
+          className="text-xs font-medium text-brand-blue"
+        >
+          {showArchived ? `← Back to Active` : `View Archived (${archivedCount})`}
+        </button>
+        <Link href="/settings" className="text-xs text-brand-blue font-medium">
+          Settings
+        </Link>
+      </div>
+
       <div className="p-4 space-y-3">
         {loading ? (
           <p className="text-center text-gray-400 py-12">Loading...</p>
-        ) : auctions.length === 0 ? (
+        ) : visibleAuctions.length === 0 ? (
           <p className="text-center text-gray-400 py-12">
-            No auctions yet. Create your first!
+            {showArchived ? 'No archived auctions' : 'No auctions yet. Create your first!'}
           </p>
         ) : (
-          auctions.map((auction) => (
-            <Link
+          visibleAuctions.map((auction) => (
+            <div
               key={auction.id}
-              href={`/auctions/${auction.id}`}
-              className="block bg-white rounded-xl p-4 shadow-sm border border-gray-100 active:bg-gray-50 transition-colors"
+              className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
             >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-bold text-brand-navy">{auction.name}</h2>
-                  <p className="text-sm text-gray-400 mt-0.5">
-                    {auction.lot_count} lot{auction.lot_count !== 1 ? 's' : ''}
-                  </p>
+              <Link
+                href={`/auctions/${auction.id}`}
+                className="block p-4 active:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-bold text-brand-navy">{auction.name}</h2>
+                    <p className="text-sm text-gray-400 mt-0.5">
+                      {auction.lot_count} lot{auction.lot_count !== 1 ? 's' : ''}
+                    </p>
+                  </div>
+                  <svg
+                    className="w-5 h-5 text-gray-300"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
                 </div>
-                <svg
-                  className="w-5 h-5 text-gray-300"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+              </Link>
+              <div className="border-t border-gray-100 px-4 py-2 flex justify-end">
+                <button
+                  onClick={() => toggleArchive(auction.id, !!auction.archived_at)}
+                  className="text-xs text-gray-400 font-medium hover:text-brand-blue"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
+                  {auction.archived_at ? 'Restore' : 'Archive'}
+                </button>
               </div>
-            </Link>
+            </div>
           ))
         )}
       </div>

@@ -23,6 +23,11 @@ export default function AuctionDetailPage() {
   const [afLinked, setAfLinked] = useState(false);
   const [showAfLink, setShowAfLink] = useState(false);
   const [afAuctionId, setAfAuctionId] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'uploaded' | 'not_uploaded' | 'failed'>('all');
+  const [sortBy, setSortBy] = useState<'lot_number' | 'price_desc' | 'price_asc' | 'confidence'>('lot_number');
+  const [selectedLots, setSelectedLots] = useState<Set<string>>(new Set());
+  const [bulkMode, setBulkMode] = useState(false);
   const [afAuctions, setAfAuctions] = useState<{ id: string; name: string }[]>([]);
   const supabase = createClient();
 
@@ -33,6 +38,7 @@ export default function AuctionDetailPage() {
         .from('lots')
         .select('*, lot_photos(*)')
         .eq('auction_id', id)
+        .is('deleted_at', null)
         .order('lot_number', { ascending: true }),
       supabase
         .from('af_auction_map')
@@ -334,22 +340,83 @@ export default function AuctionDetailPage() {
   };
 
   const deleteLot = async (lotId: string) => {
-    if (!confirm('Delete this lot?')) return;
+    if (!confirm('Delete this lot? (Can be restored from trash)')) return;
 
-    // Delete photos from storage first
-    const lot = lots.find((l) => l.id === lotId);
-    if (lot?.lot_photos.length) {
-      const paths = lot.lot_photos.map((p) => p.storage_path);
-      await supabase.storage.from('lot-photos').remove(paths);
-    }
-
-    await supabase.from('lots').delete().eq('id', lotId);
+    // Soft delete — keeps photos and data, just marks as deleted
+    await supabase
+      .from('lots')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', lotId);
     fetchData();
   };
 
   const getPhotoUrl = (path: string) => {
     const { data } = supabase.storage.from('lot-photos').getPublicUrl(path);
     return data.publicUrl;
+  };
+
+  // Compute filtered + sorted lots
+  const filteredLots = (() => {
+    let result = [...lots];
+
+    // Search
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter((lot) => {
+        return (
+          (lot.item_name || '').toLowerCase().includes(q) ||
+          (lot.brand || '').toLowerCase().includes(q) ||
+          (lot.model || '').toLowerCase().includes(q) ||
+          String(lot.lot_number).includes(q)
+        );
+      });
+    }
+
+    // Filter by upload status
+    if (filterStatus !== 'all') {
+      result = result.filter((lot) => {
+        const status = (lot as any).af_upload_status;
+        if (filterStatus === 'uploaded') return status === 'uploaded';
+        if (filterStatus === 'not_uploaded') return status !== 'uploaded' && status !== 'failed';
+        if (filterStatus === 'failed') return status === 'failed';
+        return true;
+      });
+    }
+
+    // Sort
+    result.sort((a, b) => {
+      if (sortBy === 'lot_number') return a.lot_number - b.lot_number;
+      if (sortBy === 'price_desc') return (Number(b.listed_price) || 0) - (Number(a.listed_price) || 0);
+      if (sortBy === 'price_asc') return (Number(a.listed_price) || 0) - (Number(b.listed_price) || 0);
+      if (sortBy === 'confidence') {
+        const order: Record<string, number> = { high: 3, medium: 2, low: 1 };
+        return (order[b.confidence || ''] || 0) - (order[a.confidence || ''] || 0);
+      }
+      return 0;
+    });
+
+    return result;
+  })();
+
+  const toggleLotSelection = (lotId: string) => {
+    setSelectedLots((prev) => {
+      const next = new Set(prev);
+      if (next.has(lotId)) next.delete(lotId);
+      else next.add(lotId);
+      return next;
+    });
+  };
+
+  const bulkDelete = async () => {
+    if (selectedLots.size === 0) return;
+    if (!confirm(`Delete ${selectedLots.size} selected lot(s)?`)) return;
+    await supabase
+      .from('lots')
+      .update({ deleted_at: new Date().toISOString() })
+      .in('id', Array.from(selectedLots));
+    setSelectedLots(new Set());
+    setBulkMode(false);
+    fetchData();
   };
 
   if (loading) {
@@ -500,17 +567,120 @@ export default function AuctionDetailPage() {
         </div>
       )}
 
+      {/* Search + Filter + Sort bar */}
+      {lots.length > 0 && (
+        <div className="px-4 mb-2 space-y-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by item name, brand, model, lot #"
+            className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-brand-blue"
+          />
+          <div className="flex gap-2">
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as any)}
+              className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-xs font-medium focus:outline-none focus:border-brand-blue"
+            >
+              <option value="all">All lots</option>
+              <option value="not_uploaded">Not uploaded</option>
+              <option value="uploaded">Uploaded to AF</option>
+              <option value="failed">Failed</option>
+            </select>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-xs font-medium focus:outline-none focus:border-brand-blue"
+            >
+              <option value="lot_number">Lot # (asc)</option>
+              <option value="price_desc">Price (high-low)</option>
+              <option value="price_asc">Price (low-high)</option>
+              <option value="confidence">Confidence</option>
+            </select>
+            <button
+              onClick={() => {
+                setBulkMode(!bulkMode);
+                setSelectedLots(new Set());
+              }}
+              className={`px-3 py-2 rounded-lg border text-xs font-bold uppercase tracking-wide ${
+                bulkMode
+                  ? 'bg-brand-blue text-white border-brand-blue'
+                  : 'border-gray-200 text-gray-600'
+              }`}
+            >
+              Select
+            </button>
+          </div>
+          {bulkMode && selectedLots.size > 0 && (
+            <div className="flex gap-2 items-center bg-brand-blue/5 rounded-lg p-2">
+              <span className="text-xs font-bold text-brand-blue">{selectedLots.size} selected</span>
+              <button
+                onClick={bulkDelete}
+                className="ml-auto px-3 py-1 rounded text-xs font-bold text-red-500 border border-red-300"
+              >
+                Delete
+              </button>
+            </div>
+          )}
+          <p className="text-xs text-gray-400">
+            Showing {filteredLots.length} of {lots.length}
+          </p>
+        </div>
+      )}
+
       <div className="p-4 space-y-3">
-        {lots.length === 0 ? (
+        {filteredLots.length === 0 ? (
           <p className="text-center text-gray-400 py-12">
-            No lots yet. Add your first!
+            {lots.length === 0 ? 'No lots yet. Add your first!' : 'No lots match your filters'}
           </p>
         ) : (
-          lots.map((lot) => (
+          filteredLots.map((lot) => (
             <div
               key={lot.id}
-              className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
+              className={`bg-white rounded-xl shadow-sm border overflow-hidden ${
+                selectedLots.has(lot.id) ? 'border-brand-blue' : 'border-gray-100'
+              }`}
             >
+              {bulkMode ? (
+                <div
+                  onClick={() => toggleLotSelection(lot.id)}
+                  className="flex items-center p-3 gap-3 cursor-pointer active:bg-gray-50"
+                >
+                  <div
+                    className={`w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                      selectedLots.has(lot.id)
+                        ? 'bg-brand-blue border-brand-blue'
+                        : 'border-gray-300'
+                    }`}
+                  >
+                    {selectedLots.has(lot.id) && (
+                      <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                          fillRule="evenodd"
+                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center flex-shrink-0">
+                    <span className="text-white font-black text-sm">#{lot.lot_number}</span>
+                  </div>
+                  {lot.lot_photos[0] && (
+                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
+                      <img
+                        src={getPhotoUrl(lot.lot_photos[0].storage_path)}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-brand-navy text-sm truncate">{lot.item_name || 'Untitled'}</p>
+                  </div>
+                </div>
+              ) : (
               <Link
                 href={`/auctions/${id}/lots/${lot.id}/review`}
                 className="flex items-center p-3 gap-3 active:bg-gray-50 transition-colors"
@@ -563,8 +733,10 @@ export default function AuctionDetailPage() {
                   </div>
                 </div>
               </Link>
+              )}
 
-              {/* Delete */}
+              {/* Delete (only show when not in bulk mode) */}
+              {!bulkMode && (
               <div className="border-t border-gray-100 px-3 py-2 flex justify-end">
                 <button
                   onClick={() => deleteLot(lot.id)}
@@ -573,6 +745,7 @@ export default function AuctionDetailPage() {
                   Delete
                 </button>
               </div>
+              )}
             </div>
           ))
         )}
