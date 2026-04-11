@@ -21,6 +21,19 @@ export default function LotReviewPage() {
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
   const [nextLotNumber, setNextLotNumber] = useState(1);
+  const [editMode, setEditMode] = useState(false);
+
+  // Helper to update listing fields
+  const updateListingField = (field: keyof GenerateListingResponse, value: any) => {
+    if (!listing) return;
+    const updated = { ...listing, [field]: value };
+    // If retail price changed, recalculate listed price
+    if (field === 'estimated_retail_new') {
+      const retail = Number(value) || 0;
+      updated.listed_price = Math.round(retail * 1.10);
+    }
+    setListing(updated);
+  };
 
   // Existing lot state
   const [existingLot, setExistingLot] = useState<LotWithPhotos | null>(null);
@@ -226,42 +239,111 @@ export default function LotReviewPage() {
           </div>
         )}
 
+        {/* Edit toggle (only for new lots) */}
+        {isNew && (
+          <button
+            onClick={() => setEditMode(!editMode)}
+            className={`w-full py-2 rounded-lg border-2 font-bold text-sm uppercase tracking-wide transition-colors ${
+              editMode
+                ? 'border-brand-green text-brand-green bg-brand-green/5'
+                : 'border-gray-200 text-gray-500'
+            }`}
+          >
+            {editMode ? 'Done Editing' : 'Edit Listing'}
+          </button>
+        )}
+
         {/* Item summary card */}
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-          <div className="flex items-start justify-between mb-2">
-            <h2 className="font-black text-brand-navy text-lg">
-              {displayListing.item_name}
-            </h2>
+          <div className="flex items-start justify-between mb-2 gap-2">
+            {editMode && isNew && listing ? (
+              <input
+                type="text"
+                value={listing.item_name}
+                onChange={(e) => updateListingField('item_name', e.target.value)}
+                className="flex-1 font-black text-brand-navy text-lg px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+              />
+            ) : (
+              <h2 className="font-black text-brand-navy text-lg">
+                {displayListing.item_name}
+              </h2>
+            )}
             <ConfidenceChip confidence={displayConfidence} />
           </div>
 
-          <div className="space-y-1 text-sm text-gray-600">
-            {displayListing.brand && displayListing.brand !== 'Unknown' && (
-              <p>
-                <span className="font-medium text-gray-400">Brand:</span>{' '}
-                {displayListing.brand}
-              </p>
-            )}
-            {displayListing.model && displayListing.model !== 'Unknown' && (
-              <p>
-                <span className="font-medium text-gray-400">Model:</span>{' '}
-                {displayListing.model}
-              </p>
-            )}
-            {displayListing.category && (
-              <p>
-                <span className="font-medium text-gray-400">Category:</span>{' '}
-                {displayListing.category}
-              </p>
+          <div className="space-y-2 text-sm text-gray-600">
+            {editMode && isNew && listing ? (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-gray-400 uppercase">Brand</label>
+                  <input
+                    type="text"
+                    value={listing.brand}
+                    onChange={(e) => updateListingField('brand', e.target.value)}
+                    className="w-full mt-0.5 px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-400 uppercase">Model</label>
+                  <input
+                    type="text"
+                    value={listing.model}
+                    onChange={(e) => updateListingField('model', e.target.value)}
+                    className="w-full mt-0.5 px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-400 uppercase">Category</label>
+                  <input
+                    type="text"
+                    value={listing.category}
+                    onChange={(e) => updateListingField('category', e.target.value)}
+                    className="w-full mt-0.5 px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                {displayListing.brand && displayListing.brand !== 'Unknown' && (
+                  <p>
+                    <span className="font-medium text-gray-400">Brand:</span>{' '}
+                    {displayListing.brand}
+                  </p>
+                )}
+                {displayListing.model && displayListing.model !== 'Unknown' && (
+                  <p>
+                    <span className="font-medium text-gray-400">Model:</span>{' '}
+                    {displayListing.model}
+                  </p>
+                )}
+                {displayListing.category && (
+                  <p>
+                    <span className="font-medium text-gray-400">Category:</span>{' '}
+                    {displayListing.category}
+                  </p>
+                )}
+              </>
             )}
           </div>
 
           <div className="mt-3 flex items-center gap-4">
             <div>
               <p className="text-xs text-gray-400">Est. Retail</p>
-              <p className="font-bold text-brand-green">
-                ${Number(displayListing.estimated_retail_new).toLocaleString()}
-              </p>
+              {editMode && isNew && listing ? (
+                <div className="flex items-center">
+                  <span className="font-bold text-brand-green mr-1">$</span>
+                  <input
+                    type="number"
+                    value={listing.estimated_retail_new}
+                    onChange={(e) => updateListingField('estimated_retail_new', Number(e.target.value))}
+                    className="w-24 font-bold text-brand-green px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                  />
+                </div>
+              ) : (
+                <p className="font-bold text-brand-green">
+                  ${Number(displayListing.estimated_retail_new).toLocaleString()}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs text-gray-400">Listed Price</p>
@@ -291,9 +373,18 @@ export default function LotReviewPage() {
               {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
-          <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
-            {displayListing.auction_description}
-          </pre>
+          {editMode && isNew && listing ? (
+            <textarea
+              value={listing.auction_description}
+              onChange={(e) => updateListingField('auction_description', e.target.value)}
+              rows={14}
+              className="w-full text-sm text-gray-700 font-sans leading-relaxed px-3 py-2 rounded border border-gray-200 focus:outline-none focus:border-brand-blue resize-y"
+            />
+          ) : (
+            <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
+              {displayListing.auction_description}
+            </pre>
+          )}
         </div>
 
         {/* Key features */}
