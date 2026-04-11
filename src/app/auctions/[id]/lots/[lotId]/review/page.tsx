@@ -9,6 +9,7 @@ import GradientButton from '@/components/GradientButton';
 import ConfidenceChip from '@/components/ConfidenceChip';
 import ProgressBar from '@/components/ProgressBar';
 import IndeterminateBar from '@/components/IndeterminateBar';
+import ReorderablePhotos from '@/components/ReorderablePhotos';
 
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
@@ -408,6 +409,22 @@ export default function LotReviewPage() {
     if (data) setExistingLot(data as LotWithPhotos);
   };
 
+  const handleReorderPhotos = async (photoIds: string[]) => {
+    if (!existingLot) return;
+    // Update display_order locally first for instant feedback
+    const updated = photoIds.map((id, i) => {
+      const photo = existingLot.lot_photos?.find((p) => p.id === id);
+      return { ...photo!, display_order: i };
+    });
+    setExistingLot({ ...existingLot, lot_photos: updated } as LotWithPhotos);
+    // Then persist
+    await fetch('/api/lot-photos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lot_id: existingLot.id, photo_ids: photoIds }),
+    });
+  };
+
   const handleAddPhotos = async (files: FileList | null) => {
     if (!files || !existingLot) return;
     const { processImage } = await import('@/lib/image-utils');
@@ -462,43 +479,35 @@ export default function LotReviewPage() {
 
       <div className="p-4 space-y-4">
         {/* Photos */}
-        {(displayPhotos.length > 0 || (editMode && !isNew)) && (
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {displayPhotos.map((photo, i) => (
-              <div
-                key={i}
-                className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200 relative"
-              >
-                <img
-                  src={photo}
-                  alt={`Photo ${i + 1}`}
-                  className="w-full h-full object-cover"
-                />
-                {editMode && !isNew && existingPhotoData[i] && (
-                  <button
-                    onClick={() => handleDeletePhoto(existingPhotoData[i].id)}
-                    className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center"
-                  >
-                    &times;
-                  </button>
-                )}
-              </div>
-            ))}
-            {editMode && !isNew && (
-              <label className="w-20 h-20 flex-shrink-0 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:border-brand-blue hover:text-brand-blue">
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => handleAddPhotos(e.target.files)}
-                />
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </label>
-            )}
-          </div>
+        {!isNew ? (
+          // Existing lot — use reorderable component
+          (existingPhotoData.length > 0 || editMode) && (
+            <ReorderablePhotos
+              photos={existingPhotoData.map((p) => ({
+                id: p.id,
+                url: getPhotoUrl(p.storage_path),
+                storage_path: p.storage_path,
+              }))}
+              onReorder={handleReorderPhotos}
+              onDelete={handleDeletePhoto}
+              onAdd={handleAddPhotos}
+              canEdit={editMode}
+            />
+          )
+        ) : (
+          // New lot — simple display (no reorder since they're just base64 strings)
+          displayPhotos.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {displayPhotos.map((photo, i) => (
+                <div
+                  key={i}
+                  className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200 relative"
+                >
+                  <img src={photo} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
+                </div>
+              ))}
+            </div>
+          )
         )}
 
         {/* Duplicate warning */}
