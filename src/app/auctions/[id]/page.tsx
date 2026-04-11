@@ -157,27 +157,55 @@ export default function AuctionDetailPage() {
   };
 
   const handleRefreshStockImages = async () => {
-    if (!confirm('Search for stock images for all lots with known brand+model that dont have one yet? (Skips already-uploaded lots)')) return;
+    if (!confirm('Search for stock images for all lots with known brand+model?')) return;
     setRefreshing(true);
     setUploadMsg(null);
+
+    let totalUpdated = 0;
+    let totalCandidates = 0;
+    let offset = 0;
+    let batchNum = 0;
+    const BATCH_SIZE = 3;
+
     try {
-      const res = await fetch('/api/refresh-stock-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auction_id: id }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        setUploadMsg({ type: 'error', text: data.error });
-      } else {
+      while (true) {
+        batchNum++;
         setUploadMsg({
-          type: data.updated > 0 ? 'success' : 'error',
-          text: data.message || `${data.updated} updated, ${data.notFound} not found`,
+          type: 'success',
+          text: `Processing batch ${batchNum}... (${totalUpdated} updated so far)`,
         });
-        fetchData();
+
+        const res = await fetch('/api/refresh-stock-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ auction_id: id, offset, batchSize: BATCH_SIZE }),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Server error ${res.status}: ${errText.substring(0, 200)}`);
+        }
+
+        const data = await res.json();
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        totalUpdated += data.updated || 0;
+        totalCandidates = data.totalCandidates || 0;
+        offset = data.nextOffset || offset;
+
+        if (!data.hasMore) break;
+        if (batchNum > 50) break; // safety limit
       }
+
+      setUploadMsg({
+        type: totalUpdated > 0 ? 'success' : 'error',
+        text: `Done! ${totalUpdated} stock images added (${totalCandidates} candidates processed)`,
+      });
+      fetchData();
     } catch (err: any) {
-      setUploadMsg({ type: 'error', text: err.message });
+      setUploadMsg({ type: 'error', text: `Batch ${batchNum} failed: ${err.message}` });
     }
     setRefreshing(false);
   };

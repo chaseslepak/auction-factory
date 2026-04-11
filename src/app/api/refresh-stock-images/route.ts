@@ -250,13 +250,14 @@ async function processRefresh(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { auction_id, lot_ids } = await request.json();
+  const { auction_id, lot_ids, offset = 0, batchSize = 5 } = await request.json();
 
   // Get lots that don't have a stock image yet
   let query = supabase
     .from('lots')
     .select('*, lot_photos(*)')
-    .limit(1000);
+    .limit(1000)
+    .order('lot_number', { ascending: true });
 
   if (lot_ids?.length) {
     query = query.in('id', lot_ids);
@@ -287,12 +288,20 @@ async function processRefresh(request: NextRequest) {
   if (candidates.length === 0) {
     return NextResponse.json({
       totalLots: lots.length,
-      candidates: 0,
+      totalCandidates: 0,
       updated: 0,
       skipped,
+      hasMore: false,
+      nextOffset: 0,
       message: `0 of ${lots.length} lots have a brand or model. AI couldn't identify them.`,
     });
   }
+
+  // Slice to just this batch
+  const totalCandidates = candidates.length;
+  const batchCandidates = candidates.slice(offset, offset + batchSize);
+  const nextOffset = offset + batchCandidates.length;
+  const hasMore = nextOffset < totalCandidates;
 
   // Initialize Anthropic client for verification
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -304,7 +313,7 @@ async function processRefresh(request: NextRequest) {
   let updated = 0;
   const results: { lot_number: number; item_name: string; found: boolean }[] = [];
 
-  for (const lot of candidates) {
+  for (const lot of batchCandidates) {
     try {
       // Get public URLs for user's existing photos to use for verification
       const userPhotoUrls = (lot.lot_photos || [])
@@ -367,21 +376,12 @@ async function processRefresh(request: NextRequest) {
             display_order: 0,
           });
 
-          // Find the highest retail price from multiple sources
+          // Update retail pricing from WebstaurantStore if it's higher than current
           const currentRetail = Number(lot.estimated_retail_new) || 0;
           const webstaurantPrice = found.price || 0;
 
-          // Also do a web search to find prices from other retailers
-          const webSearchPrice = await researchRetailPrice(
-            anthropic,
-            lot.brand || '',
-            lot.model || '',
-            lot.item_name || ''
-          );
-
-          const maxPrice = Math.max(currentRetail, webstaurantPrice, webSearchPrice);
-          if (maxPrice > currentRetail) {
-            const newRetail = Math.round(maxPrice);
+          if (webstaurantPrice > currentRetail) {
+            const newRetail = Math.round(webstaurantPrice);
             const newListed = Math.round(newRetail * 1.10);
             await supabase
               .from('lots')
@@ -409,11 +409,15 @@ async function processRefresh(request: NextRequest) {
   const notFoundCount = results.filter((r) => !r.found).length;
   return NextResponse.json({
     totalLots: lots.length,
-    candidates: candidates.length,
+    totalCandidates,
+    batchSize: batchCandidates.length,
+    offset,
+    nextOffset,
+    hasMore,
     updated,
     notFound: notFoundCount,
     skipped,
     results,
-    message: `${updated} updated out of ${candidates.length} searched (${lots.length} total lots, ${skipped.noBrandOrModel} skipped — no brand/model)`,
+    message: `${updated} updated in this batch (${nextOffset}/${totalCandidates} candidates processed)`,
   });
 }
