@@ -40,7 +40,7 @@ export default function LotReviewPage() {
 
   // Shared state
   const [mode, setMode] = useState<'single' | 'range'>('single');
-  const [rangeCount, setRangeCount] = useState(2);
+  const [rangeCount, setRangeCount] = useState<number | ''>('');
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +89,12 @@ export default function LotReviewPage() {
     setError(null);
 
     try {
-      const lotsToCreate = mode === 'single' ? 1 : rangeCount;
+      const lotsToCreate = mode === 'single' ? 1 : Number(rangeCount) || 0;
+      if (mode === 'range' && lotsToCreate < 2) {
+        setError('Please enter how many lots to create (minimum 2)');
+        setSaving(false);
+        return;
+      }
 
       for (let i = 0; i < lotsToCreate; i++) {
         const lotNumber = nextLotNumber + i;
@@ -433,7 +438,7 @@ export default function LotReviewPage() {
               </button>
             </div>
             {mode === 'range' && (
-              <div className="mt-3 flex items-center gap-3">
+              <div className="mt-3 flex items-center gap-3 flex-wrap">
                 <label className="text-sm text-gray-600">
                   Create
                 </label>
@@ -442,14 +447,22 @@ export default function LotReviewPage() {
                   min={2}
                   max={50}
                   value={rangeCount}
-                  onChange={(e) =>
-                    setRangeCount(Math.max(2, Math.min(50, Number(e.target.value))))
-                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '') {
+                      setRangeCount('');
+                    } else {
+                      setRangeCount(Math.max(0, Math.min(50, Number(v))));
+                    }
+                  }}
+                  placeholder="#"
                   className="w-20 px-3 py-2 rounded-lg border border-gray-200 text-center font-bold focus:outline-none focus:border-brand-blue"
                 />
                 <label className="text-sm text-gray-600">
-                  identical lots (#{nextLotNumber}&ndash;#
-                  {nextLotNumber + rangeCount - 1})
+                  identical lots
+                  {rangeCount && Number(rangeCount) >= 2 && (
+                    <> (#{nextLotNumber}&ndash;#{nextLotNumber + Number(rangeCount) - 1})</>
+                  )}
                 </label>
               </div>
             )}
