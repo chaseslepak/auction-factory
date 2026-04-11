@@ -108,7 +108,7 @@ export default function AuctionDetailPage() {
     // Refresh lots state
     await fetchData();
 
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 2;
     const batches: string[][] = [];
     for (let i = 0; i < uploaded.length; i += BATCH_SIZE) {
       batches.push(uploaded.slice(i, i + BATCH_SIZE).map((l) => l.id));
@@ -302,7 +302,7 @@ export default function AuctionDetailPage() {
     setUploadMsg(null);
     setUploadProgress({ current: 0, total: failedLots.length });
 
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 2;
     const batches: string[][] = [];
     for (let i = 0; i < failedLots.length; i += BATCH_SIZE) {
       batches.push(failedLots.slice(i, i + BATCH_SIZE).map((l) => l.id));
@@ -362,7 +362,7 @@ export default function AuctionDetailPage() {
     setUploadMsg(null);
     setUploadProgress({ current: 0, total: unuploaded.length });
 
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 2;
     const batches: string[][] = [];
     for (let i = 0; i < unuploaded.length; i += BATCH_SIZE) {
       batches.push(unuploaded.slice(i, i + BATCH_SIZE).map((l) => l.id));

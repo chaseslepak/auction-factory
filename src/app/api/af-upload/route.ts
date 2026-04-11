@@ -108,17 +108,25 @@ async function uploadLotToAF(
       addField('exit', 'Save & Exit');
     }
 
-    // Download and attach photos as binary parts
+    // Download and attach photos as binary parts (with timeout per photo)
     const photoParts: { name: string; filename: string; data: Buffer; contentType: string }[] = [];
     for (let i = 0; i < photos.length; i++) {
-      const photoRes = await fetch(photos[i].url);
-      const arrayBuf = await photoRes.arrayBuffer();
-      photoParts.push({
-        name: 'file[]',
-        filename: `photo_${i}.jpg`,
-        data: Buffer.from(arrayBuf),
-        contentType: 'image/jpeg',
-      });
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s per photo
+        const photoRes = await fetch(photos[i].url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!photoRes.ok) continue;
+        const arrayBuf = await photoRes.arrayBuffer();
+        photoParts.push({
+          name: 'file[]',
+          filename: `photo_${i}.jpg`,
+          data: Buffer.from(arrayBuf),
+          contentType: 'image/jpeg',
+        });
+      } catch {
+        // Photo download failed — continue with the rest
+      }
     }
 
     // Build the final multipart body with binary photo data
@@ -159,8 +167,10 @@ async function uploadLotToAF(
       offset += part.length;
     }
 
-    // POST to AF add_item form (same URL as GET)
+    // POST to AF add_item form (same URL as GET) with 20s timeout
     const url = `${AF_BASE}/add_item_2new.php?auction=${afAuctionId}`;
+    const postController = new AbortController();
+    const postTimeoutId = setTimeout(() => postController.abort(), 20000);
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -169,7 +179,9 @@ async function uploadLotToAF(
       },
       body: fullBody,
       redirect: 'follow',
+      signal: postController.signal,
     });
+    clearTimeout(postTimeoutId);
 
     // Get response details for debugging
     const html = await res.text();
@@ -288,6 +300,7 @@ export async function POST(request: NextRequest) {
     const lot = lots[i];
     const isLast = i === lots.length - 1;
 
+    try {
     // Get public URLs for photos, sorted by display_order (stock image = 0, first)
     const photos = (lot.lot_photos || [])
       .slice()
@@ -377,6 +390,23 @@ export async function POST(request: NextRequest) {
           .in('id', remaining);
       }
       break;
+    }
+    } catch (lotErr: any) {
+      // Any exception for this specific lot — mark as failed and continue with next
+      console.error('Lot upload error:', lotErr?.message, 'lot:', lot.id);
+      await supabase
+        .from('lots')
+        .update({
+          af_upload_status: 'failed',
+          af_upload_error: lotErr?.message || 'Unknown error',
+        })
+        .eq('id', lot.id);
+      results.push({
+        lot_id: lot.id,
+        lot_number: lot.lot_number,
+        success: false,
+        error: lotErr?.message || 'Unknown error',
+      });
     }
   }
 
