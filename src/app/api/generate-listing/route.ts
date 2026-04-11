@@ -7,10 +7,11 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 interface StockCandidate {
   imageUrl: string;
   title: string;
-  source: 'webstaurant' | 'katom';
+  price: number;
+  source: 'webstaurant';
 }
 
-// Extract multiple product candidates (image + title) from search results
+// Extract WebstaurantStore product data from their embedded JSON
 async function searchStockImages(
   brand: string,
   model: string
@@ -18,41 +19,49 @@ async function searchStockImages(
   const candidates: StockCandidate[] = [];
   const query = `${brand} ${model}`.trim();
 
-  // WebstaurantStore
   try {
     const url = `https://www.webstaurantstore.com/search/${encodeURIComponent(query)}.html`;
     const res = await fetch(url, { headers: { 'User-Agent': UA } });
     const html = await res.text();
 
-    // Extract product cards: each card has alt text (title) + src (image)
-    const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(\/images\/products\/[^"]+\.(jpg|png|webp))"/gi;
-    let match;
-    while ((match = cardRegex.exec(html)) !== null && candidates.length < 6) {
-      candidates.push({
-        title: match[1],
-        imageUrl: `https://www.webstaurantstore.com${match[2]}`,
-        source: 'webstaurant',
-      });
+    // WebstaurantStore embeds search results as JSON in a script tag
+    const jsonMatch = html.match(/data-hypernova-key="SearchPage"[^>]*><!--([\s\S]*?)--><\/script>/);
+    if (jsonMatch) {
+      try {
+        const data = JSON.parse(jsonMatch[1]);
+        const products = data.products || [];
+        for (const product of products.slice(0, 8)) {
+          const price = Number(product.price?.price) || 0;
+          const title = product.description || product.alt || '';
+          const imagePath = product.primaryImagePath || '';
+          if (title && imagePath && price > 0) {
+            candidates.push({
+              title,
+              imageUrl: imagePath.startsWith('http')
+                ? imagePath
+                : `https://www.webstaurantstore.com${imagePath}`,
+              price,
+              source: 'webstaurant',
+            });
+          }
+        }
+      } catch {}
     }
-  } catch {}
 
-  // KaTom as fallback
-  if (candidates.length === 0) {
-    try {
-      const url = `https://www.katom.com/search.html?w=${encodeURIComponent(query)}`;
-      const res = await fetch(url, { headers: { 'User-Agent': UA } });
-      const html = await res.text();
-      const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(https:\/\/[^"]*katom[^"]*\.(jpg|png|webp))"/gi;
+    // Fallback: regex extraction if JSON parsing fails
+    if (candidates.length === 0) {
+      const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(\/images\/products\/[^"]+\.(jpg|png|webp))"/gi;
       let match;
       while ((match = cardRegex.exec(html)) !== null && candidates.length < 6) {
         candidates.push({
           title: match[1],
-          imageUrl: match[2],
-          source: 'katom',
+          imageUrl: `https://www.webstaurantstore.com${match[2]}`,
+          price: 0,
+          source: 'webstaurant',
         });
       }
-    } catch {}
-  }
+    }
+  } catch {}
 
   return candidates;
 }
@@ -64,55 +73,49 @@ async function findAndVerifyStockImage(
   model: string,
   itemName: string,
   userImages: string[]
-): Promise<string | null> {
+): Promise<{ imageUrl: string; price: number } | null> {
   // Step 1: Search for candidates
   const candidates = await searchStockImages(brand, model);
   if (candidates.length === 0) return null;
 
-  // Step 2: Pre-filter by model number in title (case insensitive, strip spaces/dashes)
+  // Step 2: Pre-filter by model number in title (strip spaces/dashes)
   const modelNormalized = model.replace(/[\s\-_]/g, '').toLowerCase();
   const filtered = candidates.filter((c) => {
     const titleNormalized = c.title.replace(/[\s\-_]/g, '').toLowerCase();
     return titleNormalized.includes(modelNormalized);
   });
 
-  // Use filtered if any match, otherwise try all candidates
   const toVerify = filtered.length > 0 ? filtered : candidates;
 
-  // Step 3: If only 1 candidate and it matches model in title, use it directly
+  // Step 3: If only 1 exact match, use it directly
   if (filtered.length === 1) {
-    return filtered[0].imageUrl;
+    return { imageUrl: filtered[0].imageUrl, price: filtered[0].price };
   }
 
-  // Step 4: Download candidate images and use Claude vision to verify
   if (toVerify.length === 0) return null;
 
   try {
-    // Download all candidate images as base64
-    const candidateImages: { url: string; title: string; base64: string }[] = [];
+    // Download candidate images
+    const candidateData: { url: string; title: string; price: number; base64: string }[] = [];
     for (const c of toVerify.slice(0, 4)) {
-      // Limit to 4 to save tokens
       try {
         const res = await fetch(c.imageUrl);
         if (!res.ok) continue;
         const buf = await res.arrayBuffer();
         const base64 = Buffer.from(buf).toString('base64');
-        candidateImages.push({ url: c.imageUrl, title: c.title, base64 });
+        candidateData.push({ url: c.imageUrl, title: c.title, price: c.price, base64 });
       } catch {}
     }
 
-    if (candidateImages.length === 0) return null;
-    if (candidateImages.length === 1 && filtered.length > 0) {
-      return candidateImages[0].url;
+    if (candidateData.length === 0) return null;
+    if (candidateData.length === 1) {
+      return { imageUrl: candidateData[0].url, price: candidateData[0].price };
     }
 
-    // Build verification request
+    // Use Claude vision to pick the best match
     const content: any[] = [];
-
-    // User's actual photos
     content.push({ type: 'text', text: `USER'S PHOTOS of the actual item (${itemName}):` });
     for (const img of userImages.slice(0, 3)) {
-      // Limit to 3 user photos
       content.push({
         type: 'image',
         source: {
@@ -123,19 +126,18 @@ async function findAndVerifyStockImage(
       });
     }
 
-    // Candidate stock images
     content.push({
       type: 'text',
-      text: `\nCANDIDATE STOCK IMAGES (numbered). Which one BEST matches the user's actual item? Respond with ONLY the number (1-${candidateImages.length}) or "NONE" if none match:`,
+      text: `\nCANDIDATE STOCK IMAGES (numbered). Which one BEST matches the user's actual item? Respond with ONLY the number (1-${candidateData.length}) or "NONE" if none match:`,
     });
-    for (let i = 0; i < candidateImages.length; i++) {
-      content.push({ type: 'text', text: `\n${i + 1}. ${candidateImages[i].title}` });
+    for (let i = 0; i < candidateData.length; i++) {
+      content.push({ type: 'text', text: `\n${i + 1}. ${candidateData[i].title}` });
       content.push({
         type: 'image',
         source: {
           type: 'base64',
           media_type: 'image/jpeg',
-          data: candidateImages[i].base64,
+          data: candidateData[i].base64,
         },
       });
     }
@@ -150,11 +152,10 @@ async function findAndVerifyStockImage(
     const numMatch = text.match(/(\d+)/);
     if (numMatch) {
       const idx = parseInt(numMatch[1]) - 1;
-      if (idx >= 0 && idx < candidateImages.length) {
-        return candidateImages[idx].url;
+      if (idx >= 0 && idx < candidateData.length) {
+        return { imageUrl: candidateData[idx].url, price: candidateData[idx].price };
       }
     }
-    // If Claude said NONE or invalid response, reject
     return null;
   } catch {
     return null;
@@ -280,7 +281,7 @@ export async function POST(request: NextRequest) {
     if (notes) contextText += `\n- Staff notes: ${notes}`;
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-opus-4-6',
       max_tokens: 2000,
       messages: [
         {
@@ -307,11 +308,7 @@ export async function POST(request: NextRequest) {
 
     const listing = JSON.parse(jsonMatch[0]);
 
-    // Compute listed price (retail + 10%)
-    const retailNew = Number(listing.estimated_retail_new) || 0;
-    listing.listed_price = Math.round(retailNew * 1.10);
-
-    // Search for stock image when we have a known brand+model
+    // Search for stock image AND real retail price from WebstaurantStore
     const hasBrand = listing.brand && listing.brand !== 'Unknown' && listing.brand.trim() !== '';
     const hasModel = listing.model && listing.model !== 'Unknown' && listing.model.trim() !== '';
 
@@ -321,10 +318,22 @@ export async function POST(request: NextRequest) {
         listing.brand,
         listing.model,
         listing.item_name,
-        images // user's actual photos for verification
+        images
       );
-      if (found) listing.stock_image_url = found;
+      if (found) {
+        listing.stock_image_url = found.imageUrl;
+        // Use the real price from WebstaurantStore if we found one
+        // (and it's higher than the AI estimate, per the "highest available" rule)
+        if (found.price > 0) {
+          const aiEstimate = Number(listing.estimated_retail_new) || 0;
+          listing.estimated_retail_new = Math.max(aiEstimate, Math.round(found.price));
+        }
+      }
     }
+
+    // Compute listed price (retail + 10%) — AFTER potential price update
+    const retailNew = Number(listing.estimated_retail_new) || 0;
+    listing.listed_price = Math.round(retailNew * 1.10);
 
     // Ensure stock_image_url exists in response
     if (!listing.stock_image_url) {

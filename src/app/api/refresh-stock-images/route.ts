@@ -9,39 +9,40 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 interface StockCandidate {
   imageUrl: string;
   title: string;
+  price: number;
 }
 
 async function searchCandidates(query: string): Promise<StockCandidate[]> {
   const candidates: StockCandidate[] = [];
 
-  // WebstaurantStore
   try {
     const url = `https://www.webstaurantstore.com/search/${encodeURIComponent(query)}.html`;
     const res = await fetch(url, { headers: { 'User-Agent': UA } });
     const html = await res.text();
-    const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(\/images\/products\/[^"]+\.(jpg|png|webp))"/gi;
-    let match;
-    while ((match = cardRegex.exec(html)) !== null && candidates.length < 6) {
-      candidates.push({
-        title: match[1],
-        imageUrl: `https://www.webstaurantstore.com${match[2]}`,
-      });
+
+    // Parse embedded JSON from SearchPage hypernova script
+    const jsonMatch = html.match(/data-hypernova-key="SearchPage"[^>]*><!--([\s\S]*?)--><\/script>/);
+    if (jsonMatch) {
+      try {
+        const data = JSON.parse(jsonMatch[1]);
+        const products = data.products || [];
+        for (const product of products.slice(0, 8)) {
+          const price = Number(product.price?.price) || 0;
+          const title = product.description || product.alt || '';
+          const imagePath = product.primaryImagePath || '';
+          if (title && imagePath && price > 0) {
+            candidates.push({
+              title,
+              imageUrl: imagePath.startsWith('http')
+                ? imagePath
+                : `https://www.webstaurantstore.com${imagePath}`,
+              price,
+            });
+          }
+        }
+      } catch {}
     }
   } catch {}
-
-  // KaTom fallback
-  if (candidates.length === 0) {
-    try {
-      const url = `https://www.katom.com/search.html?w=${encodeURIComponent(query)}`;
-      const res = await fetch(url, { headers: { 'User-Agent': UA } });
-      const html = await res.text();
-      const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(https:\/\/[^"]*katom[^"]*\.(jpg|png|webp))"/gi;
-      let match;
-      while ((match = cardRegex.exec(html)) !== null && candidates.length < 6) {
-        candidates.push({ title: match[1], imageUrl: match[2] });
-      }
-    } catch {}
-  }
 
   return candidates;
 }
@@ -52,10 +53,9 @@ async function findAndVerifyStockImage(
   model: string,
   itemName: string,
   userPhotoUrls: string[]
-): Promise<string | null> {
+): Promise<{ imageUrl: string; price: number } | null> {
   if (!brand && !model) return null;
 
-  // Try multiple search queries
   const queries = [
     `${brand} ${model}`.trim(),
     model?.trim(),
@@ -70,7 +70,6 @@ async function findAndVerifyStockImage(
 
   if (candidates.length === 0) return null;
 
-  // Pre-filter by model number in title
   const modelNormalized = (model || '').replace(/[\s\-_]/g, '').toLowerCase();
   const filtered = modelNormalized
     ? candidates.filter((c) => c.title.replace(/[\s\-_]/g, '').toLowerCase().includes(modelNormalized))
@@ -78,10 +77,11 @@ async function findAndVerifyStockImage(
 
   const toVerify = filtered.length > 0 ? filtered : candidates;
 
-  // If only 1 filtered match and model is in title, use it directly (high confidence)
-  if (filtered.length === 1) return filtered[0].imageUrl;
+  if (filtered.length === 1) {
+    return { imageUrl: filtered[0].imageUrl, price: filtered[0].price };
+  }
 
-  // Download user's photos as base64
+  // Download user's photos
   const userImagesB64: string[] = [];
   for (const photoUrl of userPhotoUrls.slice(0, 3)) {
     try {
@@ -94,18 +94,24 @@ async function findAndVerifyStockImage(
   }
 
   if (userImagesB64.length === 0) {
-    // No user photos to compare against — only use if exact model match
-    return filtered.length > 0 ? filtered[0].imageUrl : null;
+    return filtered.length > 0
+      ? { imageUrl: filtered[0].imageUrl, price: filtered[0].price }
+      : null;
   }
 
   // Download candidate images
-  const candidateData: { url: string; title: string; base64: string }[] = [];
+  const candidateData: { url: string; title: string; price: number; base64: string }[] = [];
   for (const c of toVerify.slice(0, 4)) {
     try {
       const res = await fetch(c.imageUrl);
       if (!res.ok) continue;
       const buf = await res.arrayBuffer();
-      candidateData.push({ url: c.imageUrl, title: c.title, base64: Buffer.from(buf).toString('base64') });
+      candidateData.push({
+        url: c.imageUrl,
+        title: c.title,
+        price: c.price,
+        base64: Buffer.from(buf).toString('base64'),
+      });
     } catch {}
   }
 
@@ -144,7 +150,7 @@ async function findAndVerifyStockImage(
     if (numMatch) {
       const idx = parseInt(numMatch[1]) - 1;
       if (idx >= 0 && idx < candidateData.length) {
-        return candidateData[idx].url;
+        return { imageUrl: candidateData[idx].url, price: candidateData[idx].price };
       }
     }
     return null;
@@ -225,7 +231,7 @@ export async function POST(request: NextRequest) {
           supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl
         );
 
-      const imageUrl = await findAndVerifyStockImage(
+      const found = await findAndVerifyStockImage(
         anthropic,
         lot.brand || '',
         lot.model || '',
@@ -233,9 +239,9 @@ export async function POST(request: NextRequest) {
         userPhotoUrls
       );
 
-      if (imageUrl) {
+      if (found) {
         // Download the stock image
-        const imgRes = await fetch(imageUrl);
+        const imgRes = await fetch(found.imageUrl);
         if (!imgRes.ok) {
           results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
           continue;
@@ -268,6 +274,23 @@ export async function POST(request: NextRequest) {
             storage_path: storagePath,
             display_order: 0,
           });
+
+          // Update retail pricing if the WebstaurantStore price is higher
+          if (found.price > 0) {
+            const currentRetail = Number(lot.estimated_retail_new) || 0;
+            if (found.price > currentRetail) {
+              const newRetail = Math.round(found.price);
+              const newListed = Math.round(newRetail * 1.10);
+              await supabase
+                .from('lots')
+                .update({
+                  estimated_retail_new: newRetail,
+                  listed_price: newListed,
+                })
+                .eq('id', lot.id);
+            }
+          }
+
           updated++;
           results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: true });
         } else {
