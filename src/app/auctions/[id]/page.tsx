@@ -674,13 +674,19 @@ export default function AuctionDetailPage() {
               >
                 {refreshing ? 'Searching for stock images...' : 'Find Stock Images'}
               </button>
+              <Link
+                href={`/auctions/${id}/browser-upload`}
+                className="w-full block text-center py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide"
+              >
+                🌐 Browser Upload (recommended)
+              </Link>
               <div className="flex gap-2">
                 <button
                   onClick={handleUploadToAf}
                   disabled={uploading}
                   className="flex-1 py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
                 >
-                  {uploading ? 'Uploading...' : 'Upload to AF'}
+                  {uploading ? 'Uploading...' : 'Server Upload (fallback)'}
                 </button>
                 <button
                   onClick={async () => {
