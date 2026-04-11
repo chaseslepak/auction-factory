@@ -5,6 +5,9 @@ import { processStockImageJob } from '@/lib/stock-image-processor';
 
 export const maxDuration = 60;
 
+// Process only N jobs per invocation to avoid timeouts
+const MAX_JOBS_PER_INVOCATION = 1;
+
 // This endpoint processes pending jobs from the queue.
 // Can be called by:
 // 1. The enqueue endpoint (to start processing)
@@ -41,8 +44,8 @@ export async function POST(request: NextRequest) {
       .eq('status', 'processing')
       .lt('started_at', twoMinutesAgo);
 
-    // Process jobs one at a time until we run out of time
-    while (Date.now() - startTime < TIME_LIMIT) {
+    // Process up to MAX_JOBS_PER_INVOCATION jobs per call
+    while (processed < MAX_JOBS_PER_INVOCATION && Date.now() - startTime < TIME_LIMIT) {
       // Claim the next pending job
       const { data: pendingJobs } = await supabase
         .from('jobs')
