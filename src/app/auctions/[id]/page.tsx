@@ -108,7 +108,7 @@ export default function AuctionDetailPage() {
     // Refresh lots state
     await fetchData();
 
-    const BATCH_SIZE = 2;
+    const BATCH_SIZE = 1;
     const batches: string[][] = [];
     for (let i = 0; i < uploaded.length; i += BATCH_SIZE) {
       batches.push(uploaded.slice(i, i + BATCH_SIZE).map((l) => l.id));
@@ -276,7 +276,10 @@ export default function AuctionDetailPage() {
   }, [id]);
 
   const handleRetryFailed = async () => {
-    const failedLots = lots.filter((l: any) => l.af_upload_status === 'failed');
+    const failedLots = lots
+      .filter((l: any) => l.af_upload_status === 'failed')
+      .slice()
+      .sort((a, b) => a.lot_number - b.lot_number);
     if (failedLots.length === 0) {
       setUploadMsg({ type: 'error', text: 'No failed lots to retry.' });
       return;
@@ -302,7 +305,7 @@ export default function AuctionDetailPage() {
     setUploadMsg(null);
     setUploadProgress({ current: 0, total: failedLots.length });
 
-    const BATCH_SIZE = 2;
+    const BATCH_SIZE = 1;
     const batches: string[][] = [];
     for (let i = 0; i < failedLots.length; i += BATCH_SIZE) {
       batches.push(failedLots.slice(i, i + BATCH_SIZE).map((l) => l.id));
@@ -349,9 +352,11 @@ export default function AuctionDetailPage() {
   };
 
   const handleUploadToAf = async () => {
-    const unuploaded = lots.filter(
-      (l) => l.af_upload_status !== 'uploaded'
-    );
+    // Sort by lot_number to guarantee upload order (this is critical!)
+    const unuploaded = lots
+      .filter((l) => l.af_upload_status !== 'uploaded')
+      .slice()
+      .sort((a, b) => a.lot_number - b.lot_number);
     if (unuploaded.length === 0) {
       setUploadMsg({ type: 'error', text: 'All lots already uploaded.' });
       return;
@@ -362,7 +367,7 @@ export default function AuctionDetailPage() {
     setUploadMsg(null);
     setUploadProgress({ current: 0, total: unuploaded.length });
 
-    const BATCH_SIZE = 2;
+    const BATCH_SIZE = 1;
     const batches: string[][] = [];
     for (let i = 0; i < unuploaded.length; i += BATCH_SIZE) {
       batches.push(unuploaded.slice(i, i + BATCH_SIZE).map((l) => l.id));
