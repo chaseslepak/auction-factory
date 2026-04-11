@@ -172,9 +172,7 @@ export default function AuctionDetailPage() {
       } else {
         setUploadMsg({
           type: data.updated > 0 ? 'success' : 'error',
-          text: data.updated > 0
-            ? `Added stock images to ${data.updated} lot(s)`
-            : data.message || `Scanned ${data.candidates}, none found`,
+          text: data.message || `${data.updated} updated, ${data.notFound} not found`,
         });
         fetchData();
       }

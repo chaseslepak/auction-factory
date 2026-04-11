@@ -5,8 +5,14 @@ export const maxDuration = 60;
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-async function findStockImage(brand: string, model: string): Promise<string | null> {
-  const queries = [`${brand} ${model}`.trim(), model.trim()];
+async function findStockImage(brand: string, model: string, itemName: string): Promise<string | null> {
+  const queries = [
+    `${brand} ${model}`.trim(),
+    model?.trim(),
+    `${brand} ${itemName}`.trim(),
+    brand?.trim(),
+    itemName?.trim(),
+  ].filter((q) => q && q.length > 2);
 
   for (const query of queries) {
     // Try WebstaurantStore
@@ -44,7 +50,8 @@ export async function POST(request: NextRequest) {
   // Get lots that don't have a stock image yet
   let query = supabase
     .from('lots')
-    .select('*, lot_photos(*)');
+    .select('*, lot_photos(*)')
+    .limit(1000);
 
   if (lot_ids?.length) {
     query = query.in('id', lot_ids);
@@ -60,21 +67,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error?.message || 'No lots found' }, { status: 404 });
   }
 
-  // Filter to lots with brand+model but no stock image
+  // Filter to lots with at least brand OR model — removed stock image exclusion
   const candidates = lots.filter((lot: any) => {
     const hasBrand = lot.brand && lot.brand !== 'Unknown' && lot.brand.trim() !== '';
     const hasModel = lot.model && lot.model !== 'Unknown' && lot.model.trim() !== '';
-    const hasStockImage = (lot.lot_photos || []).some((p: any) =>
-      p.storage_path.includes('/stock_')
-    );
-    return hasBrand && hasModel && !hasStockImage;
+    return hasBrand || hasModel;
   });
+
+  // Count skip reasons
+  const skipped = {
+    noBrandOrModel: lots.length - candidates.length,
+  };
 
   if (candidates.length === 0) {
     return NextResponse.json({
-      scanned: lots.length,
+      totalLots: lots.length,
+      candidates: 0,
       updated: 0,
-      message: 'No eligible lots found (need brand+model and no existing stock image)',
+      skipped,
+      message: `0 of ${lots.length} lots have a brand or model. AI couldn't identify them.`,
     });
   }
 
@@ -83,7 +94,7 @@ export async function POST(request: NextRequest) {
 
   for (const lot of candidates) {
     try {
-      const imageUrl = await findStockImage(lot.brand, lot.model);
+      const imageUrl = await findStockImage(lot.brand || '', lot.model || '', lot.item_name || '');
 
       if (imageUrl) {
         // Download the stock image
@@ -133,10 +144,14 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const notFoundCount = results.filter((r) => !r.found).length;
   return NextResponse.json({
-    scanned: lots.length,
+    totalLots: lots.length,
     candidates: candidates.length,
     updated,
+    notFound: notFoundCount,
+    skipped,
     results,
+    message: `${updated} updated out of ${candidates.length} searched (${lots.length} total lots, ${skipped.noBrandOrModel} skipped — no brand/model)`,
   });
 }
