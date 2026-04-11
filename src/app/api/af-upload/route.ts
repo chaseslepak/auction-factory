@@ -284,11 +284,14 @@ export async function POST(request: NextRequest) {
     const lot = lots[i];
     const isLast = i === lots.length - 1;
 
-    // Get public URLs for photos
-    const photos = (lot.lot_photos || []).map((p: any) => ({
-      url: supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl,
-      storage_path: p.storage_path,
-    }));
+    // Get public URLs for photos, sorted by display_order (stock image = 0, first)
+    const photos = (lot.lot_photos || [])
+      .slice()
+      .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0))
+      .map((p: any) => ({
+        url: supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl,
+        storage_path: p.storage_path,
+      }));
 
     const result = await uploadLotToAF(
       lot,
