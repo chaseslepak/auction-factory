@@ -2,6 +2,165 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
 
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+interface StockCandidate {
+  imageUrl: string;
+  title: string;
+  source: 'webstaurant' | 'katom';
+}
+
+// Extract multiple product candidates (image + title) from search results
+async function searchStockImages(
+  brand: string,
+  model: string
+): Promise<StockCandidate[]> {
+  const candidates: StockCandidate[] = [];
+  const query = `${brand} ${model}`.trim();
+
+  // WebstaurantStore
+  try {
+    const url = `https://www.webstaurantstore.com/search/${encodeURIComponent(query)}.html`;
+    const res = await fetch(url, { headers: { 'User-Agent': UA } });
+    const html = await res.text();
+
+    // Extract product cards: each card has alt text (title) + src (image)
+    const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(\/images\/products\/[^"]+\.(jpg|png|webp))"/gi;
+    let match;
+    while ((match = cardRegex.exec(html)) !== null && candidates.length < 6) {
+      candidates.push({
+        title: match[1],
+        imageUrl: `https://www.webstaurantstore.com${match[2]}`,
+        source: 'webstaurant',
+      });
+    }
+  } catch {}
+
+  // KaTom as fallback
+  if (candidates.length === 0) {
+    try {
+      const url = `https://www.katom.com/search.html?w=${encodeURIComponent(query)}`;
+      const res = await fetch(url, { headers: { 'User-Agent': UA } });
+      const html = await res.text();
+      const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(https:\/\/[^"]*katom[^"]*\.(jpg|png|webp))"/gi;
+      let match;
+      while ((match = cardRegex.exec(html)) !== null && candidates.length < 6) {
+        candidates.push({
+          title: match[1],
+          imageUrl: match[2],
+          source: 'katom',
+        });
+      }
+    } catch {}
+  }
+
+  return candidates;
+}
+
+// Use Claude vision to verify which candidate matches the user's photos
+async function findAndVerifyStockImage(
+  anthropic: Anthropic,
+  brand: string,
+  model: string,
+  itemName: string,
+  userImages: string[]
+): Promise<string | null> {
+  // Step 1: Search for candidates
+  const candidates = await searchStockImages(brand, model);
+  if (candidates.length === 0) return null;
+
+  // Step 2: Pre-filter by model number in title (case insensitive, strip spaces/dashes)
+  const modelNormalized = model.replace(/[\s\-_]/g, '').toLowerCase();
+  const filtered = candidates.filter((c) => {
+    const titleNormalized = c.title.replace(/[\s\-_]/g, '').toLowerCase();
+    return titleNormalized.includes(modelNormalized);
+  });
+
+  // Use filtered if any match, otherwise try all candidates
+  const toVerify = filtered.length > 0 ? filtered : candidates;
+
+  // Step 3: If only 1 candidate and it matches model in title, use it directly
+  if (filtered.length === 1) {
+    return filtered[0].imageUrl;
+  }
+
+  // Step 4: Download candidate images and use Claude vision to verify
+  if (toVerify.length === 0) return null;
+
+  try {
+    // Download all candidate images as base64
+    const candidateImages: { url: string; title: string; base64: string }[] = [];
+    for (const c of toVerify.slice(0, 4)) {
+      // Limit to 4 to save tokens
+      try {
+        const res = await fetch(c.imageUrl);
+        if (!res.ok) continue;
+        const buf = await res.arrayBuffer();
+        const base64 = Buffer.from(buf).toString('base64');
+        candidateImages.push({ url: c.imageUrl, title: c.title, base64 });
+      } catch {}
+    }
+
+    if (candidateImages.length === 0) return null;
+    if (candidateImages.length === 1 && filtered.length > 0) {
+      return candidateImages[0].url;
+    }
+
+    // Build verification request
+    const content: any[] = [];
+
+    // User's actual photos
+    content.push({ type: 'text', text: `USER'S PHOTOS of the actual item (${itemName}):` });
+    for (const img of userImages.slice(0, 3)) {
+      // Limit to 3 user photos
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: img.replace(/^data:image\/\w+;base64,/, ''),
+        },
+      });
+    }
+
+    // Candidate stock images
+    content.push({
+      type: 'text',
+      text: `\nCANDIDATE STOCK IMAGES (numbered). Which one BEST matches the user's actual item? Respond with ONLY the number (1-${candidateImages.length}) or "NONE" if none match:`,
+    });
+    for (let i = 0; i < candidateImages.length; i++) {
+      content.push({ type: 'text', text: `\n${i + 1}. ${candidateImages[i].title}` });
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: candidateImages[i].base64,
+        },
+      });
+    }
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 20,
+      messages: [{ role: 'user', content }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+    const numMatch = text.match(/(\d+)/);
+    if (numMatch) {
+      const idx = parseInt(numMatch[1]) - 1;
+      if (idx >= 0 && idx < candidateImages.length) {
+        return candidateImages[idx].url;
+      }
+    }
+    // If Claude said NONE or invalid response, reject
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const SYSTEM_PROMPT = `You are a restaurant equipment identification expert for Auction Factory Ohio in Cleveland, OH.
 
 CAREFULLY EXAMINE every photo provided. Look for:
@@ -153,46 +312,18 @@ export async function POST(request: NextRequest) {
     listing.listed_price = Math.round(retailNew * 1.10);
 
     // Search for stock image when we have a known brand+model
-    // (Relaxed criteria: any condition, any confidence, as long as brand+model are known)
     const hasBrand = listing.brand && listing.brand !== 'Unknown' && listing.brand.trim() !== '';
     const hasModel = listing.model && listing.model !== 'Unknown' && listing.model.trim() !== '';
 
     if (hasBrand && hasModel) {
-      const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-      const searchQueries = [
-        `${listing.brand} ${listing.model}`.trim(),
-        listing.model.trim(), // Fallback: model number alone
-      ];
-
-      for (const searchQuery of searchQueries) {
-        if (listing.stock_image_url) break;
-
-        // Try WebstaurantStore first
-        try {
-          const searchUrl = `https://www.webstaurantstore.com/search/${encodeURIComponent(searchQuery)}.html`;
-          const searchRes = await fetch(searchUrl, { headers: { 'User-Agent': UA } });
-          const searchHtml = await searchRes.text();
-
-          // Look for product images (relative path format)
-          const imgMatch = searchHtml.match(/src="(\/images\/products\/[^"]+\.(jpg|png|webp))"/i);
-          if (imgMatch) {
-            listing.stock_image_url = `https://www.webstaurantstore.com${imgMatch[1]}`;
-            break;
-          }
-        } catch {}
-
-        // Try KaTom
-        try {
-          const katomUrl = `https://www.katom.com/search.html?w=${encodeURIComponent(searchQuery)}`;
-          const katomRes = await fetch(katomUrl, { headers: { 'User-Agent': UA } });
-          const katomHtml = await katomRes.text();
-          const katomImg = katomHtml.match(/src="(https:\/\/[^"]*katom[^"]*\.(jpg|png|webp))"/i);
-          if (katomImg) {
-            listing.stock_image_url = katomImg[1];
-            break;
-          }
-        } catch {}
-      }
+      const found = await findAndVerifyStockImage(
+        anthropic,
+        listing.brand,
+        listing.model,
+        listing.item_name,
+        images // user's actual photos for verification
+      );
+      if (found) listing.stock_image_url = found;
     }
 
     // Ensure stock_image_url exists in response
