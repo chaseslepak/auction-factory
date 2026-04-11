@@ -700,6 +700,34 @@ export default function AuctionDetailPage() {
         </div>
       )}
 
+      {/* Auction Stats Summary */}
+      {lots.length > 0 && (
+        <div className="px-4 mb-3">
+          <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Total Value</p>
+              <p className="text-sm font-black text-brand-green">
+                ${lots.reduce((sum, l) => sum + (Number(l.listed_price) || 0) * (l.quantity || 1), 0).toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Uploaded</p>
+              <p className="text-sm font-black text-brand-blue">
+                {lots.filter((l: any) => l.af_upload_status === 'uploaded').length}/{lots.length}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Avg Price</p>
+              <p className="text-sm font-black text-brand-navy">
+                ${Math.round(
+                  lots.reduce((sum, l) => sum + (Number(l.listed_price) || 0), 0) / lots.length
+                ).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="p-4 space-y-3">
         {filteredLots.length === 0 ? (
           <p className="text-center text-gray-400 py-12">

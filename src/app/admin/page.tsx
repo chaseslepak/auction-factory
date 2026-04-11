@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 
 const sections = [
@@ -12,11 +14,63 @@ const sections = [
 ];
 
 export default function AdminPage() {
+  const [jobStats, setJobStats] = useState<{ pending: number; processing: number; completed: number; failed: number } | null>(null);
+  const supabase = createClient();
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      const { data } = await supabase.from('jobs').select('status');
+      if (data) {
+        setJobStats({
+          pending: data.filter((j) => j.status === 'pending').length,
+          processing: data.filter((j) => j.status === 'processing').length,
+          completed: data.filter((j) => j.status === 'completed').length,
+          failed: data.filter((j) => j.status === 'failed').length,
+        });
+      }
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="min-h-screen bg-brand-bg">
       <Header title="Admin" backHref="/auctions" />
 
       <div className="p-4 space-y-3">
+        {jobStats && (jobStats.pending > 0 || jobStats.processing > 0) && (
+          <div className="bg-brand-blue/5 border border-brand-blue/20 rounded-xl p-4">
+            <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-2">
+              Background Jobs
+            </h3>
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <div>
+                <p className="text-xs text-gray-400">Pending</p>
+                <p className="font-black text-brand-navy">{jobStats.pending}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Running</p>
+                <p className="font-black text-brand-blue">{jobStats.processing}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Done</p>
+                <p className="font-black text-brand-green">{jobStats.completed}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Failed</p>
+                <p className="font-black text-red-500">{jobStats.failed}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => fetch('/api/jobs/process', { method: 'POST' }).catch(() => {})}
+              className="mt-3 w-full text-xs font-bold text-brand-blue border border-brand-blue/30 rounded py-1"
+            >
+              Kick Processor
+            </button>
+          </div>
+        )}
+
         {sections.map((section) => (
           <Link
             key={section.href}
