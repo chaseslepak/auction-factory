@@ -169,7 +169,7 @@ export default function AuctionDetailPage() {
     let totalCandidates = 0;
     let offset = 0;
     let batchNum = 0;
-    const BATCH_SIZE = 2;
+    const BATCH_SIZE = 1;
 
     try {
       while (true) {
@@ -180,14 +180,17 @@ export default function AuctionDetailPage() {
           body: JSON.stringify({ auction_id: id, offset, batchSize: BATCH_SIZE }),
         });
 
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`Server error ${res.status}: ${errText.substring(0, 200)}`);
+        // Always read as text first, then try to parse
+        const responseText = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error(`Server returned non-JSON (status ${res.status}): ${responseText.substring(0, 150)}`);
         }
 
-        const data = await res.json();
-        if (data.error) {
-          throw new Error(data.error);
+        if (!res.ok || data.error) {
+          throw new Error(data.error || `Server error ${res.status}`);
         }
 
         totalUpdated += data.updated || 0;

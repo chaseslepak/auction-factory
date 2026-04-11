@@ -12,65 +12,60 @@ async function researchRetailPrice(
   itemName: string
 ): Promise<number> {
   try {
-    const response = await anthropic.messages.create({
+    // Timeout after 25 seconds to avoid blocking the whole request
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 25000)
+    );
+
+    const apiPromise = anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: 512,
       tools: [
         {
           type: 'web_search_20250305' as any,
           name: 'web_search',
-          max_uses: 3,
+          max_uses: 2,
         },
       ] as any,
       messages: [
         {
           role: 'user',
-          content: `Find the current retail price for this exact restaurant/commercial kitchen equipment from multiple retailers:
+          content: `Search the web for the current retail price of: ${brand} ${model} ${itemName}
 
-Brand: ${brand}
-Model: ${model}
-Item: ${itemName}
+Focus on US restaurant equipment retailers (WebstaurantStore, KaTom, Central Restaurant, CKitchen, etc).
 
-Search across WebstaurantStore, KaTom, Central Restaurant, CKitchen, Tundra Restaurant Supply, and other major US restaurant equipment retailers. Find at least 3-5 different retailer prices if possible.
+After searching, give me JUST the highest retail price you found as a single number with a dollar sign. For example: "$3,885" or "$1,234.50" — nothing else, no explanation.
 
-Return ONLY a JSON object with this format (no markdown, no explanation):
-{
-  "prices": [
-    { "retailer": "WebstaurantStore", "price": 1234 },
-    { "retailer": "KaTom", "price": 1299 }
-  ],
-  "highest": 1299
-}
-
-If you can't find real prices, return {"prices": [], "highest": 0}. Only include prices you can verify from actual search results — do not make up prices.`,
+If you can't find any real price, respond with just "$0".`,
         },
       ],
     });
 
+    const response = await Promise.race([apiPromise, timeoutPromise]);
+    if (!response) {
+      console.log('Web search timeout for:', brand, model);
+      return 0;
+    }
+
+    // Extract all text from content blocks
     let fullText = '';
-    for (const block of response.content) {
+    for (const block of (response as any).content || []) {
       if (block.type === 'text') {
-        fullText += block.text;
+        fullText += ' ' + block.text;
       }
     }
 
-    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return 0;
-
-    const data = JSON.parse(jsonMatch[0]);
-    const highest = Number(data.highest) || 0;
-
-    let maxFromArray = 0;
-    if (Array.isArray(data.prices)) {
-      for (const p of data.prices) {
-        const price = Number(p.price) || 0;
-        if (price > maxFromArray) maxFromArray = price;
-      }
+    // Extract all dollar amounts from the text
+    const priceMatches = fullText.match(/\$[\d,]+(?:\.\d{2})?/g) || [];
+    let maxPrice = 0;
+    for (const match of priceMatches) {
+      const num = Number(match.replace(/[$,]/g, ''));
+      if (num > maxPrice && num < 100000) maxPrice = num;
     }
 
-    return Math.max(highest, maxFromArray);
-  } catch (err) {
-    console.error('Web search pricing failed:', err);
+    return maxPrice;
+  } catch (err: any) {
+    console.error('Web search pricing failed:', err?.message || err);
     return 0;
   }
 }
