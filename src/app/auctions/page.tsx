@@ -68,8 +68,8 @@ export default function AuctionsPage() {
         >
           {showArchived ? `← Back to Active` : `View Archived (${archivedCount})`}
         </button>
-        <Link href="/settings" className="text-xs text-brand-blue font-medium">
-          Settings
+        <Link href="/admin" className="text-xs text-brand-blue font-medium">
+          Admin
         </Link>
       </div>
 

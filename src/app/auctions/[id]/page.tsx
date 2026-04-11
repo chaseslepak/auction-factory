@@ -419,6 +419,58 @@ export default function AuctionDetailPage() {
     fetchData();
   };
 
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkPriceMultiplier, setBulkPriceMultiplier] = useState('');
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [bulkCondition, setBulkCondition] = useState('');
+
+  const applyBulkEdit = async () => {
+    if (selectedLots.size === 0) return;
+    const updates: any = {};
+
+    if (bulkCategory.trim()) updates.category = bulkCategory.trim();
+    if (bulkCondition) updates.condition_rating = Number(bulkCondition);
+
+    if (bulkPriceMultiplier) {
+      const multi = Number(bulkPriceMultiplier);
+      if (!isNaN(multi) && multi > 0) {
+        // Apply multiplier per-lot (can't do in one query)
+        const lotsToUpdate = lots.filter((l) => selectedLots.has(l.id));
+        for (const lot of lotsToUpdate) {
+          const currentRetail = Number(lot.estimated_retail_new) || 0;
+          const newRetail = Math.round(currentRetail * multi);
+          const newListed = Math.round(newRetail * 1.10);
+          await supabase
+            .from('lots')
+            .update({
+              estimated_retail_new: newRetail,
+              listed_price: newListed,
+              ...updates,
+            })
+            .eq('id', lot.id);
+        }
+        setBulkEditOpen(false);
+        setSelectedLots(new Set());
+        setBulkMode(false);
+        setBulkPriceMultiplier('');
+        setBulkCategory('');
+        setBulkCondition('');
+        fetchData();
+        return;
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('lots').update(updates).in('id', Array.from(selectedLots));
+    }
+    setBulkEditOpen(false);
+    setSelectedLots(new Set());
+    setBulkMode(false);
+    setBulkCategory('');
+    setBulkCondition('');
+    fetchData();
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-brand-bg">
@@ -616,8 +668,14 @@ export default function AuctionDetailPage() {
             <div className="flex gap-2 items-center bg-brand-blue/5 rounded-lg p-2">
               <span className="text-xs font-bold text-brand-blue">{selectedLots.size} selected</span>
               <button
+                onClick={() => setBulkEditOpen(true)}
+                className="ml-auto px-3 py-1 rounded text-xs font-bold text-brand-blue border border-brand-blue/30"
+              >
+                Edit
+              </button>
+              <button
                 onClick={bulkDelete}
-                className="ml-auto px-3 py-1 rounded text-xs font-bold text-red-500 border border-red-300"
+                className="px-3 py-1 rounded text-xs font-bold text-red-500 border border-red-300"
               >
                 Delete
               </button>
@@ -750,6 +808,78 @@ export default function AuctionDetailPage() {
           ))
         )}
       </div>
+
+      {/* Bulk edit modal */}
+      {bulkEditOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end">
+          <div className="bg-white w-full rounded-t-2xl p-6 space-y-4">
+            <h2 className="font-black text-brand-navy text-sm tracking-[0.1em] uppercase">
+              Bulk Edit ({selectedLots.size} lots)
+            </h2>
+
+            <div>
+              <label className="text-xs font-medium text-gray-400 uppercase">
+                Price Multiplier (leave blank to skip)
+              </label>
+              <input
+                type="text"
+                value={bulkPriceMultiplier}
+                onChange={(e) => setBulkPriceMultiplier(e.target.value)}
+                placeholder="e.g. 1.1 for +10%, 0.9 for -10%"
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-brand-blue"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-400 uppercase">
+                Category (leave blank to skip)
+              </label>
+              <input
+                type="text"
+                value={bulkCategory}
+                onChange={(e) => setBulkCategory(e.target.value)}
+                placeholder="e.g. Refrigeration"
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-brand-blue"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-400 uppercase">
+                Condition (leave blank to skip)
+              </label>
+              <select
+                value={bulkCondition}
+                onChange={(e) => setBulkCondition(e.target.value)}
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm"
+              >
+                <option value="">Don&apos;t change</option>
+                <option value="10">10 - New in box</option>
+                <option value="9">9 - Like New</option>
+                <option value="8">8 - Excellent</option>
+                <option value="7">7 - Good</option>
+                <option value="6">6 - Average</option>
+                <option value="5">5 - Well used</option>
+                <option value="4">4 - Functions</option>
+                <option value="3">3 - Needs parts</option>
+                <option value="2">2 - Repairable</option>
+                <option value="1">1 - Broken</option>
+              </select>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setBulkEditOpen(false)}
+                className="flex-1 py-3 rounded-full border border-gray-200 font-bold text-gray-500 text-sm uppercase"
+              >
+                Cancel
+              </button>
+              <div className="flex-1">
+                <GradientButton onClick={applyBulkEdit}>Apply</GradientButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sticky new lot button */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-brand-bg via-brand-bg to-transparent pt-8">
