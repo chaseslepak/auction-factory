@@ -346,9 +346,34 @@ export async function POST(request: NextRequest) {
     contextText += `\n- Quantity: ${quantity}`;
     if (notes) contextText += `\n- Staff notes: ${notes}`;
 
+    // Use tool_use to force structured JSON output (eliminates parsing errors)
+    const listingTool = {
+      name: 'create_listing',
+      description: 'Create a structured auction listing for restaurant equipment',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          item_name: { type: 'string', description: 'Product name with brand and model (max 200 chars)' },
+          brand: { type: 'string' },
+          model: { type: 'string' },
+          category: { type: 'string' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+          estimated_retail_new: { type: 'number' },
+          width: { type: 'string' },
+          depth: { type: 'string' },
+          height: { type: 'string' },
+          key_features: { type: 'array', items: { type: 'string' } },
+          auction_description: { type: 'string', description: 'Full formatted listing with features and condition' },
+        },
+        required: ['item_name', 'brand', 'model', 'category', 'confidence', 'estimated_retail_new', 'key_features', 'auction_description'],
+      },
+    };
+
     const response = await anthropic.messages.create({
       model: 'claude-opus-4-6',
       max_tokens: 2000,
+      tools: [listingTool],
+      tool_choice: { type: 'tool', name: 'create_listing' },
       messages: [
         {
           role: 'user',
@@ -369,38 +394,20 @@ export async function POST(request: NextRequest) {
       output_tokens: response.usage?.output_tokens,
     });
 
-    // Extract JSON from response
-    const text =
-      response.content[0].type === 'text' ? response.content[0].text : '';
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-
-    if (!jsonMatch) {
-      return NextResponse.json(
-        { error: 'Failed to parse AI response' },
-        { status: 500 }
-      );
+    // Extract the tool_use block (guaranteed valid JSON)
+    let listing: any = null;
+    for (const block of response.content) {
+      if (block.type === 'tool_use' && block.name === 'create_listing') {
+        listing = block.input;
+        break;
+      }
     }
 
-    // Try to parse the JSON, with fallback recovery for common AI errors
-    let listing: any;
-    try {
-      listing = JSON.parse(jsonMatch[0]);
-    } catch (parseErr: any) {
-      // Common issue: unescaped newlines/quotes in string values
-      // Try to fix by escaping unescaped newlines inside string values
-      try {
-        const cleaned = jsonMatch[0]
-          // Replace literal newlines inside strings with \n
-          .replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (m) => m.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t'));
-        listing = JSON.parse(cleaned);
-      } catch {
-        // Second fallback: ask Claude to fix it
-        console.error('JSON parse failed:', parseErr.message, 'raw:', jsonMatch[0].substring(0, 500));
-        return NextResponse.json(
-          { error: `AI returned invalid JSON: ${parseErr.message}. Try regenerating the listing.` },
-          { status: 500 }
-        );
-      }
+    if (!listing) {
+      return NextResponse.json(
+        { error: 'AI did not return structured listing. Try regenerating.' },
+        { status: 500 }
+      );
     }
 
     // Search for stock image AND real retail price
