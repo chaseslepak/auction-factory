@@ -381,7 +381,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const listing = JSON.parse(jsonMatch[0]);
+    // Try to parse the JSON, with fallback recovery for common AI errors
+    let listing: any;
+    try {
+      listing = JSON.parse(jsonMatch[0]);
+    } catch (parseErr: any) {
+      // Common issue: unescaped newlines/quotes in string values
+      // Try to fix by escaping unescaped newlines inside string values
+      try {
+        const cleaned = jsonMatch[0]
+          // Replace literal newlines inside strings with \n
+          .replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (m) => m.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t'));
+        listing = JSON.parse(cleaned);
+      } catch {
+        // Second fallback: ask Claude to fix it
+        console.error('JSON parse failed:', parseErr.message, 'raw:', jsonMatch[0].substring(0, 500));
+        return NextResponse.json(
+          { error: `AI returned invalid JSON: ${parseErr.message}. Try regenerating the listing.` },
+          { status: 500 }
+        );
+      }
+    }
 
     // Search for stock image AND real retail price
     const hasBrand = listing.brand && listing.brand !== 'Unknown' && listing.brand.trim() !== '';
