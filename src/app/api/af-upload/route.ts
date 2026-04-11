@@ -20,10 +20,16 @@ const CONDITION_MAP: Record<number, string> = {
 
 const AF_BASE = 'https://www.auctionfactory.com/admin';
 
+const BROWSER_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 async function fetchWithCookie(url: string, cookie: string, options: RequestInit = {}) {
   return fetch(url, {
     ...options,
     headers: {
+      'User-Agent': BROWSER_UA,
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
       ...options.headers as Record<string, string>,
       Cookie: cookie,
     },
@@ -176,6 +182,11 @@ async function uploadLotToAF(
       headers: {
         Cookie: sessionCookie,
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'User-Agent': BROWSER_UA,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Referer: getUrl,
+        Origin: 'https://www.auctionfactory.com',
       },
       body: fullBody,
       redirect: 'follow',
@@ -309,6 +320,11 @@ export async function POST(request: NextRequest) {
   for (let i = 0; i < lots.length; i++) {
     const lot = lots[i];
     const isLast = i === lots.length - 1;
+
+    // Small delay between requests to avoid looking like a bot
+    if (i > 0) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
 
     try {
     // Get public URLs for photos, sorted by display_order (stock image = 0, first)
