@@ -350,5 +350,19 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Log activity for this upload batch
+  try {
+    const succeededIds = results.filter((r) => r.success).map((r) => r.lot_id);
+    if (succeededIds.length > 0) {
+      await supabase.from('activity_log').insert({
+        user_email: user.email || 'unknown',
+        action: 'uploaded_to_af',
+        entity_type: 'lot',
+        auction_id: auction_id,
+        details: { count: succeededIds.length, lot_ids: succeededIds.slice(0, 20) },
+      });
+    }
+  } catch {}
+
   return NextResponse.json({ results });
 }

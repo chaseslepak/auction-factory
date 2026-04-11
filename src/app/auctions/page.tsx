@@ -36,11 +36,33 @@ export default function AuctionsPage() {
     fetchAuctions();
   }, []);
 
+  const logActivity = async (action: string, entity_id?: string, auction_id?: string, details?: any) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.email) return;
+    await supabase.from('activity_log').insert({
+      user_email: user.email,
+      action,
+      entity_type: 'auction',
+      entity_id,
+      auction_id,
+      details: details || {},
+    });
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
 
-    await supabase.from('auctions').insert({ name: newName.trim() });
+    const { data } = await supabase
+      .from('auctions')
+      .insert({ name: newName.trim() })
+      .select()
+      .single();
+
+    if (data) {
+      logActivity('created', data.id, data.id, { name: newName.trim() });
+    }
+
     setNewName('');
     setShowForm(false);
     fetchAuctions();
@@ -51,6 +73,7 @@ export default function AuctionsPage() {
       .from('auctions')
       .update({ archived_at: isArchived ? null : new Date().toISOString() })
       .eq('id', auctionId);
+    logActivity(isArchived ? 'unarchived' : 'archived', auctionId, auctionId);
     fetchAuctions();
   };
 
