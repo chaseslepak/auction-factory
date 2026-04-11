@@ -8,6 +8,7 @@ import type { Auction, LotWithPhotos } from '@/lib/types';
 import Header from '@/components/Header';
 import GradientButton from '@/components/GradientButton';
 import ConfidenceChip from '@/components/ConfidenceChip';
+import ProgressBar from '@/components/ProgressBar';
 
 export default function AuctionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -17,6 +18,8 @@ export default function AuctionDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
+  const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
   const [afLinked, setAfLinked] = useState(false);
   const [showAfLink, setShowAfLink] = useState(false);
   const [afAuctionId, setAfAuctionId] = useState('');
@@ -157,9 +160,10 @@ export default function AuctionDetailPage() {
   };
 
   const handleRefreshStockImages = async () => {
-    if (!confirm('Search for stock images for all lots with known brand+model?')) return;
+    if (!confirm('Search for stock images and pricing for all lots with known brand+model?')) return;
     setRefreshing(true);
     setUploadMsg(null);
+    setRefreshProgress({ current: 0, total: 0 });
 
     let totalUpdated = 0;
     let totalCandidates = 0;
@@ -170,11 +174,6 @@ export default function AuctionDetailPage() {
     try {
       while (true) {
         batchNum++;
-        setUploadMsg({
-          type: 'success',
-          text: `Processing batch ${batchNum}... (${totalUpdated} updated so far)`,
-        });
-
         const res = await fetch('/api/refresh-stock-images', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -195,19 +194,22 @@ export default function AuctionDetailPage() {
         totalCandidates = data.totalCandidates || 0;
         offset = data.nextOffset || offset;
 
+        setRefreshProgress({ current: offset, total: totalCandidates });
+
         if (!data.hasMore) break;
         if (batchNum > 50) break; // safety limit
       }
 
       setUploadMsg({
         type: totalUpdated > 0 ? 'success' : 'error',
-        text: `Done! ${totalUpdated} stock images added (${totalCandidates} candidates processed)`,
+        text: `Done! ${totalUpdated} stock images / prices updated (${totalCandidates} processed)`,
       });
       fetchData();
     } catch (err: any) {
       setUploadMsg({ type: 'error', text: `Batch ${batchNum} failed: ${err.message}` });
     }
     setRefreshing(false);
+    setRefreshProgress({ current: 0, total: 0 });
   };
 
   const handleUploadToAf = async () => {
@@ -222,6 +224,7 @@ export default function AuctionDetailPage() {
 
     setUploading(true);
     setUploadMsg(null);
+    setUploadProgress({ current: 0, total: unuploaded.length });
 
     const BATCH_SIZE = 5;
     const batches: string[][] = [];
@@ -235,10 +238,6 @@ export default function AuctionDetailPage() {
 
     try {
       for (let i = 0; i < batches.length; i++) {
-        setUploadMsg({
-          type: 'success',
-          text: `Uploading batch ${i + 1}/${batches.length} (${totalSucceeded}/${unuploaded.length} done)...`,
-        });
 
         const res = await fetch('/api/af-upload', {
           method: 'POST',
@@ -265,6 +264,8 @@ export default function AuctionDetailPage() {
         totalSucceeded += succeeded;
         totalFailed += failed;
 
+        setUploadProgress({ current: totalSucceeded + totalFailed, total: unuploaded.length });
+
         // Refresh lots after each batch to show progress
         fetchData();
       }
@@ -285,6 +286,7 @@ export default function AuctionDetailPage() {
     }
 
     setUploading(false);
+    setUploadProgress({ current: 0, total: 0 });
   };
 
   const deleteLot = async (lotId: string) => {
@@ -429,6 +431,20 @@ export default function AuctionDetailPage() {
                 >
                   Re-upload Existing to AF (creates duplicates)
                 </button>
+              )}
+              {uploading && uploadProgress.total > 0 && (
+                <ProgressBar
+                  current={uploadProgress.current}
+                  total={uploadProgress.total}
+                  label="Uploading to AF"
+                />
+              )}
+              {refreshing && (
+                <ProgressBar
+                  current={refreshProgress.current}
+                  total={refreshProgress.total || 1}
+                  label={refreshProgress.total > 0 ? 'Finding stock images & pricing' : 'Starting scan...'}
+                />
               )}
               {uploadMsg && (
                 <p className={`text-xs text-center ${uploadMsg.type === 'success' ? 'text-brand-green' : 'text-red-500'}`}>

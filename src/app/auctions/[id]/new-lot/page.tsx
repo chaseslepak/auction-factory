@@ -8,6 +8,7 @@ import PhotoGrid from '@/components/PhotoGrid';
 import ConditionSlider from '@/components/ConditionSlider';
 import GradientButton from '@/components/GradientButton';
 import SpeechInput from '@/components/SpeechInput';
+import IndeterminateBar from '@/components/IndeterminateBar';
 
 export default function NewLotPage() {
   const { id } = useParams<{ id: string }>();
@@ -149,6 +150,11 @@ export default function NewLotPage() {
 
       {/* Generate button */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-brand-bg via-brand-bg to-transparent pt-8">
+        {loading && (
+          <div className="mb-3">
+            <IndeterminateBar label="Analyzing photos, identifying item, fetching prices..." />
+          </div>
+        )}
         <GradientButton
           onClick={handleGenerate}
           loading={loading}

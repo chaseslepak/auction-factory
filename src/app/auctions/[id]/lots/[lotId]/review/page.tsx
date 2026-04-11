@@ -7,6 +7,8 @@ import type { LotWithPhotos, GenerateListingResponse } from '@/lib/types';
 import Header from '@/components/Header';
 import GradientButton from '@/components/GradientButton';
 import ConfidenceChip from '@/components/ConfidenceChip';
+import ProgressBar from '@/components/ProgressBar';
+import IndeterminateBar from '@/components/IndeterminateBar';
 
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
@@ -42,6 +44,7 @@ export default function LotReviewPage() {
   const [mode, setMode] = useState<'single' | 'range'>('single');
   const [rangeCount, setRangeCount] = useState<number | ''>('');
   const [saving, setSaving] = useState(false);
+  const [saveProgress, setSaveProgress] = useState({ current: 0, total: 0 });
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -202,6 +205,8 @@ export default function LotReviewPage() {
         return;
       }
 
+      setSaveProgress({ current: 0, total: lotsToCreate });
+
       for (let i = 0; i < lotsToCreate; i++) {
         const lotNumber = nextLotNumber + i;
 
@@ -279,6 +284,8 @@ export default function LotReviewPage() {
             display_order: photoIndex + j,
           });
         }
+
+        setSaveProgress({ current: i + 1, total: lotsToCreate });
       }
 
       // Clear pending data
@@ -583,6 +590,20 @@ export default function LotReviewPage() {
       {/* Bottom actions */}
       {isNew ? (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-brand-bg via-brand-bg to-transparent pt-8">
+          {saving && saveProgress.total > 1 && (
+            <div className="mb-3">
+              <ProgressBar
+                current={saveProgress.current}
+                total={saveProgress.total}
+                label="Saving lots"
+              />
+            </div>
+          )}
+          {saving && saveProgress.total <= 1 && (
+            <div className="mb-3">
+              <IndeterminateBar label="Saving lot..." />
+            </div>
+          )}
           <div className="flex gap-3">
             <button
               onClick={() => router.push(`/auctions/${auctionId}/new-lot`)}
@@ -634,13 +655,20 @@ export default function LotReviewPage() {
               </div>
             </div>
           ) : (
-            <button
-              onClick={handleReuploadLot}
-              disabled={reuploading}
-              className="w-full py-4 rounded-full border-2 border-orange-400 text-orange-500 font-black text-sm uppercase tracking-wide disabled:opacity-50"
-            >
-              {reuploading ? 'Re-uploading...' : 'Re-upload to AF'}
-            </button>
+            <>
+              {reuploading && (
+                <div className="mb-3">
+                  <IndeterminateBar label="Re-uploading to Auction Factory..." />
+                </div>
+              )}
+              <button
+                onClick={handleReuploadLot}
+                disabled={reuploading}
+                className="w-full py-4 rounded-full border-2 border-orange-400 text-orange-500 font-black text-sm uppercase tracking-wide disabled:opacity-50"
+              >
+                {reuploading ? 'Re-uploading...' : 'Re-upload to AF'}
+              </button>
+            </>
           )}
         </div>
       )}
