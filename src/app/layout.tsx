@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import AfKeepAlive from '@/components/AfKeepAlive';
 import GlobalJobPoller from '@/components/GlobalJobPoller';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import OfflineSync from '@/components/OfflineSync';
 import './globals.css';
 
 const inter = localFont({
@@ -53,7 +55,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans bg-brand-bg min-h-screen`}>
-        {children}
+        <OfflineSync />
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
         <AfKeepAlive />
         <GlobalJobPoller />
         <script
