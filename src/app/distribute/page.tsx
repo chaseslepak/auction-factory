@@ -227,7 +227,7 @@ export default function DistributePage() {
 
   return (
     <div className="min-h-screen bg-brand-bg">
-      <Header title="Distribute" backHref="/auctions" />
+      <Header title="AF Social Automation" backHref="" />
 
       <div className="p-4 space-y-4 max-w-4xl mx-auto">
         {/* Step 1: Select Auction */}

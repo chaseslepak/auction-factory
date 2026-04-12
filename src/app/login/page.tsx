@@ -50,10 +50,10 @@ function LoginForm() {
           </svg>
         </div>
         <h1 className="text-white font-black text-lg tracking-[0.2em] uppercase">
-          Auction Factory
+          AF Social Automation
         </h1>
         <p className="text-gray-400 text-sm tracking-[0.15em] uppercase mt-1">
-          Ohio Lotter
+          Listings & Marketing
         </p>
       </div>
 
