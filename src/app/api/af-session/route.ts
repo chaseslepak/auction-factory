@@ -19,8 +19,17 @@ export async function POST(request: NextRequest) {
   }
 
   // Extract just the PHPSESSID from the cookie string
+  // Handle all formats: full document.cookie, just PHPSESSID=xxx, or just the hash
   const phpMatch = session_cookie.match(/PHPSESSID=([^;]+)/);
-  const cleanCookie = phpMatch ? `PHPSESSID=${phpMatch[1]}` : session_cookie;
+  let cleanCookie: string;
+  if (phpMatch) {
+    cleanCookie = `PHPSESSID=${phpMatch[1]}`;
+  } else if (/^[a-f0-9]{26,40}$/i.test(session_cookie.trim())) {
+    // Bare session ID (just the hash) — add the prefix
+    cleanCookie = `PHPSESSID=${session_cookie.trim()}`;
+  } else {
+    cleanCookie = session_cookie;
+  }
 
   // Verify the cookie works by loading the add_item page
   try {
