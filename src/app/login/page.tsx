@@ -1,19 +1,23 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import GradientButton from '@/components/GradientButton';
 
 function LoginForm() {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<'magic' | 'password'>('magic');
   const searchParams = useSearchParams();
+  const router = useRouter();
   const authError = searchParams.get('error');
+  const authMsg = searchParams.get('msg');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleMagicLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
@@ -28,7 +32,13 @@ function LoginForm() {
       });
 
       if (signInError) {
-        setError(signInError.message);
+        // If rate limited, suggest password login
+        if (signInError.message.toLowerCase().includes('rate') || signInError.message.toLowerCase().includes('limit')) {
+          setError('Email rate limited. Try password login below, or wait 15 minutes.');
+          setMode('password');
+        } else {
+          setError(signInError.message);
+        }
       } else {
         setSent(true);
       }
@@ -37,6 +47,59 @@ function LoginForm() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        if (signInError.message.includes('Invalid login credentials')) {
+          // Maybe they haven't set a password yet — offer to send a reset
+          setError('No password set yet. Click "Set Password" to create one via email.');
+        } else {
+          setError(signInError.message);
+        }
+      } else {
+        router.push('/auctions');
+      }
+    } catch (err: any) {
+      setError(`Request failed: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!email) {
+      setError('Enter your email first');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/callback?next=/auctions`,
+      });
+      if (error) {
+        setError(error.message);
+      } else {
+        setSent(true);
+        setError(null);
+      }
+    } catch (err: any) {
+      setError(err.message);
+    }
+    setLoading(false);
   };
 
   return (
@@ -57,10 +120,15 @@ function LoginForm() {
         </p>
       </div>
 
-      {/* Auth error */}
+      {/* Auth errors */}
       {authError === 'not_authorized' && (
         <div className="bg-red-900/50 border border-red-500 text-red-200 text-sm rounded-lg px-4 py-3 mb-4 w-full max-w-sm text-center">
           Your email is not authorized. Contact your administrator.
+        </div>
+      )}
+      {authError === 'auth_failed' && (
+        <div className="bg-red-900/50 border border-red-500 text-red-200 text-sm rounded-lg px-4 py-3 mb-4 w-full max-w-sm text-center">
+          Login failed{authMsg ? `: ${authMsg}` : ''}. Try again.
         </div>
       )}
 
@@ -70,11 +138,11 @@ function LoginForm() {
           <div className="bg-brand-green/10 border border-brand-green text-brand-green text-sm rounded-lg px-4 py-6 text-center">
             <p className="font-bold mb-1">Check your email</p>
             <p className="text-green-300">
-              We sent a magic link to <strong>{email}</strong>
+              We sent a link to <strong>{email}</strong>
             </p>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+        ) : mode === 'magic' ? (
+          <form onSubmit={handleMagicLink} className="space-y-4">
             <input
               type="email"
               value={email}
@@ -89,6 +157,54 @@ function LoginForm() {
             <GradientButton type="submit" loading={loading}>
               Send Magic Link
             </GradientButton>
+            <button
+              type="button"
+              onClick={() => setMode('password')}
+              className="w-full text-center text-gray-400 text-sm hover:text-white"
+            >
+              Use password instead
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handlePasswordLogin} className="space-y-4">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter your email"
+              required
+              className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:border-brand-green"
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
+              required
+              className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:border-brand-green"
+            />
+            {error && (
+              <p className="text-red-400 text-sm">{error}</p>
+            )}
+            <GradientButton type="submit" loading={loading}>
+              Log In
+            </GradientButton>
+            <div className="flex justify-between">
+              <button
+                type="button"
+                onClick={() => setMode('magic')}
+                className="text-gray-400 text-sm hover:text-white"
+              >
+                Use magic link
+              </button>
+              <button
+                type="button"
+                onClick={handleResetPassword}
+                className="text-brand-green text-sm hover:text-green-300"
+              >
+                Set Password
+              </button>
+            </div>
           </form>
         )}
       </div>
