@@ -440,20 +440,19 @@ export default function LotReviewPage() {
     });
     setExistingLot({ ...existingLot, lot_photos: updated } as LotWithPhotos);
     // Persist to database
-    const res = await fetch('/api/lot-photos', {
+    await fetch('/api/lot-photos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lot_id: existingLot.id, photo_ids: photoIds }),
     });
-    // Re-fetch from DB to confirm the order stuck
-    if (res.ok) {
-      const { data } = await supabase
-        .from('lots')
-        .select('*, lot_photos(*)')
-        .eq('id', lotId)
-        .single();
-      if (data) setExistingLot(data as LotWithPhotos);
-    }
+    // Always re-fetch from DB — on success this confirms the order stuck,
+    // on failure the UI snaps back to DB truth.
+    const { data } = await supabase
+      .from('lots')
+      .select('*, lot_photos(*)')
+      .eq('id', lotId)
+      .single();
+    if (data) setExistingLot(data as LotWithPhotos);
   };
 
   const handleAddPhotos = async (files: FileList | null) => {

@@ -264,7 +264,9 @@ async function uploadLotToAF(
     if (err.name === 'AbortError' || err.message?.includes('aborted')) {
       return { success: false, error: 'TIMEOUT_UNCERTAIN: upload may have succeeded on AF' };
     }
-    return { success: false, error: err.message };
+    // Network-layer error (DNS, connection refused, TLS): no HTTP response
+    // from AF at all, so safe to retry.
+    return { success: false, error: `NETWORK_ERROR: ${err.message}` };
   }
 }
 
@@ -280,6 +282,17 @@ export async function POST(request: NextRequest) {
 
   if (!auction_id || !lot_ids?.length) {
     return NextResponse.json({ error: 'auction_id and lot_ids required' }, { status: 400 });
+  }
+
+  // Hard cap: each lot can take up to ~43s (40s timeout + 3s delay). On a 60s
+  // Vercel function this means 1 lot per call is the only truly safe batch.
+  // Allow up to 3 as a guardrail for small manual retries, but reject anything
+  // larger so we don't hit function timeouts and leave lots in uploading state.
+  if (lot_ids.length > 3) {
+    return NextResponse.json(
+      { error: `Batch too large (${lot_ids.length}). Max 3 lots per call — the client should batch.` },
+      { status: 400 }
+    );
   }
 
   // Get AF session cookie
@@ -374,7 +387,9 @@ export async function POST(request: NextRequest) {
         storage_path: p.storage_path,
       }));
 
-    // Retry up to 2 times on transient failures
+    // Retry up to 2 times, but ONLY on network-layer errors where we got
+    // no HTTP response from AF at all. Any HTTP response (even 500) means AF
+    // may have processed the request — retrying would create duplicates.
     let result = await uploadLotToAF(
       lot,
       photos,
@@ -383,14 +398,7 @@ export async function POST(request: NextRequest) {
       isLast ? 'exit' : 'next'
     );
     let retryCount = 0;
-    while (!result.success && retryCount < 2) {
-      // Don't retry session expired errors
-      if (result.error?.includes('session expired')) break;
-      // Don't retry timeouts — the upload may have succeeded on AF's side
-      if (result.error?.includes('TIMEOUT_UNCERTAIN')) break;
-      // Don't retry Forbidden — same data will fail again, go straight to placeholder
-      if (result.error?.includes('FORBIDDEN_BY_AF')) break;
-      // Wait before retry
+    while (!result.success && retryCount < 2 && result.error?.startsWith('NETWORK_ERROR:')) {
       await new Promise((r) => setTimeout(r, 1000 * (retryCount + 1)));
       result = await uploadLotToAF(
         lot,

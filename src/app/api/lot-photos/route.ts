@@ -53,13 +53,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'lot_id and photo_ids array required' }, { status: 400 });
   }
 
-  // Update display_order for each photo
-  for (let i = 0; i < photo_ids.length; i++) {
-    await supabase
-      .from('lot_photos')
-      .update({ display_order: i })
-      .eq('id', photo_ids[i])
-      .eq('lot_id', lot_id);
+  // Update display_order for each photo in parallel, then check for errors
+  const results = await Promise.all(
+    photo_ids.map((id: string, i: number) =>
+      supabase
+        .from('lot_photos')
+        .update({ display_order: i })
+        .eq('id', id)
+        .eq('lot_id', lot_id)
+    )
+  );
+  const firstError = results.find((r) => r.error);
+  if (firstError?.error) {
+    return NextResponse.json({ error: firstError.error.message }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });
