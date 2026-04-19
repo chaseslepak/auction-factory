@@ -439,12 +439,21 @@ export default function LotReviewPage() {
       return { ...photo!, display_order: i };
     });
     setExistingLot({ ...existingLot, lot_photos: updated } as LotWithPhotos);
-    // Then persist
-    await fetch('/api/lot-photos', {
+    // Persist to database
+    const res = await fetch('/api/lot-photos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lot_id: existingLot.id, photo_ids: photoIds }),
     });
+    // Re-fetch from DB to confirm the order stuck
+    if (res.ok) {
+      const { data } = await supabase
+        .from('lots')
+        .select('*, lot_photos(*)')
+        .eq('id', lotId)
+        .single();
+      if (data) setExistingLot(data as LotWithPhotos);
+    }
   };
 
   const handleAddPhotos = async (files: FileList | null) => {
