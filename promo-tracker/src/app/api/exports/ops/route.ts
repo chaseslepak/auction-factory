@@ -6,7 +6,8 @@ import { allocateByDays, sliceIntoIsoWeeks } from "@/lib/weeks";
 
 const COLUMNS = [
   "iso_year", "iso_week", "week_start",
-  "brand", "customer", "sku", "upc", "product_name",
+  "brand", "product_line", "customer",
+  "sku", "upc", "product_name",
   "promo_type", "expected_units_this_week",
   "discount_per_unit", "discount_depth_pct",
   "promo_id"
@@ -43,6 +44,7 @@ export async function GET(request: NextRequest) {
           iso_week: w.isoWeek,
           week_start: w.weekStart,
           brand: p.brand?.name ?? "",
+          product_line: it.product?.line ?? "",
           customer: p.customer?.name ?? "",
           sku: it.product?.sku ?? "",
           upc: it.product?.upc ?? "",

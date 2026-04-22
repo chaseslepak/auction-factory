@@ -12,6 +12,7 @@ export interface Product {
   sku: string;
   upc: string | null;
   name: string;
+  line: string | null;
   pack_size: string | null;
   case_cost_cents: number | null;
   srp_cents: number | null;

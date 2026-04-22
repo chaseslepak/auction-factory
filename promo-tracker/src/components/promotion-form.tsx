@@ -221,7 +221,9 @@ export function PromotionForm({ brands, customers, distributors, products, initi
                     <select className="input" value={r.product_id} onChange={(e) => updateRow(i, { product_id: e.target.value })}>
                       <option value="">Select…</option>
                       {brandProducts.map((p) => (
-                        <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>
+                        <option key={p.id} value={p.id}>
+                          {p.sku} — {p.name}{p.line ? ` (${p.line})` : ""}
+                        </option>
                       ))}
                     </select>
                   </td>

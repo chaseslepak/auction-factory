@@ -4,6 +4,7 @@ import { getPromotion } from "@/lib/db/promotions";
 import { PROMO_TYPE_LABEL } from "@/lib/schemas/promotion";
 import { centsToUsd } from "@/lib/money";
 import { requireUser, canEditPromotions } from "@/lib/auth";
+import { StatusButtons } from "@/components/status-buttons";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +25,8 @@ export default async function PromotionDetailPage({ params }: { params: Promise<
           <h1 className="text-2xl font-semibold">{PROMO_TYPE_LABEL[p.promo_type]}</h1>
           <div className="text-sm text-brand-muted">{p.start_date} → {p.end_date}</div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="badge bg-gray-100 capitalize">{p.status}</span>
+        <div className="flex flex-col items-end gap-2">
+          <StatusButtons promotionId={p.id} current={p.status} />
           {canEditPromotions(profile?.role) ? (
             <Link href={`/promotions/${p.id}/edit`} className="btn-secondary">Edit</Link>
           ) : null}

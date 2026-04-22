@@ -6,7 +6,7 @@ import { PROMO_TYPE_LABEL, FLAT_FEE_TYPES } from "@/lib/schemas/promotion";
 const COLUMNS = [
   "promo_id", "brand", "customer", "distributor", "channel", "promo_type",
   "start_date", "end_date", "status", "line_kind",
-  "sku", "upc", "product_name", "pack_size",
+  "sku", "upc", "product_name", "product_line", "pack_size",
   "discount_per_unit", "scan_rate_per_unit", "fixed_fee",
   "expected_units", "expected_spend", "notes"
 ] as const;
@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
         sku: "",
         upc: "",
         product_name: "",
+        product_line: "",
         pack_size: "",
         discount_per_unit: "",
         scan_rate_per_unit: "",
@@ -68,6 +69,7 @@ export async function GET(request: NextRequest) {
         sku: it.product?.sku ?? "",
         upc: it.product?.upc ?? "",
         product_name: it.product?.name ?? "",
+        product_line: it.product?.line ?? "",
         pack_size: it.product?.pack_size ?? "",
         discount_per_unit: dollars(it.discount_per_unit_cents),
         scan_rate_per_unit: dollars(it.scan_rate_per_unit_cents),
