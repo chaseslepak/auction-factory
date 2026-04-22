@@ -411,11 +411,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Search for stock image AND real retail price
+    // Stock images are only auto-fetched for items in new-in-box condition (10).
     const hasBrand = listing.brand && listing.brand !== 'Unknown' && listing.brand.trim() !== '';
     const hasModel = listing.model && listing.model !== 'Unknown' && listing.model.trim() !== '';
+    const isNewInBox = Number(condition) === 10;
 
     let webstaurantPrice = 0;
-    if (hasBrand && hasModel) {
+    if (hasBrand && hasModel && isNewInBox) {
       const found = await findAndVerifyStockImage(
         anthropic,
         listing.brand,

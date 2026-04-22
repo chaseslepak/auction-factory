@@ -38,44 +38,71 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { auction_id, job_type = 'refresh_stock_images' } = await request.json();
+  const {
+    auction_id,
+    job_type = 'refresh_stock_images',
+    lot_ids,
+  } = await request.json();
 
   if (!auction_id) {
     return NextResponse.json({ error: 'auction_id required' }, { status: 400 });
   }
 
-  // Get all eligible lots in this auction
-  const { data: lots, error } = await supabase
+  // When explicit lot_ids are provided (per-lot manual trigger) we skip the
+  // condition gate — users can force a search on any lot regardless of condition.
+  const explicitLots = Array.isArray(lot_ids) && lot_ids.length > 0;
+
+  let lotsQuery = supabase
     .from('lots')
-    .select('id, brand, model')
+    .select('id, brand, model, condition_rating')
     .eq('auction_id', auction_id)
     .limit(1000);
+
+  if (explicitLots) {
+    lotsQuery = lotsQuery.in('id', lot_ids);
+  }
+
+  const { data: lots, error } = await lotsQuery;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Filter to lots that have a brand or model
+  // Bulk: require brand/model + condition 10 "New in box".
+  // Per-lot: just require brand/model.
   const candidates = (lots || []).filter((lot: any) => {
     const hasBrand = lot.brand && lot.brand !== 'Unknown' && lot.brand.trim() !== '';
     const hasModel = lot.model && lot.model !== 'Unknown' && lot.model.trim() !== '';
-    return hasBrand || hasModel;
+    if (!(hasBrand || hasModel)) return false;
+    if (!explicitLots && Number(lot.condition_rating) !== 10) return false;
+    return true;
   });
 
   if (candidates.length === 0) {
     return NextResponse.json({
       enqueued: 0,
-      message: `0 of ${lots?.length || 0} lots have a brand or model.`,
+      message: explicitLots
+        ? `Selected lot has no brand or model — can't search for a stock image.`
+        : `0 of ${lots?.length || 0} lots are eligible (need brand/model + condition 10 "New in box").`,
     });
   }
 
-  // Delete ALL existing jobs for this auction so the new batch starts fresh
-  // (otherwise old completed jobs show up in the progress count)
-  await supabase
-    .from('jobs')
-    .delete()
-    .eq('type', job_type)
-    .eq('auction_id', auction_id);
+  // For bulk refreshes, clear old jobs so the progress count starts fresh.
+  // For per-lot triggers, just delete this lot's prior job(s) so it can be re-run.
+  if (explicitLots) {
+    await supabase
+      .from('jobs')
+      .delete()
+      .eq('type', job_type)
+      .eq('auction_id', auction_id)
+      .in('lot_id', candidates.map((c: any) => c.id));
+  } else {
+    await supabase
+      .from('jobs')
+      .delete()
+      .eq('type', job_type)
+      .eq('auction_id', auction_id);
+  }
 
   // Insert new jobs
   const jobsToInsert = candidates.map((lot: any) => ({

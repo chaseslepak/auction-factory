@@ -11,6 +11,7 @@ import ProgressBar from '@/components/ProgressBar';
 import IndeterminateBar from '@/components/IndeterminateBar';
 import ReorderablePhotos from '@/components/ReorderablePhotos';
 import ImageZoom from '@/components/ImageZoom';
+import ConditionSlider from '@/components/ConditionSlider';
 
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
@@ -143,6 +144,8 @@ export default function LotReviewPage() {
   };
 
   const [reuploading, setReuploading] = useState(false);
+  const [findingStockImage, setFindingStockImage] = useState(false);
+  const [stockImageMsg, setStockImageMsg] = useState<string | null>(null);
 
   const handleUpdateExisting = async () => {
     if (!listing || !existingLot) return;
@@ -227,6 +230,74 @@ export default function LotReviewPage() {
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleFindStockImage = async () => {
+    if (!existingLot) return;
+    setFindingStockImage(true);
+    setStockImageMsg(null);
+    try {
+      const enqueueRes = await fetch('/api/jobs/enqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auction_id: auctionId,
+          lot_ids: [existingLot.id],
+        }),
+      });
+      const enqueueData = await enqueueRes.json();
+      if (!enqueueRes.ok || enqueueData.error) {
+        throw new Error(enqueueData.error || enqueueData.message || 'Enqueue failed');
+      }
+      if (enqueueData.enqueued === 0) {
+        setStockImageMsg(enqueueData.message || 'Nothing to enqueue.');
+        setFindingStockImage(false);
+        return;
+      }
+
+      // Poll until this lot's job is no longer pending/processing
+      const pollJob = async (): Promise<void> => {
+        try {
+          const { data: jobs } = await supabase
+            .from('jobs')
+            .select('status, error')
+            .eq('type', 'refresh_stock_images')
+            .eq('lot_id', existingLot.id)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          const job = jobs?.[0];
+
+          // Kick the processor if the job is still pending and nothing's picked it up
+          if (job?.status === 'pending' || job?.status === 'processing') {
+            fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
+            setTimeout(pollJob, 3000);
+            return;
+          }
+
+          // Done — refetch the lot to pick up any new stock image/pricing
+          const { data: fresh } = await supabase
+            .from('lots')
+            .select('*, lot_photos(*)')
+            .eq('id', existingLot.id)
+            .single();
+          if (fresh) setExistingLot(fresh as LotWithPhotos);
+
+          if (job?.status === 'failed') {
+            setStockImageMsg(`Search failed: ${job.error || 'unknown error'}`);
+          } else {
+            setStockImageMsg('Stock image search complete.');
+          }
+        } catch {
+          setStockImageMsg('Search finished (status unknown).');
+        } finally {
+          setFindingStockImage(false);
+        }
+      };
+      setTimeout(pollJob, 2000);
+    } catch (err: any) {
+      setStockImageMsg(err.message);
+      setFindingStockImage(false);
     }
   };
 
@@ -667,6 +738,7 @@ export default function LotReviewPage() {
                     className="w-full mt-0.5 px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
                   />
                 </div>
+                <ConditionSlider value={condition} onChange={setCondition} />
               </>
             ) : (
               <>
@@ -688,6 +760,10 @@ export default function LotReviewPage() {
                     {displayListing.category}
                   </p>
                 )}
+                <p>
+                  <span className="font-medium text-gray-400">Condition:</span>{' '}
+                  {condition}/10
+                </p>
               </>
             )}
           </div>
@@ -767,6 +843,33 @@ export default function LotReviewPage() {
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Per-lot stock image search (existing lots only) */}
+        {!isNew && existingLot && (
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-2">
+              Stock Image
+            </h3>
+            <p className="text-xs text-gray-500 mb-3">
+              Search WebstaurantStore + the web for a stock image and current retail price for this lot.
+            </p>
+            <button
+              onClick={handleFindStockImage}
+              disabled={findingStockImage}
+              className="w-full py-2 rounded-lg border-2 border-brand-blue text-brand-blue font-bold text-sm uppercase tracking-wide disabled:opacity-50"
+            >
+              {findingStockImage ? 'Searching…' : 'Find Stock Image'}
+            </button>
+            {findingStockImage && (
+              <div className="mt-3">
+                <IndeterminateBar label="Searching..." />
+              </div>
+            )}
+            {stockImageMsg && !findingStockImage && (
+              <p className="mt-3 text-xs text-gray-600">{stockImageMsg}</p>
+            )}
           </div>
         )}
 

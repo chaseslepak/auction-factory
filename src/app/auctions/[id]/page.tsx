@@ -166,7 +166,7 @@ export default function AuctionDetailPage() {
   };
 
   const handleRefreshStockImages = async () => {
-    if (!confirm('Search for stock images and pricing for all lots with known brand+model?\n\nThis runs in the background — you can close this tab and come back later.')) return;
+    if (!confirm('Search for stock images and pricing for all "new in box" (condition 10) lots with known brand+model?\n\nThis runs in the background — you can close this tab and come back later.\n\nTo search on a non-"new in box" lot, open that lot and use its "Find Stock Image" button.')) return;
     setRefreshing(true);
     setUploadMsg(null);
     setRefreshProgress({ current: 0, total: 0 });

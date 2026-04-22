@@ -246,6 +246,9 @@ async function processRefresh(request: NextRequest) {
   }
 
   const { auction_id, lot_ids, offset = 0, batchSize = 5 } = await request.json();
+  // When explicit lot_ids are provided (per-lot manual trigger) we skip the
+  // condition gate so users can force a search for any lot.
+  const explicitLots = Array.isArray(lot_ids) && lot_ids.length > 0;
 
   // Get lots that don't have a stock image yet
   let query = supabase
@@ -254,7 +257,7 @@ async function processRefresh(request: NextRequest) {
     .limit(1000)
     .order('lot_number', { ascending: true });
 
-  if (lot_ids?.length) {
+  if (explicitLots) {
     query = query.in('id', lot_ids);
   } else if (auction_id) {
     query = query.eq('auction_id', auction_id);
@@ -268,16 +271,29 @@ async function processRefresh(request: NextRequest) {
     return NextResponse.json({ error: error?.message || 'No lots found' }, { status: 404 });
   }
 
-  // Filter to lots with at least brand OR model — removed stock image exclusion
+  // Bulk refresh only fetches stock images for new-in-box items (condition 10).
+  // Per-lot manual triggers (explicit lot_ids) bypass this gate.
   const candidates = lots.filter((lot: any) => {
     const hasBrand = lot.brand && lot.brand !== 'Unknown' && lot.brand.trim() !== '';
     const hasModel = lot.model && lot.model !== 'Unknown' && lot.model.trim() !== '';
-    return hasBrand || hasModel;
+    if (!(hasBrand || hasModel)) return false;
+    if (!explicitLots && Number(lot.condition_rating) !== 10) return false;
+    return true;
   });
 
-  // Count skip reasons
   const skipped = {
-    noBrandOrModel: lots.length - candidates.length,
+    noBrandOrModel: lots.filter((l: any) => {
+      const hasBrand = l.brand && l.brand !== 'Unknown' && l.brand.trim() !== '';
+      const hasModel = l.model && l.model !== 'Unknown' && l.model.trim() !== '';
+      return !(hasBrand || hasModel);
+    }).length,
+    notNewInBox: explicitLots
+      ? 0
+      : lots.filter((l: any) => {
+          const hasBrand = l.brand && l.brand !== 'Unknown' && l.brand.trim() !== '';
+          const hasModel = l.model && l.model !== 'Unknown' && l.model.trim() !== '';
+          return (hasBrand || hasModel) && Number(l.condition_rating) !== 10;
+        }).length,
   };
 
   if (candidates.length === 0) {
@@ -288,7 +304,9 @@ async function processRefresh(request: NextRequest) {
       skipped,
       hasMore: false,
       nextOffset: 0,
-      message: `0 of ${lots.length} lots have a brand or model. AI couldn't identify them.`,
+      message: explicitLots
+        ? `None of the selected lots have a brand or model.`
+        : `0 of ${lots.length} lots are eligible (need brand/model + condition 10 "New in box").`,
     });
   }
 
