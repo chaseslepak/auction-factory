@@ -14,6 +14,7 @@ export async function listPromotions(filters: {
   customer_id?: string;
   status?: string;
   promo_type?: string;
+  line?: string;
   start?: string;
   end?: string;
 } = {}): Promise<PromotionWithRelations[]> {
@@ -29,7 +30,12 @@ export async function listPromotions(filters: {
 
   const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []) as unknown as PromotionWithRelations[];
+  const rows = (data ?? []) as unknown as PromotionWithRelations[];
+
+  if (filters.line) {
+    return rows.filter((p) => p.items.some((it) => it.product?.line === filters.line));
+  }
+  return rows;
 }
 
 export async function getPromotion(id: string): Promise<PromotionWithRelations | null> {

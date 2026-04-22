@@ -5,6 +5,7 @@ import { PROMO_TYPE_LABEL } from "@/lib/schemas/promotion";
 import { centsToUsd } from "@/lib/money";
 import { requireUser, canEditPromotions } from "@/lib/auth";
 import { StatusButtons } from "@/components/status-buttons";
+import { signedAgreementUrl } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export default async function PromotionDetailPage({ params }: { params: Promise<
 
   const itemSpend = p.items.reduce((s, it) => s + (it.expected_spend_cents ?? 0), 0);
   const total = (p.fixed_fee_cents ?? 0) + itemSpend;
+  const agreementUrl = await signedAgreementUrl(p.agreement_url);
 
   return (
     <div className="max-w-4xl">
@@ -88,6 +90,16 @@ export default async function PromotionDetailPage({ params }: { params: Promise<
         <div className="card p-4 mb-6">
           <h2 className="font-medium mb-2">Notes</h2>
           <p className="text-sm whitespace-pre-wrap">{p.notes}</p>
+        </div>
+      ) : null}
+
+      {agreementUrl ? (
+        <div className="card p-4 mb-6">
+          <h2 className="font-medium mb-2">Agreement</h2>
+          <a href={agreementUrl} target="_blank" rel="noreferrer" className="text-sm underline">
+            Download PDF
+          </a>
+          <p className="text-xs text-brand-muted mt-1">Link expires in 1 hour; refresh to regenerate.</p>
         </div>
       ) : null}
     </div>

@@ -60,7 +60,7 @@ export const promotionSchema = z
     end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD"),
     status: z.enum(PROMO_STATUSES).default("draft"),
     fixed_fee_cents: z.number().int().nonnegative().nullable().optional(),
-    agreement_url: z.string().url().nullable().optional(),
+    agreement_url: z.string().max(500).nullable().optional(),
     notes: z.string().max(4000).nullable().optional(),
     items: z.array(promotionItemSchema).default([])
   })

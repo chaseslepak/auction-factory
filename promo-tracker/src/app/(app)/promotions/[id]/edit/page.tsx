@@ -42,6 +42,7 @@ export default async function EditPromotionPage({ params }: { params: Promise<{ 
           end_date: p.end_date,
           status: p.status,
           fixed_fee_cents: p.fixed_fee_cents ?? null,
+          agreement_url: p.agreement_url,
           notes: p.notes,
           items: p.items.map((it) => ({
             id: it.id,

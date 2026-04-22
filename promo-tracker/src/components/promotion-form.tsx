@@ -11,6 +11,7 @@ import {
   type PromotionInput
 } from "@/lib/schemas/promotion";
 import { usdToCents, centsToUsd } from "@/lib/money";
+import { createClient } from "@/lib/supabase/client";
 import type { Brand, Customer, Distributor, Product } from "@/lib/types";
 
 interface Props {
@@ -58,6 +59,9 @@ export function PromotionForm({ brands, customers, distributors, products, initi
     initial?.fixed_fee_cents != null ? (initial.fixed_fee_cents / 100).toString() : ""
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [agreementPath, setAgreementPath] = useState<string | null>(initial?.agreement_url ?? null);
+  const [agreementFile, setAgreementFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [rows, setRows] = useState<ItemRow[]>(
     initial?.items?.length
       ? initial.items.map((it) => ({
@@ -83,10 +87,40 @@ export function PromotionForm({ brands, customers, distributors, products, initi
   function addRow() { setRows((rs) => [...rs, emptyRow()]); }
   function removeRow(i: number) { setRows((rs) => rs.filter((_, idx) => idx !== i)); }
 
+  async function uploadAgreementIfNeeded(): Promise<string | null> {
+    if (!agreementFile) return agreementPath;
+    setUploadStatus("Uploading agreement…");
+    const res = await fetch("/api/upload/agreement", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: agreementFile.name })
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error(b?.error ?? "Upload signature failed");
+    }
+    const { path, token, bucket } = await res.json();
+    const supabase = createClient();
+    const { error } = await supabase.storage.from(bucket).uploadToSignedUrl(path, token, agreementFile);
+    if (error) throw new Error(error.message);
+    setUploadStatus(null);
+    return path;
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSaving(true);
+
+    let agreementPathToSave = agreementPath;
+    try {
+      agreementPathToSave = await uploadAgreementIfNeeded();
+    } catch (err) {
+      setSaving(false);
+      setUploadStatus(null);
+      setError(err instanceof Error ? err.message : "Upload failed");
+      return;
+    }
 
     const payload: PromotionInput = {
       brand_id: brandId,
@@ -98,7 +132,7 @@ export function PromotionForm({ brands, customers, distributors, products, initi
       end_date: endDate,
       status: status as PromotionInput["status"],
       fixed_fee_cents: isFlatFee ? usdToCents(fixedFee) : null,
-      agreement_url: null,
+      agreement_url: agreementPathToSave,
       notes: notes || null,
       items: rows
         .filter((r) => r.product_id)
@@ -245,6 +279,26 @@ export function PromotionForm({ brands, customers, distributors, products, initi
       <section className="card p-5">
         <label className="label">Notes</label>
         <textarea className="input min-h-[80px]" value={notes ?? ""} onChange={(e) => setNotes(e.target.value)} />
+      </section>
+
+      <section className="card p-5 space-y-2">
+        <label className="label">Promo agreement (PDF, optional)</label>
+        {agreementPath ? (
+          <p className="text-sm text-brand-muted">
+            Attached: <span className="font-mono">{agreementPath.split("/").pop()}</span>
+            <button type="button" className="ml-3 text-xs underline" onClick={() => { setAgreementPath(null); setAgreementFile(null); }}>
+              Remove
+            </button>
+          </p>
+        ) : null}
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={(e) => setAgreementFile(e.target.files?.[0] ?? null)}
+          className="text-sm"
+        />
+        {agreementFile ? <p className="text-xs text-brand-muted">New file queued: {agreementFile.name}</p> : null}
+        {uploadStatus ? <p className="text-xs text-brand-muted">{uploadStatus}</p> : null}
       </section>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
