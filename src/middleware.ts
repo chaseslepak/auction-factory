@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
+import { chaseUpdateSession } from '@/lib/chase/supabase/middleware';
 
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/jobs/process', '/api/af-keepalive', '/api/browser-upload', '/api/admin-create-user'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (pathname.startsWith('/chase-os')) {
+    return chaseUpdateSession(request);
+  }
 
   const isPublic =
     PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
