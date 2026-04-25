@@ -1,4 +1,5 @@
-import { CrystalMark } from './CrystalMark';
+import Link from 'next/link';
+import { CrystalMark } from './_components/CrystalMark';
 
 const principles = [
   { eyebrow: 'Joyful', body: 'Not childish. The smile of a great first bite, not a clown’s grin.' },
@@ -8,35 +9,10 @@ const principles = [
   { eyebrow: 'Approachable', body: 'But premium. The line forms because it’s worth it, not because it’s cheap.' },
 ];
 
-const fryer = [
-  { name: 'Mini Donuts', desc: 'Cinnamon sugar, six to a bag.', price: '$6' },
-  { name: 'Glaze of the Day', desc: 'Brown butter, maple, or strawberry.', price: '$7' },
-  { name: 'Kettle Corn', desc: 'Brown butter, fresh popped.', price: '$5' },
-];
-
-const cold = [
-  { name: 'Hand-Scooped', desc: 'Two scoops, your pick of cone.', price: '$7' },
-  { name: 'Coffee', desc: 'Hot, iced, or with a splash.', price: '$5' },
-  { name: 'Dirty Soda', desc: 'Boylan + cream + your choice of syrup.', price: '$6' },
-];
-
-export default function SugarIceLanding() {
+export default function SugarIceHome() {
   return (
     <>
       <header className="si-hero">
-        <nav className="si-nav">
-          <div className="si-row si-nav-inner">
-            <a href="#top" className="si-mono" style={{ color: 'var(--cream)', textDecoration: 'none', fontSize: 11, letterSpacing: '0.22em', textTransform: 'uppercase' }}>
-              Sugar <span style={{ color: 'var(--accent)' }}>+</span> Ice
-            </a>
-            <div className="si-nav-links">
-              <a href="#menu">Menu</a>
-              <a href="#story">Our Story</a>
-              <a href="#visit">Visit</a>
-            </div>
-          </div>
-        </nav>
-
         <div className="si-row" id="top">
           <div className="si-hero-meta">
             <span>Craft Desserts &nbsp;·&nbsp; Coffee &nbsp;·&nbsp; Made to Order</span>
@@ -69,12 +45,12 @@ export default function SugarIceLanding() {
           </div>
 
           <div className="si-cta-row">
-            <a href="#menu" className="si-btn si-btn-accent">
+            <Link href="/sugar-and-ice/menu" className="si-btn si-btn-accent">
               See the Menu <span className="si-arrow">→</span>
-            </a>
-            <a href="#visit" className="si-btn si-btn-ghost">
+            </Link>
+            <Link href="/sugar-and-ice/visit" className="si-btn si-btn-ghost">
               Find Us
-            </a>
+            </Link>
           </div>
         </div>
       </header>
@@ -119,108 +95,45 @@ export default function SugarIceLanding() {
         </div>
       </section>
 
-      <section className="si-section si-menu-section" id="menu">
+      <section className="si-section" style={{ background: 'var(--cream-2)' }}>
         <div className="si-row">
           <div className="si-section-label">
             <span className="si-num">02</span>
-            <span className="si-lbl">A Taste of the Menu</span>
+            <span className="si-lbl">Where to Go Next</span>
             <span className="si-line" />
           </div>
 
           <div className="si-grid-2">
-            <h2>Made small. Made fresh. Made to order.</h2>
+            <h2>Pick a thread. Pull on it.</h2>
             <p className="si-body">
-              The menu is short on purpose &mdash; a handful of things, each done well. Donuts spun in front of you, ice cream scooped to order, coffee poured fresh, dirty sodas built by hand.
+              The full menu, the brand we&rsquo;re building, and where to find us &mdash; each gets its own page. Or just keep scrolling.
             </p>
           </div>
 
-          <div className="si-menu-grid">
-            <div className="si-menu-col">
-              <h3>From the Kettle</h3>
-              {fryer.map((item) => (
-                <div key={item.name} className="si-menu-row">
-                  <div>
-                    <div className="si-name">{item.name}</div>
-                    <div className="si-desc">{item.desc}</div>
-                  </div>
-                  <div className="si-price">{item.price}</div>
-                </div>
-              ))}
-            </div>
-            <div className="si-menu-col">
-              <h3>Coffee &amp; Cold</h3>
-              {cold.map((item) => (
-                <div key={item.name} className="si-menu-row">
-                  <div>
-                    <div className="si-name">{item.name}</div>
-                    <div className="si-desc">{item.desc}</div>
-                  </div>
-                  <div className="si-price">{item.price}</div>
-                </div>
-              ))}
-            </div>
+          <div className="si-feature-grid">
+            <Link href="/sugar-and-ice/menu" className="si-feature-card">
+              <span className="si-feature-num">01 · Menu</span>
+              <h3>Spun, Scooped, Poured.</h3>
+              <p>The full menu — donuts spun in front of you, ice cream scooped to order, coffee poured fresh, dirty sodas built by hand.</p>
+              <span className="si-feature-link">See the Menu →</span>
+            </Link>
+
+            <Link href="/sugar-and-ice/about" className="si-feature-card">
+              <span className="si-feature-num">02 · Our Story</span>
+              <h3>Comfort food, confidently set.</h3>
+              <p>The brand foundation — what we make, why it matters, and what we mean when we say &ldquo;at home next to a great cheese board.&rdquo;</p>
+              <span className="si-feature-link">Read More →</span>
+            </Link>
+
+            <Link href="/sugar-and-ice/visit" className="si-feature-card">
+              <span className="si-feature-num">03 · Visit</span>
+              <h3>We&rsquo;re probably parked somewhere good.</h3>
+              <p>Catch us at festivals, breweries, hotels, and main streets. Get on the list and we&rsquo;ll tell you when we&rsquo;re close.</p>
+              <span className="si-feature-link">Find Us →</span>
+            </Link>
           </div>
         </div>
       </section>
-
-      <section className="si-section" id="visit">
-        <div className="si-row">
-          <div className="si-section-label">
-            <span className="si-num">03</span>
-            <span className="si-lbl">Find Us</span>
-            <span className="si-line" />
-          </div>
-
-          <div className="si-grid-2">
-            <div>
-              <h2>We&rsquo;re probably parked somewhere good.</h2>
-              <p className="si-body" style={{ marginTop: 24 }}>
-                Trailer, kiosk, counter, or flagship &mdash; the brand scales from one location to fifty. Catch us at festivals, breweries, and main streets. Follow along to see where we&rsquo;re pouring next.
-              </p>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start', justifyContent: 'center' }}>
-              <a href="https://thesugarandice.com" className="si-btn si-btn-accent">
-                Get on the List
-              </a>
-              <a href="#menu" className="si-btn" style={{ color: 'var(--espresso)' }}>
-                Browse the Menu
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <footer className="si-footer">
-        <div className="si-row">
-          <div className="si-footer-grid">
-            <div>
-              <p className="si-footer-tagline">
-                Spun<span className="si-dot">.</span> Scooped<span className="si-dot">.</span> Poured<span className="si-dot">.</span>
-              </p>
-              <a href="https://thesugarandice.com" className="si-footer-domain">
-                thesugarandice<span className="si-tld">.com</span>
-              </a>
-            </div>
-            <div>
-              <h4>Visit</h4>
-              <p>Festivals &amp; Pop-ups</p>
-              <p>Breweries &amp; Hotels</p>
-              <p>Wherever the line forms.</p>
-            </div>
-            <div>
-              <h4>Follow</h4>
-              <p><a href="#">Instagram</a></p>
-              <p><a href="#">TikTok</a></p>
-              <p><a href="#">Newsletter</a></p>
-            </div>
-          </div>
-
-          <div className="si-footer-bottom">
-            <span>Sugar <span style={{ color: 'var(--accent)' }}>+</span> Ice &nbsp;·&nbsp; Brand v1.0</span>
-            <span>Made Small · Made Fresh · Made to Order</span>
-          </div>
-        </div>
-      </footer>
     </>
   );
 }
