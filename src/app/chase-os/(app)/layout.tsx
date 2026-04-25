@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from 'next';
-import { requireChaseUser } from '@/lib/chase/auth';
+import { requireChaseUser, isStaff } from '@/lib/chase/auth';
 import Sidebar from '@/components/chase/nav/Sidebar';
 import MobileNav from '@/components/chase/nav/MobileNav';
 import TopBar from '@/components/chase/nav/TopBar';
+import QuickCapture from '@/components/chase/today/QuickCapture';
 
 export const metadata: Metadata = {
   title: 'Chase OS',
@@ -25,6 +26,7 @@ export default async function ChaseAppLayout({ children }: { children: React.Rea
         <main className="flex-1 px-4 pb-24 pt-4 sm:px-6 md:pb-8">{children}</main>
       </div>
       <MobileNav role={profile.role} />
+      {isStaff(profile.role) ? <QuickCapture /> : null}
     </div>
   );
 }

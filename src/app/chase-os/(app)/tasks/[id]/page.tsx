@@ -8,6 +8,7 @@ import Avatar from '@/components/chase/shared/Avatar';
 import { PriorityBadge, StatusBadge, UrgencyBadge } from '@/components/chase/shared/Badge';
 import TaskStatusControls from '@/components/chase/tasks/TaskStatusControls';
 import CommentForm from '@/components/chase/tasks/CommentForm';
+import AttachmentUpload from '@/components/chase/tasks/AttachmentUpload';
 import type { Company, Profile, Task, TaskAttachment, TaskComment } from '@/lib/chase/types';
 
 export const dynamic = 'force-dynamic';
@@ -100,8 +101,8 @@ export default async function TaskDetailPage({ params }: { params: { id: string 
           </Card>
 
           <Card>
-            <CardHeader title="Attachments" />
-            <CardBody>
+            <CardHeader title="Attachments" subtitle={`${attachments?.length ?? 0}`} />
+            <CardBody className="space-y-3">
               {attachments && attachments.length > 0 ? (
                 <ul className="space-y-2">
                   {(attachments as TaskAttachment[]).map((a) => (
@@ -112,8 +113,11 @@ export default async function TaskDetailPage({ params }: { params: { id: string 
                   ))}
                 </ul>
               ) : (
-                <EmptyState title="No attachments" description="Upload via Storage; this list reflects task_attachments rows." />
+                <EmptyState title="No attachments yet" />
               )}
+              <div className="border-t border-slate-100 pt-3">
+                <AttachmentUpload taskId={task.id} />
+              </div>
             </CardBody>
           </Card>
         </div>

@@ -1,5 +1,6 @@
+import Link from 'next/link';
 import { createChaseServerClient } from '@/lib/chase/supabase/server';
-import { requireChaseUser } from '@/lib/chase/auth';
+import { requireChaseUser, isStaff } from '@/lib/chase/auth';
 import { Card, CardBody, CardHeader } from '@/components/chase/shared/Card';
 import EmptyState from '@/components/chase/shared/EmptyState';
 import type { Decision } from '@/lib/chase/types';
@@ -14,15 +15,22 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default async function DecisionsPage() {
-  await requireChaseUser();
+  const { profile } = await requireChaseUser();
   const supabase = createChaseServerClient();
   const { data: decisions } = await supabase.from('decisions').select('*').order('due_date', { ascending: true, nullsFirst: false });
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-brand-navy sm:text-3xl">Decisions</h1>
-        <p className="mt-1 text-sm text-slate-600">What needs deciding, with options and recommendations.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-navy sm:text-3xl">Decisions</h1>
+          <p className="mt-1 text-sm text-slate-600">What needs deciding, with options and recommendations.</p>
+        </div>
+        {isStaff(profile.role) ? (
+          <Link href="/chase-os/decisions/new" className="inline-flex items-center rounded-lg bg-brand-blue px-3 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90">
+            + New decision
+          </Link>
+        ) : null}
       </div>
       <Card>
         <CardHeader title="All decisions" subtitle={`${decisions?.length ?? 0}`} />
@@ -30,22 +38,24 @@ export default async function DecisionsPage() {
           {decisions && decisions.length > 0 ? (
             <ul>
               {(decisions as Decision[]).map((d) => (
-                <li key={d.id} className="border-b border-slate-100 px-4 py-4 last:border-b-0 sm:px-5">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-brand-navy">{d.title}</h3>
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_STYLE[d.status] ?? ''}`}>
-                      {d.status}
-                    </span>
-                  </div>
-                  {d.context ? <p className="mt-1 text-xs text-slate-600">{d.context}</p> : null}
-                  {d.recommendation ? (
-                    <p className="mt-2 text-xs text-slate-700">
-                      <span className="font-semibold uppercase tracking-wide text-slate-500">Rec:</span> {d.recommendation}
-                    </p>
-                  ) : null}
-                  {d.due_date ? (
-                    <p className="mt-1 text-[11px] text-slate-400">Due {new Date(d.due_date).toLocaleDateString()}</p>
-                  ) : null}
+                <li key={d.id} className="border-b border-slate-100 last:border-b-0">
+                  <Link href={`/chase-os/decisions/${d.id}`} className="block px-4 py-4 transition hover:bg-slate-50 sm:px-5">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-brand-navy">{d.title}</h3>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_STYLE[d.status] ?? ''}`}>
+                        {d.status}
+                      </span>
+                    </div>
+                    {d.context ? <p className="mt-1 line-clamp-2 text-xs text-slate-600">{d.context}</p> : null}
+                    {d.recommendation ? (
+                      <p className="mt-2 text-xs text-slate-700">
+                        <span className="font-semibold uppercase tracking-wide text-slate-500">Rec:</span> {d.recommendation}
+                      </p>
+                    ) : null}
+                    {d.due_date ? (
+                      <p className="mt-1 text-[11px] text-slate-400">Due {new Date(d.due_date).toLocaleDateString()}</p>
+                    ) : null}
+                  </Link>
                 </li>
               ))}
             </ul>

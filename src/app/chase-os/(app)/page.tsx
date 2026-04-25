@@ -124,11 +124,13 @@ export default async function TodayPage() {
               {decisions && decisions.length > 0 ? (
                 <ul>
                   {(decisions as Decision[]).map((d) => (
-                    <li key={d.id} className="border-b border-slate-100 px-4 py-3 last:border-b-0 sm:px-5">
-                      <p className="font-medium text-brand-navy">{d.title}</p>
-                      {d.recommendation ? (
-                        <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">Rec: {d.recommendation}</p>
-                      ) : null}
+                    <li key={d.id} className="border-b border-slate-100 last:border-b-0">
+                      <Link href={`/chase-os/decisions/${d.id}`} className="block px-4 py-3 transition hover:bg-slate-50 sm:px-5">
+                        <p className="font-medium text-brand-navy hover:underline">{d.title}</p>
+                        {d.recommendation ? (
+                          <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">Rec: {d.recommendation}</p>
+                        ) : null}
+                      </Link>
                     </li>
                   ))}
                 </ul>

@@ -1,5 +1,6 @@
 import { Card, CardBody, CardHeader } from '@/components/chase/shared/Card';
 import EmptyState from '@/components/chase/shared/EmptyState';
+import HealthEntryForm from '@/components/chase/health/HealthEntryForm';
 import { requireChaseUser } from '@/lib/chase/auth';
 import { createChaseServerClient } from '@/lib/chase/supabase/server';
 
@@ -21,7 +22,13 @@ export default async function HealthPage() {
         <p className="mt-1 text-sm text-slate-600">Private journal — only you can see your entries (enforced by RLS).</p>
       </div>
       <Card>
-        <CardHeader title="Recent entries" />
+        <CardHeader title="Log today" subtitle="Or pick a past date to backfill" />
+        <CardBody>
+          <HealthEntryForm />
+        </CardBody>
+      </Card>
+      <Card>
+        <CardHeader title="Recent entries" subtitle={`${entries?.length ?? 0}`} />
         <CardBody className="!p-0">
           {entries && entries.length > 0 ? (
             <ul>
@@ -38,7 +45,7 @@ export default async function HealthPage() {
               ))}
             </ul>
           ) : (
-            <div className="p-5"><EmptyState title="No entries yet" description="Daily log UI ships in the next iteration." /></div>
+            <div className="p-5"><EmptyState title="No entries yet" description="Log your first entry above." /></div>
           )}
         </CardBody>
       </Card>
