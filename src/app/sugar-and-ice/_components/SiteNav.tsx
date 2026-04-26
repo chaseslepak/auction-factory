@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { CrystalMark } from './CrystalMark';
 
 const navLinks: ReadonlyArray<{ href: string; label: string }> = [
-  { href: '/sugar-and-ice/menu', label: 'Menu' },
   { href: '/sugar-and-ice/about', label: 'Our Story' },
   { href: '/sugar-and-ice/visit', label: 'Book Us' },
 ];

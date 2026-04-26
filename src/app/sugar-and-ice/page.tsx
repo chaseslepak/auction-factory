@@ -45,11 +45,11 @@ export default function SugarIceHome() {
           </div>
 
           <div className="si-cta-row">
-            <Link href="/sugar-and-ice/menu" className="si-btn si-btn-accent">
-              See the Menu <span className="si-arrow">→</span>
+            <Link href="/sugar-and-ice/visit" className="si-btn si-btn-accent">
+              Book the Trailer <span className="si-arrow">→</span>
             </Link>
-            <Link href="/sugar-and-ice/visit" className="si-btn si-btn-ghost">
-              Book the Trailer
+            <Link href="/sugar-and-ice/about" className="si-btn si-btn-ghost">
+              Our Story
             </Link>
           </div>
         </div>
@@ -111,22 +111,15 @@ export default function SugarIceHome() {
           </div>
 
           <div className="si-feature-grid">
-            <Link href="/sugar-and-ice/menu" className="si-feature-card">
-              <span className="si-feature-num">01 · Menu</span>
-              <h3>What&rsquo;s on the menu today.</h3>
-              <p>Donuts, gelato, kettle corn, coffee, dirty sodas. Prices, flavors, and the things we&rsquo;re only making this week.</p>
-              <span className="si-feature-link">See the Menu →</span>
-            </Link>
-
             <Link href="/sugar-and-ice/about" className="si-feature-card">
-              <span className="si-feature-num">02 · Our Story</span>
+              <span className="si-feature-num">01 · Our Story</span>
               <h3>How it started.</h3>
               <p>One trailer, one fryer, and a stubborn opinion about brown butter. Why we make it small, and what we won&rsquo;t cut corners on.</p>
               <span className="si-feature-link">Read More →</span>
             </Link>
 
             <Link href="/sugar-and-ice/visit" className="si-feature-card">
-              <span className="si-feature-num">03 · Book Us</span>
+              <span className="si-feature-num">02 · Book Us</span>
               <h3>Book the trailer.</h3>
               <p>Weddings, festivals, parties, corporate days. Wherever you want dessert made on-site, we&rsquo;ll bring it.</p>
               <span className="si-feature-link">Request a Quote →</span>

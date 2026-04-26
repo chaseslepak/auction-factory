@@ -15,7 +15,6 @@ export function SiteFooter() {
           </div>
           <div>
             <h4>Explore</h4>
-            <p><Link href="/sugar-and-ice/menu">The Menu</Link></p>
             <p><Link href="/sugar-and-ice/about">Our Story</Link></p>
             <p><Link href="/sugar-and-ice/visit">Book Us</Link></p>
           </div>
