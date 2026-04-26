@@ -3,8 +3,17 @@ import { updateSession } from '@/lib/supabase/middleware';
 
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/jobs/process', '/api/af-keepalive', '/api/browser-upload', '/api/admin-create-user', '/sugar-and-ice'];
 
+const SUGAR_HOSTS = new Set(['thesugarandice.com', 'www.thesugarandice.com']);
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const host = (request.headers.get('host') || '').toLowerCase();
+
+  if (SUGAR_HOSTS.has(host) && !pathname.startsWith('/sugar-and-ice')) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/sugar-and-ice' + (pathname === '/' ? '' : pathname);
+    return NextResponse.rewrite(url);
+  }
 
   const isPublic =
     PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
