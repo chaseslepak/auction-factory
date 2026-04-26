@@ -4,29 +4,15 @@ import { PageHero } from '../_components/PageHero';
 export const metadata: Metadata = {
   title: 'Our Story',
   description:
-    'Sugar + Ice sits at the intersection of nostalgic Americana and modern craft food culture. Joyful, crafted, nostalgic, warm, approachable.',
+    'How Sugar + Ice started — one trailer, one fryer, and a stubborn opinion about brown butter. Mini donuts, hand-scooped gelato, kettle corn, real coffee, and Boylan dirty sodas.',
 };
 
-const principles = [
-  { eyebrow: 'Joyful', body: 'Not childish. The smile of a great first bite, not a clown’s grin.' },
-  { eyebrow: 'Crafted', body: 'Not precious. Things made by hand, in front of you, well.' },
-  { eyebrow: 'Nostalgic', body: 'Not retro kitsch. The memory, refined. The reference, not the costume.' },
-  { eyebrow: 'Warm', body: 'But visually sharp. Comfort food, set in confident type.' },
-  { eyebrow: 'Approachable', body: 'But premium. The line forms because it’s worth it, not because it’s cheap.' },
-];
-
-const sayYes = [
-  'Spun to order.',
-  'Hand-scooped, hand-poured.',
-  'Brown butter. Sea salt. Real cream.',
-  'We’re parked at the brewery ’til ten.',
-];
-
-const sayNo = [
-  'Delicious. Yummy. Amazing.',
-  'Treats! Indulge! Decadent!',
-  'Multiple exclamation marks',
-  'Emoji-stuffed captions',
+const craft = [
+  { eyebrow: 'Donuts', body: 'Fresh batter, hot oil, six to a bag — handed over before the sugar has time to settle. We don’t hold them.' },
+  { eyebrow: 'Gelato', body: 'Brown butter sweet cream is the house flavor. Salted honey, olive oil and lemon, affogato. Real cream, real sugar, the good vanilla.' },
+  { eyebrow: 'Kettle Corn', body: 'Brown butter, sea salt, and a kettle that someone is actually watching. Caramel-pecan when we’re feeling it.' },
+  { eyebrow: 'Coffee', body: 'Hot, iced, or with a splash. Brown sugar cream cold brew. A real affogato — espresso poured over a scoop, eaten with a spoon.' },
+  { eyebrow: 'Dirty Sodas', body: 'Boylan craft soda, cream, your pick of house syrup. Built in front of you, served cold.' },
 ];
 
 export default function SugarIceAbout() {
@@ -35,22 +21,25 @@ export default function SugarIceAbout() {
       <PageHero
         num="02"
         eyebrow="Our Story"
-        title="Comfort food, confidently set."
-        lede="Sugar + Ice sits at the intersection of nostalgic Americana and modern craft food culture — the food you loved as a kid, made with the care you expect today."
+        title="How it started."
+        lede="One trailer, one fryer, and a stubborn opinion about how mini donuts should taste."
       />
 
       <section className="si-about-section">
         <div className="si-row">
           <div className="si-grid-2">
             <p className="si-pull-quote">
-              At home next to $18 cocktails<span className="si-dot">.</span> And a great cheese board<span className="si-dot">.</span>
+              Make it small<span className="si-dot">.</span> Make it fresh<span className="si-dot">.</span> Make it in front of you<span className="si-dot">.</span>
             </p>
             <div>
               <p className="si-body">
-                It belongs at a boutique festival, a hotel lobby, a beach town main street, an airport terminal, a stadium concourse &mdash; anywhere people want the food they loved as a kid, made with the care they expect today.
+                We started Sugar + Ice because the things we loved as kids &mdash; warm mini donuts at a fair, a scoop of something cold on a Saturday, kettle corn out of a paper bag &mdash; were almost always made with shortcuts. Pre-made batter. Cheap oil. The cone bigger than the scoop.
               </p>
               <p className="si-body" style={{ marginTop: 16 }}>
-                The brand is built for everyone. Kids on a Saturday. Couples on a Friday. Late-night crowds. Parents who want one good thing, made well, that the whole family can agree on.
+                We thought we could do all of that better, in one place, made to order. So we built a trailer, dialed in a recipe for brown butter sweet cream gelato, and started showing up at festivals.
+              </p>
+              <p className="si-body" style={{ marginTop: 16 }}>
+                Now we&rsquo;re here. Same trailer some days, a counter shop other days, a hotel kiosk after that. Same five things on the menu, made the same way every time.
               </p>
             </div>
           </div>
@@ -61,22 +50,22 @@ export default function SugarIceAbout() {
         <div className="si-row">
           <div className="si-section-label">
             <span className="si-num">A</span>
-            <span className="si-lbl">Five Principles</span>
+            <span className="si-lbl">What We Make</span>
             <span className="si-line" />
           </div>
 
           <div className="si-grid-2">
-            <h2>Five things we hold to.</h2>
+            <h2>Five things, made the way they should be made.</h2>
             <p className="si-body">
-              Not a manifesto. A short list of the things that have to be true, every time, for a Sugar + Ice product to feel like a Sugar + Ice product.
+              Short menu. Each thing on it earns its spot. We&rsquo;d rather do five things really well than twenty things in passing.
             </p>
           </div>
 
           <div className="si-principles" style={{ marginTop: 32 }}>
-            {principles.map((p) => (
-              <div key={p.eyebrow} className="si-principle">
-                <span className="si-eyebrow">{p.eyebrow}</span>
-                <span className="si-prose">{p.body}</span>
+            {craft.map((c) => (
+              <div key={c.eyebrow} className="si-principle">
+                <span className="si-eyebrow">{c.eyebrow}</span>
+                <span className="si-prose">{c.body}</span>
               </div>
             ))}
           </div>
@@ -87,47 +76,34 @@ export default function SugarIceAbout() {
         <div className="si-row">
           <div className="si-section-label">
             <span className="si-num">B</span>
-            <span className="si-lbl">How We Talk</span>
+            <span className="si-lbl">What We Won&rsquo;t Cut</span>
             <span className="si-line" />
           </div>
 
           <div className="si-grid-2">
-            <h2>Short. Punchy. Warm.</h2>
+            <h2>The short list of things we&rsquo;re stubborn about.</h2>
             <p className="si-body">
-              A craftsperson who happens to be funny &mdash; not a hype account. Action verbs. Invitations, not pitches. Wit over wackiness.
+              These are the line items we won&rsquo;t move on, even when it would be easier or cheaper to.
             </p>
           </div>
 
-          <div className="si-say-grid">
-            <div className="si-say-card si-say-yes">
-              <h4>Sounds Like Us</h4>
-              <ul>
-                {sayYes.map((s) => <li key={s}>{s}</li>)}
-              </ul>
+          <div className="si-principles" style={{ marginTop: 32 }}>
+            <div className="si-principle">
+              <span className="si-eyebrow">Real cream</span>
+              <span className="si-prose">In the gelato, in the cold brew, in the dirty sodas. No powder, no shelf-stable shortcut.</span>
             </div>
-            <div className="si-say-card si-say-no">
-              <h4>Doesn’t Sound Like Us</h4>
-              <ul>
-                {sayNo.map((s) => <li key={s}>{s}</li>)}
-              </ul>
+            <div className="si-principle">
+              <span className="si-eyebrow">Brown butter</span>
+              <span className="si-prose">In the kettle corn and the donut glaze. Made in-house. It takes longer; it&rsquo;s worth it.</span>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="si-about-section si-about-section--dark">
-        <div className="si-row">
-          <div className="si-section-label">
-            <span className="si-num">C</span>
-            <span className="si-lbl">From One to Fifty</span>
-            <span className="si-line" />
-          </div>
-
-          <div className="si-grid-2">
-            <h2>Trailer, kiosk, counter, or flagship.</h2>
-            <p className="si-body">
-              The brand is built to scale. One trailer to fifty locations &mdash; the system flexes without losing what makes it ours. Same crystal mark, same tagline, same standards. Different square footage.
-            </p>
+            <div className="si-principle">
+              <span className="si-eyebrow">Made to order</span>
+              <span className="si-prose">If it&rsquo;s sitting in a warmer, it&rsquo;s not on the menu. If you ordered it, someone is making it right now.</span>
+            </div>
+            <div className="si-principle">
+              <span className="si-eyebrow">Boylan, not house cola</span>
+              <span className="si-prose">For the dirty sodas. The good stuff costs more. The drink is better. End of argument.</span>
+            </div>
           </div>
         </div>
       </section>

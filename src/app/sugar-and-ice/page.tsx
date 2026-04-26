@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { CrystalMark } from './_components/CrystalMark';
 
-const principles = [
-  { eyebrow: 'Joyful', body: 'Not childish. The smile of a great first bite, not a clown’s grin.' },
-  { eyebrow: 'Crafted', body: 'Not precious. Things made by hand, in front of you, well.' },
-  { eyebrow: 'Nostalgic', body: 'Not retro kitsch. The memory, refined. The reference, not the costume.' },
-  { eyebrow: 'Warm', body: 'But visually sharp. Comfort food, set in confident type.' },
-  { eyebrow: 'Approachable', body: 'But premium. The line forms because it’s worth it, not because it’s cheap.' },
+const things = [
+  { eyebrow: 'Donuts', body: 'Mini, fresh-fried, tossed in cinnamon sugar or glazed while you watch. Six to a bag, warm.' },
+  { eyebrow: 'Gelato', body: 'Hand-scooped to order. Brown butter sweet cream, salted honey, olive oil and lemon.' },
+  { eyebrow: 'Kettle Corn', body: 'Brown butter and sea salt. Caramel-pecan when we’re feeling it. Birthday-cake when you are.' },
+  { eyebrow: 'Coffee', body: 'Hot, iced, or with a splash. Brown sugar cream cold brew. A real affogato.' },
+  { eyebrow: 'Dirty Sodas', body: 'Boylan + cream + your pick of syrup. The drink your kid will fight you for.' },
 ];
 
 export default function SugarIceHome() {
@@ -37,10 +37,10 @@ export default function SugarIceHome() {
 
           <div className="si-hero-grid">
             <p className="si-hero-lede">
-              A craft dessert and coffee brand serving the food you loved as a kid &mdash; executed at the level of a boutique dessert shop. At home next to $18 cocktails and a great cheese board.
+              Mini donuts fried to order. Gelato hand-scooped. Kettle corn still warm from the kettle. Real coffee, Boylan dirty sodas, and a couple of things you&rsquo;ll want to try because you&rsquo;ve never had them this good.
             </p>
             <p className="si-hero-sub">
-              Made small. Made fresh. Made to order. Built for everyone &mdash; kids, couples, late-night crowds &mdash; and built to scale: one location to fifty.
+              Walk up. Order. Watch it get made. Two minutes later you&rsquo;ve got something better than you remember it being.
             </p>
           </div>
 
@@ -68,26 +68,26 @@ export default function SugarIceHome() {
         <div className="si-row">
           <div className="si-section-label">
             <span className="si-num">01</span>
-            <span className="si-lbl">Our Foundation</span>
+            <span className="si-lbl">What We Make</span>
             <span className="si-line" />
           </div>
 
           <div className="si-grid-2">
             <div>
-              <h2>At home next to $18 cocktails and a great cheese board.</h2>
+              <h2>Five things, all made to order.</h2>
               <p className="si-body" style={{ marginTop: 24 }}>
-                Sugar + Ice sits at the intersection of nostalgic Americana and modern craft food culture. It belongs at a boutique festival, a hotel lobby, a beach town main street, an airport terminal, a stadium concourse &mdash; anywhere people want the food they loved as a kid, made with the care they expect today.
+                Short menu on purpose. Donuts go in the fryer when you order. Gelato gets scooped in front of you. Kettle corn comes out of the kettle a few feet away. Nothing&rsquo;s pre-made, nothing sits.
               </p>
               <p className="si-body" style={{ marginTop: 16 }}>
-                The brand is built for everyone &mdash; kids, couples, late-night crowds, parents on a Saturday. Not childish. Not precious. Confident, warm, and a little bit fun.
+                If a line forms, it forms because the next bag is worth waiting for.
               </p>
             </div>
 
             <div className="si-principles">
-              {principles.map((p) => (
-                <div key={p.eyebrow} className="si-principle">
-                  <span className="si-eyebrow">{p.eyebrow}</span>
-                  <span className="si-prose">{p.body}</span>
+              {things.map((t) => (
+                <div key={t.eyebrow} className="si-principle">
+                  <span className="si-eyebrow">{t.eyebrow}</span>
+                  <span className="si-prose">{t.body}</span>
                 </div>
               ))}
             </div>
@@ -106,29 +106,29 @@ export default function SugarIceHome() {
           <div className="si-grid-2">
             <h2>Pick a thread. Pull on it.</h2>
             <p className="si-body">
-              The full menu, the brand we&rsquo;re building, and where to find us &mdash; each gets its own page. Or just keep scrolling.
+              The full menu, the story behind the trailer, and where to catch us next. Or just keep scrolling.
             </p>
           </div>
 
           <div className="si-feature-grid">
             <Link href="/sugar-and-ice/menu" className="si-feature-card">
               <span className="si-feature-num">01 · Menu</span>
-              <h3>Spun, Scooped, Poured.</h3>
-              <p>The full menu — donuts spun in front of you, ice cream scooped to order, coffee poured fresh, dirty sodas built by hand.</p>
+              <h3>What&rsquo;s on the menu today.</h3>
+              <p>Donuts, gelato, kettle corn, coffee, dirty sodas. Prices, flavors, and the things we&rsquo;re only making this week.</p>
               <span className="si-feature-link">See the Menu →</span>
             </Link>
 
             <Link href="/sugar-and-ice/about" className="si-feature-card">
               <span className="si-feature-num">02 · Our Story</span>
-              <h3>Comfort food, confidently set.</h3>
-              <p>The brand foundation — what we make, why it matters, and what we mean when we say &ldquo;at home next to a great cheese board.&rdquo;</p>
+              <h3>How it started.</h3>
+              <p>One trailer, one fryer, and a stubborn opinion about brown butter. Why we make it small, and what we won&rsquo;t cut corners on.</p>
               <span className="si-feature-link">Read More →</span>
             </Link>
 
             <Link href="/sugar-and-ice/visit" className="si-feature-card">
               <span className="si-feature-num">03 · Visit</span>
-              <h3>We&rsquo;re probably parked somewhere good.</h3>
-              <p>Catch us at festivals, breweries, hotels, and main streets. Get on the list and we&rsquo;ll tell you when we&rsquo;re close.</p>
+              <h3>Where to find us this week.</h3>
+              <p>Festivals, breweries, hotels, main streets. Get on the list and we&rsquo;ll tell you when we&rsquo;re close.</p>
               <span className="si-feature-link">Find Us →</span>
             </Link>
           </div>

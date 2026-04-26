@@ -28,7 +28,7 @@ export function SiteFooter() {
         </div>
 
         <div className="si-footer-bottom">
-          <span>Sugar <span style={{ color: 'var(--accent)' }}>+</span> Ice &nbsp;·&nbsp; Brand v1.0</span>
+          <span>Sugar <span style={{ color: 'var(--accent)' }}>+</span> Ice &nbsp;·&nbsp; &copy; {new Date().getFullYear()}</span>
           <span>Made Small · Made Fresh · Made to Order</span>
         </div>
       </div>

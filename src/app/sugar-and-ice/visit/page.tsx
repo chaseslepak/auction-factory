@@ -9,33 +9,33 @@ export const metadata: Metadata = {
 
 const placements = [
   {
-    eyebrow: 'Pop-Up',
+    eyebrow: 'Trailer',
     title: 'Festivals',
-    body: 'Boutique food festivals, art fairs, summer markets. The trailer rolls in, the line forms, the line gets fed.',
+    body: 'Food festivals, art fairs, summer markets. The trailer rolls in, the line forms, the line gets fed.',
   },
   {
-    eyebrow: 'Stay',
-    title: 'Hotels & Resorts',
+    eyebrow: 'Lobby',
+    title: 'Hotels',
     body: 'Lobby kiosks for the four-o’clock crowd. Late-night carts for the people who came back for one more.',
   },
   {
-    eyebrow: 'Main Street',
-    title: 'Brick & Mortar',
-    body: 'Counter shops on walking streets, beach towns, college blocks. Same menu. More square footage.',
+    eyebrow: 'Walk-Up',
+    title: 'Counter Shops',
+    body: 'Walking streets, beach towns, college blocks. Same menu, just more room to sit down with it.',
   },
   {
-    eyebrow: 'Stadium',
-    title: 'Concourses',
-    body: 'Sports, concerts, conferences. A point of light in a sea of nachos.',
+    eyebrow: 'Concourse',
+    title: 'Stadiums & Arenas',
+    body: 'Sports, concerts, conferences. A line worth standing in between innings.',
   },
   {
-    eyebrow: 'Field',
+    eyebrow: 'Pour',
     title: 'Breweries',
-    body: 'We bring dessert. They bring the IPA. Everyone wins.',
+    body: 'We bring dessert. They bring the IPA. You get both in one trip.',
   },
   {
-    eyebrow: 'Private',
-    title: 'Events & Catering',
+    eyebrow: 'Booked',
+    title: 'Private Events',
     body: 'Weddings, corporate offsites, birthday parties. Trailer, cart, or counter — your call.',
   },
 ];
@@ -59,9 +59,9 @@ export default function SugarIceVisit() {
           </div>
 
           <div className="si-grid-2">
-            <h2>Anywhere people want what they loved as a kid, made well today.</h2>
+            <h2>You&rsquo;ll catch us in a few different setups.</h2>
             <p className="si-body">
-              The brand is built for any context where great food belongs. The footprint changes; the standards don&rsquo;t.
+              Same fryer, same gelato cabinet, same coffee. Different square footage. Whether it&rsquo;s a trailer at a brewery or a counter shop on a walking street, what you order is what you&rsquo;d get anywhere else we set up.
             </p>
           </div>
 

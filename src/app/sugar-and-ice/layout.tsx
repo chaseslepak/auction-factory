@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     template: '%s · Sugar + Ice',
   },
   description:
-    'A craft dessert and coffee brand serving the food you loved as a kid — executed at the level of a boutique dessert shop. Donuts, ice cream, kettle corn, coffee, dirty sodas.',
+    'Mini donuts, hand-scooped gelato, kettle corn, real coffee, and Boylan dirty sodas — made to order. Find us at festivals, breweries, hotels, and on main streets.',
 };
 
 export default function SugarIceLayout({
