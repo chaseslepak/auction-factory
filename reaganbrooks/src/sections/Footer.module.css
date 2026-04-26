@@ -16,6 +16,7 @@
 .line {
   display: inline-flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
   gap: 0.65rem;
   font-family: var(--font-serif);
@@ -27,7 +28,29 @@
   color: var(--color-stone-gray);
 }
 
+.location {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.sep,
 .dot {
   color: var(--color-stone-gray);
   opacity: 0.7;
+}
+
+@media (max-width: 768px) {
+  /* Mobile artboard breaks the footer into two rows:
+       Row 1: Reagan Brooks LLC
+       Row 2: Richfield, Ohio · © 2026
+     The first separator is hidden so the column stack reads cleanly. */
+  .line {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .sep {
+    display: none;
+  }
 }

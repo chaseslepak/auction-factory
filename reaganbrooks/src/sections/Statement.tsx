@@ -11,7 +11,7 @@ export function Statement() {
       <p className={styles.sub}>
         Reagan Brooks owns and actively operates a portfolio of businesses
         across consumer goods, foodservice, asset resale, home services, real
-        estate, and entertainment. Headquartered in Northeast Ohio.
+        estate, athletics, and entertainment. Headquartered in Northeast Ohio.
       </p>
     </section>
   );
