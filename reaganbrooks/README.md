@@ -61,11 +61,17 @@ The visual identity is the deliverable; the code is just how it gets there. Read
 - **Motion:** None. No fade-ins, no parallax, no scroll-triggered reveals.
 - **No emoji, no icon fonts, no chat widgets, no cookie banners, no analytics, no social links.** If a section feels empty, the answer is composition and whitespace.
 
+## OG image
+
+Generated at build time by `src/app/opengraph-image.tsx` using `next/og`. Composes the spec from `cowork/ASSET_SPEC.md`: stacked uppercase wordmark on Bone, 1px Antique Brass hairline below, 1200×630 PNG. The font is fetched once at build time from the @fontsource jsDelivr mirror — Satori (the engine inside `next/og`) requires woff/TTF/OTF rather than woff2, so the build-time font source differs from the live page's `next/font/google` import.
+
+If the build environment has no outbound network, `app/opengraph-image.tsx` will fail to render. Vendor the woff into the repo if that becomes a problem.
+
 ## What is intentionally deferred
 
-- **PNG icon set** (`favicon.ico`, `favicon-16/32`, `apple-touch-icon`, `icon-192/512`) and **OG image** (`og-image.png`) per `cowork/ASSET_SPEC.md`. Need source HTMLs `cowork/source/05-avatars-favicons.html` (icon SVGs) and `cowork/source/08-monogram-exploration.html` to render. The SVG favicon (`app/icon.svg`) covers Chrome/Firefox/Safari/Edge in the meantime.
+- **PNG icon set** (`favicon.ico`, `favicon-16/32`, `apple-touch-icon`, `icon-192/512`) per `cowork/ASSET_SPEC.md`. Need source HTMLs `cowork/source/05-avatars-favicons.html` (icon SVGs) and `cowork/source/08-monogram-exploration.html` to render. The SVG favicon (`app/icon.svg`) covers Chrome/Firefox/Safari/Edge in the meantime; iOS home-screen and Android adaptive icons fall back to the system default.
 - **Email signature** — pending `cowork/source/04-email-signature.html`.
-- **Visual diff** vs `cowork/source/01-website-desktop.html` and `02-website-mobile.html` — pending those files.
+- **Visual diff** vs `cowork/source/01-website-desktop.html` and `02-website-mobile.html` — pending source files. The current implementation is built from `brand-tokens.json` plus the rendered text content of the artboards, not the artboards' actual markup.
 
 ## Deployment
 
