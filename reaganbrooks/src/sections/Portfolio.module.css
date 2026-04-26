@@ -2,24 +2,25 @@
   max-width: var(--max-content);
   margin: 0 auto;
   padding: var(--section-pad-y) var(--gutter);
-  border-top: 1px solid var(--rule-soft);
+  border-top: 1px solid var(--rule);
 }
 
 .eyebrow {
   font-family: var(--font-serif);
   font-weight: var(--weight-medium);
-  font-size: var(--size-eyebrow);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   color: var(--color-slate-navy);
-  margin-bottom: 0.6rem;
+  margin-bottom: var(--space-stack-tight);
 }
 
 .note {
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: var(--weight-regular);
-  font-size: 0.95rem;
+  font-size: var(--size-italic-accent);
   color: var(--color-stone-gray);
   margin-bottom: clamp(2.5rem, 5vw, 4rem);
 }
@@ -40,24 +41,24 @@
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: var(--weight-regular);
-  font-size: var(--size-portfolio-cat);
+  font-size: var(--size-italic-accent);
   color: var(--color-antique-brass);
-  margin-bottom: 0.45rem;
+  margin-bottom: var(--space-stack-tight);
 }
 
 .name {
   font-family: var(--font-serif);
   font-weight: var(--weight-medium);
-  font-size: var(--size-portfolio-name);
-  line-height: 1.2;
-  letter-spacing: -0.005em;
+  font-size: var(--size-title);
+  line-height: var(--leading-title);
+  letter-spacing: 0;
   color: var(--color-slate-navy);
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.6rem;
 }
 
 .description {
-  font-size: 1rem;
-  line-height: 1.55;
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
   color: var(--color-ink);
 }
 
@@ -78,7 +79,8 @@
     row-gap: 2rem;
   }
 
-  .name {
-    font-size: 1.375rem;
+  .description {
+    font-size: var(--size-small);
+    line-height: var(--leading-small);
   }
 }

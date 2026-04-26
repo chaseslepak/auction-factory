@@ -2,13 +2,14 @@
   max-width: var(--max-content);
   margin: 0 auto;
   padding: var(--section-pad-y) var(--gutter);
-  border-top: 1px solid var(--rule-soft);
+  border-top: 1px solid var(--rule);
 }
 
 .eyebrow {
   font-family: var(--font-serif);
   font-weight: var(--weight-medium);
-  font-size: var(--size-eyebrow);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   color: var(--color-slate-navy);
@@ -17,16 +18,15 @@
 
 .body {
   display: grid;
-  gap: 1.5rem;
+  gap: var(--space-stack);
   max-width: 46rem;
 }
 
 .body p {
   font-family: var(--font-serif);
   font-weight: var(--weight-regular);
-  font-size: 1.3rem;
-  line-height: 1.5;
-  letter-spacing: -0.005em;
+  font-size: var(--size-title);
+  line-height: var(--leading-title);
   color: var(--color-slate-navy);
 }
 
@@ -41,8 +41,8 @@
   }
 
   .body p {
-    font-size: 1.0625rem;
-    line-height: 1.6;
+    font-size: var(--size-body);
+    line-height: var(--leading-body);
     color: var(--color-ink);
   }
 }

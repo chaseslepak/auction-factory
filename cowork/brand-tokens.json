@@ -1,0 +1,198 @@
+{
+  "name": "Reagan Brooks",
+  "version": "1.0.0",
+  "description": "Brand tokens for Reagan Brooks LLC, a privately held holding company in Richfield, Ohio.",
+  "color": {
+    "slateNavy": {
+      "hex": "#1C2C3E",
+      "role": "primary",
+      "use": "Headlines, marks, structural rules"
+    },
+    "antiqueBrass": {
+      "hex": "#8B6F3F",
+      "role": "accent",
+      "use": "Single accent — italics, callouts, key numerals"
+    },
+    "bone": {
+      "hex": "#F5F1E8",
+      "role": "surface",
+      "use": "Default page background; never use #FFFFFF"
+    },
+    "stoneGray": {
+      "hex": "#6B6358",
+      "role": "neutral",
+      "use": "Captions, secondary text, footers"
+    },
+    "ink": {
+      "hex": "#2D2A26",
+      "role": "body",
+      "use": "Body copy; warm near-black"
+    },
+    "rule": {
+      "hex": "rgba(28,44,62,0.18)",
+      "role": "rule",
+      "use": "Hairline dividers"
+    },
+    "ruleSoft": {
+      "hex": "rgba(28,44,62,0.10)",
+      "role": "rule-soft",
+      "use": "Faintest dividers"
+    }
+  },
+  "typography": {
+    "family": {
+      "primary": "EB Garamond",
+      "fallback": "\"EB Garamond\", \"Hoefler Text\", Garamond, Georgia, serif",
+      "googleFontsUrl": "https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
+    },
+    "scale": {
+      "displayXL": {
+        "size": 76,
+        "weight": 500,
+        "lineHeight": 1.04,
+        "letterSpacing": "-0.012em"
+      },
+      "displayL": {
+        "size": 56,
+        "weight": 500,
+        "lineHeight": 1.05,
+        "letterSpacing": "-0.010em"
+      },
+      "displayM": {
+        "size": 38,
+        "weight": 500,
+        "lineHeight": 1.1,
+        "letterSpacing": "-0.008em"
+      },
+      "title": {
+        "size": 21,
+        "weight": 500,
+        "lineHeight": 1.45,
+        "letterSpacing": "0"
+      },
+      "body": {
+        "size": 16,
+        "weight": 400,
+        "lineHeight": 1.7,
+        "letterSpacing": "0"
+      },
+      "small": {
+        "size": 13,
+        "weight": 400,
+        "lineHeight": 1.55,
+        "letterSpacing": "0"
+      },
+      "label": {
+        "size": 11,
+        "weight": 500,
+        "lineHeight": 1.2,
+        "letterSpacing": "0.32em",
+        "transform": "uppercase"
+      },
+      "italicAccent": {
+        "size": 14,
+        "weight": 400,
+        "style": "italic",
+        "color": "antiqueBrass"
+      }
+    },
+    "rules": [
+      "Set everything in EB Garamond. Never substitute a sans-serif except for OS-rendered chrome.",
+      "Italic + Antique Brass is the one and only emphasis pattern.",
+      "Tracked uppercase 0.32em letter-spacing for all small labels.",
+      "Body text never smaller than 13px on web."
+    ]
+  },
+  "spacing": {
+    "page": {
+      "horizontal": 72,
+      "vertical": 96
+    },
+    "section": 64,
+    "stack": {
+      "tight": 8,
+      "default": 18,
+      "loose": 32,
+      "sectionGap": 64
+    }
+  },
+  "logo": {
+    "wordmark": "Stacked uppercase REAGAN / 12px horizontal rule / BROOKS · letter-spacing 0.28em · weight 500",
+    "monogram": "Ruled Square — RB in EB Garamond Medium 46pt centered inside a 1.6pt thin Slate Navy square frame, padded 14% from edge",
+    "clearSpace": "0.5x cap-height on all four sides",
+    "minSize": {
+      "wordmarkPx": 88,
+      "monogramPx": 32
+    }
+  },
+  "voice": {
+    "tone": "Patient, plainspoken, exact. Confident without performance.",
+    "avoid": [
+      "leverage",
+      "synergy",
+      "ecosystem",
+      "platform",
+      "mission-driven",
+      "family office"
+    ],
+    "prefer": [
+      "operate",
+      "own",
+      "buy",
+      "build",
+      "holding company"
+    ],
+    "selfReference": "we, the firm",
+    "tagline": "A privately held holding company.",
+    "boilerplate": "Reagan Brooks is a privately held holding company headquartered in Northeast Ohio. The firm buys or creates businesses and actively operates a portfolio across consumer packaged goods, foodservice, asset resale and auctions, home services, real estate, athletics, and entertainment. Reagan Brooks invests with the long horizon of a family that intends to hold its assets across generations, and with the day-to-day discipline of an operator who has run the businesses inside it. The firm is named for the children of its founder."
+  },
+  "portfolio": [
+    {
+      "category": "Asset Resale",
+      "name": "Crazy Good Co",
+      "description": "Restaurant equipment resale through a heavily discounted direct-to-buyer warehouse and storefront."
+    },
+    {
+      "category": "Auctions",
+      "name": "Auction Factory CLE",
+      "description": "Regional auction operations spanning Ohio, western Pennsylvania, West Virginia, Kentucky, Michigan, and Indiana."
+    },
+    {
+      "category": "Consumer Goods",
+      "name": "Purvey CPG",
+      "description": "Brand and operations consulting for emerging consumer packaged goods companies."
+    },
+    {
+      "category": "Foodservice",
+      "name": "Sugar + Ice",
+      "description": "A specialty foodservice concept serving coffee, dirty sodas, ice cream, donuts, and desserts."
+    },
+    {
+      "category": "Home Services",
+      "name": "Home Hub Collective",
+      "description": "Operations and marketing infrastructure for owner-operated home services businesses."
+    },
+    {
+      "category": "Real Estate",
+      "name": "Slepak Properties",
+      "description": "Short-term, long-term, and commercial real estate across Ohio and Pennsylvania."
+    },
+    {
+      "category": "Athletics",
+      "name": "SwingZone Sports Hub",
+      "description": "An indoor athletic training facility."
+    },
+    {
+      "category": "Entertainment",
+      "name": "Uncle Joe's Good Time",
+      "description": "A family entertainment facility."
+    }
+  ],
+  "contact": {
+    "email": "inquiries@reaganbrooks.com",
+    "founderEmail": "chase@reaganbrooks.com",
+    "city": "Richfield, Ohio",
+    "domain": "reaganbrooks.com",
+    "legalEntity": "Reagan Brooks LLC"
+  }
+}

@@ -1,7 +1,8 @@
 /*
  * Reagan Brooks — design tokens.
- * The single source of truth for color, type, and spacing.
- * Mirrors the values in cowork/brand-tokens.json.
+ * Mirrors cowork/brand-tokens.json. The JSON is the source of truth;
+ * this file translates it into CSS custom properties consumed by
+ * every section. Never reference raw hex values in section CSS.
  */
 
 :root {
@@ -12,44 +13,62 @@
   --color-stone-gray: #6b6358;
   --color-ink: #2d2a26;
 
-  /* Hairline rules */
-  --rule-soft: rgba(28, 44, 62, 0.18);
-  --rule-strong: var(--color-slate-navy);
+  /* Hairline rules — match brand-tokens.json `rule` and `ruleSoft` */
+  --rule: rgba(28, 44, 62, 0.18); /* hairline dividers */
+  --rule-soft: rgba(28, 44, 62, 0.1); /* faintest dividers */
   --rule-brass: var(--color-antique-brass);
 
   /* ---------- Typography ---------- */
-  --font-serif: var(--font-eb-garamond), Georgia, serif;
+  --font-serif: var(--font-eb-garamond), "EB Garamond", "Hoefler Text",
+    Garamond, Georgia, serif;
 
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
 
-  /* Type rules from the brand guidelines */
-  --tracking-display: -0.012em;
-  --tracking-label: 0.42em;
+  /* Type scale — values from brand-tokens.json typography.scale */
+  --size-display-xl: 4.75rem; /* 76px */
+  --size-display-l: 3.5rem; /* 56px */
+  --size-display-m: 2.375rem; /* 38px */
+  --size-title: 1.3125rem; /* 21px */
+  --size-body: 1rem; /* 16px */
+  --size-small: 0.8125rem; /* 13px */
+  --size-label: 0.6875rem; /* 11px */
+  --size-italic-accent: 0.875rem; /* 14px */
+
+  --leading-display-xl: 1.04;
+  --leading-display-l: 1.05;
+  --leading-display-m: 1.1;
+  --leading-title: 1.45;
+  --leading-body: 1.7;
+  --leading-small: 1.55;
+  --leading-label: 1.2;
+
+  --tracking-display-xl: -0.012em;
+  --tracking-display-l: -0.01em;
+  --tracking-display-m: -0.008em;
+  --tracking-label: 0.32em;
   --tracking-wordmark: 0.28em;
 
-  /* Type scale */
-  --size-headline: clamp(2.375rem, 5.6vw, 5.5rem); /* 38–88px */
-  --size-statement-sub: clamp(1.125rem, 1.4vw, 1.375rem); /* 18–22px */
-  --size-body: 1.1875rem; /* 19px, sits inside 18–22 range */
-  --size-body-tight: 1.0625rem; /* 17px */
-  --size-eyebrow: 0.75rem; /* 12px */
-  --size-meta: 0.8125rem; /* 13px */
-  --size-portfolio-name: 1.5rem; /* 24px */
-  --size-portfolio-cat: 0.875rem; /* 14px italic */
-  --size-contact-mail: clamp(2rem, 4.4vw, 3.5rem); /* 32–56px */
-  --size-believe-title: 1.0625rem; /* 17px italic */
+  /* Fluid override for the page-opening headline:
+     scales from displayM (38) on small screens to displayXL (76) on wide. */
+  --size-headline-fluid: clamp(2.375rem, 5.6vw, 4.75rem);
+  /* Fluid override for the contact email:
+     scales from ~32px on small to displayL (56) on wide. */
+  --size-contact-email-fluid: clamp(2rem, 4.4vw, 3.5rem);
 
-  /* Line heights */
-  --leading-display: 1.04;
-  --leading-body: 1.7;
-  --leading-prose: 1.65;
+  /* ---------- Spacing ---------- */
+  --space-page-h: 4.5rem; /* 72px (page horizontal pad) */
+  --space-page-v: 6rem; /* 96px (page top/bottom margin) */
+  --space-section: 4rem; /* 64px (between section blocks) */
+  --space-stack-tight: 0.5rem; /* 8px */
+  --space-stack: 1.125rem; /* 18px */
+  --space-stack-loose: 2rem; /* 32px */
 
-  /* ---------- Layout ---------- */
-  --max-content: 78rem; /* 1248px — generous container, content inside is narrower */
-  --max-prose: 38rem; /* ~608px */
+  /* Layout container */
+  --max-content: 78rem; /* 1248px */
+  --max-prose: 38rem;
   --max-statement: 44rem;
-  --gutter: clamp(1.5rem, 4vw, 3rem);
-  --section-pad-y: clamp(4rem, 9vw, 8rem);
+  --gutter: clamp(1.5rem, 4vw, var(--space-page-h));
+  --section-pad-y: clamp(3.5rem, 9vw, var(--space-page-v));
 }

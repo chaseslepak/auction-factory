@@ -6,11 +6,11 @@ import "./globals.css";
 
 const ebGaramond = EB_Garamond({
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
   style: ["normal", "italic"],
   display: "swap",
   variable: "--font-eb-garamond",
-  fallback: ["Georgia", "serif"],
+  fallback: ["EB Garamond", "Hoefler Text", "Garamond", "Georgia", "serif"],
 });
 
 export const metadata: Metadata = {
@@ -19,12 +19,11 @@ export const metadata: Metadata = {
     default: "Reagan Brooks",
     template: "%s — Reagan Brooks",
   },
-  description:
-    "A privately held holding company headquartered in Northeast Ohio.",
+  description: "A privately held holding company.",
+  manifest: "/manifest.json",
   openGraph: {
     title: "Reagan Brooks",
-    description:
-      "A privately held holding company headquartered in Northeast Ohio.",
+    description: "A privately held holding company.",
     url: "/",
     siteName: "Reagan Brooks",
     type: "website",
