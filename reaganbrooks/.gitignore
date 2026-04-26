@@ -15,7 +15,8 @@
 
 # next.js
 /.next/
-/out/
+# /out/ — intentionally tracked: the static export is the deliverable
+# uploaded to Cloudflare Pages. Rebuilt by `npm run build`.
 
 # production
 /build

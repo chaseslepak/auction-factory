@@ -14,6 +14,10 @@ export const alt = "Reagan Brooks";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
+// Force static-export compatibility — the route is rendered once at
+// build time and emitted as a flat PNG file in the export's out/ tree.
+export const dynamic = "force-static";
+
 const COLOR = {
   bone: "#F5F1E8",
   slateNavy: "#1C2C3E",
