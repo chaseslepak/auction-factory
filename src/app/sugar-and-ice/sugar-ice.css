@@ -564,6 +564,76 @@
 }
 .si-visit-form button:hover { background: var(--espresso); color: var(--cream); border-color: var(--espresso); }
 
+.si-quote-form {
+  margin-top: 48px;
+  max-width: 760px;
+  display: grid;
+  gap: 24px;
+}
+.si-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+}
+@media (max-width: 720px) {
+  .si-form-grid { grid-template-columns: 1fr; }
+}
+.si-form-wide { grid-column: 1 / -1; }
+.si-quote-form label {
+  display: grid;
+  gap: 6px;
+}
+.si-quote-form label > span {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(27, 58, 92, 0.7);
+}
+.si-quote-form input,
+.si-quote-form select,
+.si-quote-form textarea {
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--cream);
+  color: var(--espresso);
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .15s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+.si-quote-form textarea {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  resize: vertical;
+  min-height: 120px;
+}
+.si-quote-form input::placeholder,
+.si-quote-form textarea::placeholder {
+  color: rgba(27, 58, 92, 0.4);
+}
+.si-quote-form input:focus,
+.si-quote-form select:focus,
+.si-quote-form textarea:focus {
+  border-color: var(--accent);
+}
+.si-quote-form button {
+  justify-self: start;
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 24px; border-radius: 999px;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  background: var(--accent); color: var(--accent-ink);
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  transition: background .2s ease, color .2s ease, border-color .2s ease;
+}
+.si-quote-form button:hover {
+  background: var(--espresso); color: var(--cream); border-color: var(--espresso);
+}
+
 /* ---------- generic feature cards on home ---------- */
 .si-feature-grid {
   margin-top: 56px;

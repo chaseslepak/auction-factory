@@ -102,8 +102,8 @@ export default function SugarIceMenu() {
             <p>
               The menu rotates with what&rsquo;s good. Seasonal flavors, festival specials, and the occasional one-day-only experiment.
             </p>
-            <Link href="/sugar-and-ice/visit#list" className="si-btn si-btn-accent">
-              Get on the List
+            <Link href="/sugar-and-ice/visit#quote" className="si-btn si-btn-accent">
+              Book the Trailer
             </Link>
           </div>
         </div>

@@ -17,13 +17,13 @@ export function SiteFooter() {
             <h4>Explore</h4>
             <p><Link href="/sugar-and-ice/menu">The Menu</Link></p>
             <p><Link href="/sugar-and-ice/about">Our Story</Link></p>
-            <p><Link href="/sugar-and-ice/visit">Find Us</Link></p>
+            <p><Link href="/sugar-and-ice/visit">Book Us</Link></p>
           </div>
           <div>
             <h4>Follow</h4>
             <p><a href="#">Instagram</a></p>
             <p><a href="#">TikTok</a></p>
-            <p><Link href="/sugar-and-ice/visit#list">Newsletter</Link></p>
+            <p><Link href="/sugar-and-ice/visit#quote">Request a Quote</Link></p>
           </div>
         </div>
 

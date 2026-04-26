@@ -39,7 +39,7 @@ export default function SugarIceAbout() {
                 We thought we could do all of that better, in one place, made to order. So we built a trailer, dialed in a recipe for brown butter sweet cream gelato, and started showing up at festivals.
               </p>
               <p className="si-body" style={{ marginTop: 16 }}>
-                Now we&rsquo;re here. Same trailer some days, a counter shop other days, a hotel kiosk after that. Same five things on the menu, made the same way every time.
+                Now we book the trailer for weddings, fairs, parties, and corporate days. Same five things on the menu, made the same way every time, made on-site at your event.
               </p>
             </div>
           </div>

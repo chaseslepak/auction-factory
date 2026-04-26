@@ -49,7 +49,7 @@ export default function SugarIceHome() {
               See the Menu <span className="si-arrow">→</span>
             </Link>
             <Link href="/sugar-and-ice/visit" className="si-btn si-btn-ghost">
-              Find Us
+              Book the Trailer
             </Link>
           </div>
         </div>
@@ -126,10 +126,10 @@ export default function SugarIceHome() {
             </Link>
 
             <Link href="/sugar-and-ice/visit" className="si-feature-card">
-              <span className="si-feature-num">03 · Visit</span>
-              <h3>Where to find us this week.</h3>
-              <p>Festivals, breweries, hotels, main streets. Get on the list and we&rsquo;ll tell you when we&rsquo;re close.</p>
-              <span className="si-feature-link">Find Us →</span>
+              <span className="si-feature-num">03 · Book Us</span>
+              <h3>Book the trailer.</h3>
+              <p>Weddings, festivals, parties, corporate days. Wherever you want dessert made on-site, we&rsquo;ll bring it.</p>
+              <span className="si-feature-link">Request a Quote →</span>
             </Link>
           </div>
         </div>

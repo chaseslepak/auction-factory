@@ -4,7 +4,7 @@ import { CrystalMark } from './CrystalMark';
 const navLinks: ReadonlyArray<{ href: string; label: string }> = [
   { href: '/sugar-and-ice/menu', label: 'Menu' },
   { href: '/sugar-and-ice/about', label: 'Our Story' },
-  { href: '/sugar-and-ice/visit', label: 'Visit' },
+  { href: '/sugar-and-ice/visit', label: 'Book Us' },
 ];
 
 export function SiteNav() {
@@ -25,8 +25,8 @@ export function SiteNav() {
               {l.label}
             </Link>
           ))}
-          <Link href="/sugar-and-ice/visit#list" className="si-nav-cta">
-            Get on the List
+          <Link href="/sugar-and-ice/visit#quote" className="si-nav-cta">
+            Request a Quote
           </Link>
         </div>
       </div>
