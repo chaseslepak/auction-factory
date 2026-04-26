@@ -1,0 +1,36 @@
+/*
+ * Stacked wordmark — the only primary mark on the site.
+ * Three children in a vertical flex column with align-items: center
+ * so the rule is visually centered relative to whichever line is wider.
+ * The rule is a 1px <span aria-hidden> sized to fill the container's
+ * intrinsic width (set by the wider line), per the brand guidelines.
+ */
+
+.wordmark {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--color-slate-navy);
+  font-family: var(--font-serif);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wordmark);
+  line-height: 1;
+  user-select: none;
+}
+
+.line {
+  font-size: 1.25rem; /* 20px default — overridden via parent on hero */
+  display: block;
+  /* The trailing letter-spacing creates visual right-side padding;
+     translateX corrects so the line sits optically centered. */
+  transform: translateX(calc(var(--tracking-wordmark) / 2));
+}
+
+.rule {
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: currentColor;
+  margin: 0.55em 0;
+}

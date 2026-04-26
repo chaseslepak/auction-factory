@@ -1,0 +1,61 @@
+/*
+ * Reagan Brooks — global resets and base type.
+ * Tokens are imported separately in app/layout.tsx and consumed via
+ * CSS custom properties.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: var(--color-bone);
+  color: var(--color-ink);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100svh;
+  font-size: var(--size-body);
+  font-weight: var(--weight-regular);
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ul,
+ol,
+figure {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: var(--color-slate-navy);
+  color: var(--color-bone);
+}

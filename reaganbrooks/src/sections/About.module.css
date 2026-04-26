@@ -1,0 +1,41 @@
+.section {
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding: var(--section-pad-y) var(--gutter);
+  border-top: 1px solid var(--rule-soft);
+}
+
+.eyebrow {
+  font-family: var(--font-serif);
+  font-weight: var(--weight-medium);
+  font-size: var(--size-eyebrow);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-slate-navy);
+  margin-bottom: clamp(2rem, 4vw, 3rem);
+}
+
+.prose {
+  max-width: 44rem;
+}
+
+.prose p {
+  font-size: var(--size-statement-sub);
+  line-height: var(--leading-prose);
+  color: var(--color-ink);
+}
+
+@media (max-width: 768px) {
+  .section {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+  }
+
+  .eyebrow {
+    margin-bottom: 1.5rem;
+  }
+
+  .prose p {
+    font-size: 1.0625rem;
+  }
+}

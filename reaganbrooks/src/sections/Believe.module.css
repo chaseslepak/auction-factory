@@ -1,0 +1,62 @@
+.section {
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding: var(--section-pad-y) var(--gutter);
+  border-top: 1px solid var(--rule-soft);
+}
+
+.eyebrow {
+  font-family: var(--font-serif);
+  font-weight: var(--weight-medium);
+  font-size: var(--size-eyebrow);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-slate-navy);
+  margin-bottom: clamp(2.5rem, 5vw, 4rem);
+}
+
+.stanzas {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: clamp(1.75rem, 3vw, 3rem);
+  row-gap: 2.5rem;
+}
+
+.stanza {
+  max-width: 22rem;
+}
+
+.stanzaTitle {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: var(--weight-regular);
+  font-size: var(--size-believe-title);
+  color: var(--color-antique-brass);
+  margin-bottom: 0.5rem;
+}
+
+.stanzaBody {
+  font-size: var(--size-body-tight);
+  line-height: var(--leading-prose);
+  color: var(--color-ink);
+}
+
+@media (max-width: 768px) {
+  .section {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+  }
+
+  .eyebrow {
+    margin-bottom: 1.75rem;
+  }
+
+  .stanzas {
+    grid-template-columns: 1fr;
+    row-gap: 1.75rem;
+  }
+
+  .stanzaBody {
+    font-size: 1rem;
+  }
+}

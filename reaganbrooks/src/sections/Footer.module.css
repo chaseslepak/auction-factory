@@ -1,0 +1,39 @@
+.footer {
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding: 0 var(--gutter) clamp(2rem, 4vw, 3rem);
+  text-align: center;
+}
+
+.brassRule {
+  display: block;
+  width: 4rem;
+  height: 1px;
+  margin: 0 auto clamp(1.5rem, 3vw, 2.25rem);
+  background: var(--rule-brass);
+}
+
+.line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.65rem;
+  font-family: var(--font-serif);
+  font-weight: var(--weight-medium);
+  font-size: 0.6875rem; /* 11px */
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-stone-gray);
+}
+
+.dot {
+  color: var(--color-stone-gray);
+  opacity: 0.7;
+}
+
+@media (max-width: 768px) {
+  .line {
+    font-size: 0.625rem;
+    gap: 0.5rem;
+  }
+}

@@ -1,0 +1,66 @@
+.section {
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding: clamp(5rem, 11vw, 9rem) var(--gutter) clamp(5rem, 10vw, 8rem);
+  text-align: center;
+}
+
+.hairline {
+  display: block;
+  width: 4rem;
+  height: 1px;
+  margin: 0 auto clamp(2rem, 4vw, 3rem);
+  background: var(--rule-soft);
+}
+
+.eyebrow {
+  font-family: var(--font-serif);
+  font-weight: var(--weight-medium);
+  font-size: var(--size-eyebrow);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-slate-navy);
+  margin-bottom: clamp(1.75rem, 3.5vw, 2.5rem);
+}
+
+.address {
+  font-style: normal;
+}
+
+.email {
+  display: inline-block;
+  font-family: var(--font-serif);
+  font-weight: var(--weight-regular);
+  font-size: var(--size-contact-mail);
+  letter-spacing: -0.01em;
+  color: var(--color-slate-navy);
+  border-bottom: 1px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.email:hover,
+.email:focus-visible {
+  color: var(--color-antique-brass);
+  border-bottom-color: var(--color-antique-brass);
+  outline: none;
+}
+
+.note {
+  margin-top: 1.25rem;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: var(--weight-regular);
+  font-size: 0.95rem;
+  color: var(--color-stone-gray);
+}
+
+@media (max-width: 768px) {
+  .section {
+    padding-top: 3rem;
+    padding-bottom: 3.5rem;
+  }
+
+  .email {
+    font-size: 1.625rem;
+  }
+}
