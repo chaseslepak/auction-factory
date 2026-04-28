@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
 
-const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/jobs/process', '/api/af-keepalive', '/api/browser-upload', '/api/admin-create-user', '/sugar-and-ice'];
+const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/jobs/process', '/api/af-keepalive', '/api/browser-upload', '/api/admin-create-user', '/sugar-and-ice', '/sugar-static'];
 
 const SUGAR_HOSTS = new Set(['thesugarandice.com', 'www.thesugarandice.com']);
 
