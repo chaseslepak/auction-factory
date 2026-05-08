@@ -94,7 +94,7 @@ export default function SugarIceHome() {
             </p>
           </div>
 
-          <form className="si-quote-form" action="mailto:hello@thesugarandice.com" method="post" encType="text/plain">
+          <form className="si-quote-form" action="mailto:chase@thesugarandice.com" method="post" encType="text/plain">
             <div className="si-form-grid">
               <label>
                 <span>Your name</span>
@@ -120,8 +120,8 @@ export default function SugarIceHome() {
 
           <p className="si-body" style={{ marginTop: 32, opacity: 0.7 }}>
             Or reach us directly at{' '}
-            <a href="mailto:hello@thesugarandice.com" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-              hello@thesugarandice.com
+            <a href="mailto:chase@thesugarandice.com" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+              chase@thesugarandice.com
             </a>
             .
           </p>

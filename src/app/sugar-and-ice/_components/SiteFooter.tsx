@@ -20,7 +20,7 @@ export function SiteFooter() {
           </div>
           <div>
             <h4>Reach Us</h4>
-            <p><a href="mailto:hello@thesugarandice.com">hello@thesugarandice.com</a></p>
+            <p><a href="mailto:chase@thesugarandice.com">chase@thesugarandice.com</a></p>
           </div>
         </div>
 

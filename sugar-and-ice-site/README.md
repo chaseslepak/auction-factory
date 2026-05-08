@@ -33,7 +33,7 @@ sugar-and-ice-site/
 
 ## Contact form
 
-Posts to `mailto:hello@thesugarandice.com`. Submitting opens the visitor's
+Posts to `mailto:chase@thesugarandice.com`. Submitting opens the visitor's
 email client with the form values. Works without setup.
 
 For inbox-style submissions, sign up free at https://formspree.io and
@@ -41,7 +41,7 @@ replace the `action` attribute in `index.html`:
 
 ```html
 <!-- old -->
-<form class="si-quote-form" action="mailto:hello@thesugarandice.com" method="post" enctype="text/plain">
+<form class="si-quote-form" action="mailto:chase@thesugarandice.com" method="post" enctype="text/plain">
 
 <!-- new -->
 <form class="si-quote-form" action="https://formspree.io/f/YOUR_ID" method="post">
