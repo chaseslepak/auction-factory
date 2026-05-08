@@ -62,17 +62,17 @@ export default function SugarIceHome() {
 
           <div className="si-grid-2">
             <p className="si-pull-quote">
-              Make it small<span className="si-dot">.</span> Make it fresh<span className="si-dot">.</span> Make it in front of you<span className="si-dot">.</span>
+              Five categories<span className="si-dot">.</span> A chef-driven menu<span className="si-dot">.</span> Always changing<span className="si-dot">.</span>
             </p>
             <div>
               <p className="si-body">
-                We started Sugar + Ice because the things we loved as kids &mdash; warm mini donuts at a fair, a scoop of something cold on a Saturday, kettle corn out of a paper bag &mdash; were almost always made with shortcuts. Pre-made batter. Cheap oil. The cone bigger than the scoop.
+                Sugar + Ice is a chef-driven dessert trailer that does five things &mdash; donuts, gelato, kettle corn, craft coffee, and Boylan dirty sodas &mdash; and does each of them at a level you don&rsquo;t usually associate with anything served out of a window.
               </p>
               <p className="si-body" style={{ marginTop: 16 }}>
-                We thought we could do all of that better, in one place, made to order. So we built a trailer, dialed in a recipe for brown butter sweet cream gelato, and started showing up at events.
+                The menu changes. Flavors rotate with the season, the event, and what&rsquo;s good that week. What stays the same is the standard: real ingredients, real technique, every order made the moment you place it. Nothing sits. Nothing comes out of a bottle.
               </p>
               <p className="si-body" style={{ marginTop: 16 }}>
-                Now we book the trailer for weddings, fairs, parties, and corporate days. Same five things on the menu, made the same way every time, made on-site at your event.
+                We book the trailer for weddings, fairs, parties, and corporate days &mdash; same five categories, a chef-built menu every time, made on-site at your event.
               </p>
             </div>
           </div>
