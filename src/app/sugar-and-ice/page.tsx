@@ -1,19 +1,10 @@
-import Link from 'next/link';
 import { CrystalMark } from './_components/CrystalMark';
-
-const things = [
-  { eyebrow: 'Donuts', body: 'Mini, fresh-fried, tossed in cinnamon sugar or glazed while you watch. Six to a bag, warm.' },
-  { eyebrow: 'Gelato', body: 'Hand-scooped to order. Brown butter sweet cream, salted honey, olive oil and lemon.' },
-  { eyebrow: 'Kettle Corn', body: 'Brown butter and sea salt. Caramel-pecan when we’re feeling it. Birthday-cake when you are.' },
-  { eyebrow: 'Coffee', body: 'Hot, iced, or with a splash. Brown sugar cream cold brew. A real affogato.' },
-  { eyebrow: 'Dirty Sodas', body: 'Boylan + cream + your pick of syrup. The drink your kid will fight you for.' },
-];
 
 export default function SugarIceHome() {
   return (
     <>
-      <header className="si-hero">
-        <div className="si-row" id="top">
+      <header className="si-hero" id="top">
+        <div className="si-row">
           <div className="si-hero-meta">
             <span>Craft Desserts &nbsp;·&nbsp; Coffee &nbsp;·&nbsp; Made to Order</span>
             <a href="https://thesugarandice.com">
@@ -31,13 +22,13 @@ export default function SugarIceHome() {
 
           <div className="si-tag-row">
             <span className="si-tag-primary">● Spun. Scooped. Poured.</span>
-            <span className="si-tag-quiet">Donuts · Ice Cream · Kettle Corn</span>
+            <span className="si-tag-quiet">Donuts · Gelato · Kettle Corn</span>
             <span className="si-tag-quiet">Coffee · Dirty Sodas</span>
           </div>
 
           <div className="si-hero-grid">
             <p className="si-hero-lede">
-              Mini donuts fried to order. Gelato hand-scooped. Kettle corn still warm from the kettle. Real coffee, Boylan dirty sodas, and a couple of things you&rsquo;ll want to try because you&rsquo;ve never had them this good.
+              Mini donuts fried to order. Hand-scooped gelato, kettle corn out of the kettle, real coffee, and Boylan dirty sodas &mdash; built on-site for weddings, festivals, parties, and corporate days.
             </p>
             <p className="si-hero-sub">
               Walk up. Order. Watch it get made. Two minutes later you&rsquo;ve got something better than you remember it being.
@@ -45,12 +36,12 @@ export default function SugarIceHome() {
           </div>
 
           <div className="si-cta-row">
-            <Link href="/sugar-and-ice/visit" className="si-btn si-btn-accent">
-              Book the Trailer <span className="si-arrow">→</span>
-            </Link>
-            <Link href="/sugar-and-ice/about" className="si-btn si-btn-ghost">
-              Our Story
-            </Link>
+            <a href="#contact" className="si-btn si-btn-accent">
+              Get in Touch <span className="si-arrow">→</span>
+            </a>
+            <a href="#about" className="si-btn si-btn-ghost">
+              About Us
+            </a>
           </div>
         </div>
       </header>
@@ -64,67 +55,79 @@ export default function SugarIceHome() {
         </div>
       </div>
 
-      <section className="si-section" id="story">
+      <section className="si-section" id="about">
         <div className="si-row">
           <div className="si-section-label">
-            <span className="si-num">01</span>
-            <span className="si-lbl">What We Make</span>
+            <span className="si-num">A</span>
+            <span className="si-lbl">About Us</span>
             <span className="si-line" />
           </div>
 
           <div className="si-grid-2">
+            <p className="si-pull-quote">
+              Make it small<span className="si-dot">.</span> Make it fresh<span className="si-dot">.</span> Make it in front of you<span className="si-dot">.</span>
+            </p>
             <div>
-              <h2>Five things, all made to order.</h2>
-              <p className="si-body" style={{ marginTop: 24 }}>
-                Short menu on purpose. Donuts go in the fryer when you order. Gelato gets scooped in front of you. Kettle corn comes out of the kettle a few feet away. Nothing&rsquo;s pre-made, nothing sits.
+              <p className="si-body">
+                We started Sugar + Ice because the things we loved as kids &mdash; warm mini donuts at a fair, a scoop of something cold on a Saturday, kettle corn out of a paper bag &mdash; were almost always made with shortcuts. Pre-made batter. Cheap oil. The cone bigger than the scoop.
               </p>
               <p className="si-body" style={{ marginTop: 16 }}>
-                If a line forms, it forms because the next bag is worth waiting for.
+                We thought we could do all of that better, in one place, made to order. So we built a trailer, dialed in a recipe for brown butter sweet cream gelato, and started showing up at events.
               </p>
-            </div>
-
-            <div className="si-principles">
-              {things.map((t) => (
-                <div key={t.eyebrow} className="si-principle">
-                  <span className="si-eyebrow">{t.eyebrow}</span>
-                  <span className="si-prose">{t.body}</span>
-                </div>
-              ))}
+              <p className="si-body" style={{ marginTop: 16 }}>
+                Now we book the trailer for weddings, fairs, parties, and corporate days. Same five things on the menu, made the same way every time, made on-site at your event.
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="si-section" style={{ background: 'var(--cream-2)' }}>
+      <section className="si-section" style={{ background: 'var(--cream-2)' }} id="contact">
         <div className="si-row">
           <div className="si-section-label">
-            <span className="si-num">02</span>
-            <span className="si-lbl">Where to Go Next</span>
+            <span className="si-num">B</span>
+            <span className="si-lbl">Get in Touch</span>
             <span className="si-line" />
           </div>
 
           <div className="si-grid-2">
-            <h2>Pick a thread. Pull on it.</h2>
+            <h2>Tell us about your event.</h2>
             <p className="si-body">
-              The full menu, the story behind the trailer, and where to catch us next. Or just keep scrolling.
+              Drop us a line and we&rsquo;ll write back within a day or two. The more you tell us up front &mdash; date, headcount, location &mdash; the tighter we can quote it.
             </p>
           </div>
 
-          <div className="si-feature-grid">
-            <Link href="/sugar-and-ice/about" className="si-feature-card">
-              <span className="si-feature-num">01 · Our Story</span>
-              <h3>How it started.</h3>
-              <p>One trailer, one fryer, and a stubborn opinion about brown butter. Why we make it small, and what we won&rsquo;t cut corners on.</p>
-              <span className="si-feature-link">Read More →</span>
-            </Link>
+          <form className="si-quote-form" action="mailto:hello@thesugarandice.com" method="post" encType="text/plain">
+            <div className="si-form-grid">
+              <label>
+                <span>Your name</span>
+                <input type="text" name="name" required />
+              </label>
+              <label>
+                <span>Email</span>
+                <input type="email" name="email" required />
+              </label>
+              <label className="si-form-wide">
+                <span>Phone (optional)</span>
+                <input type="tel" name="phone" />
+              </label>
+              <label className="si-form-wide">
+                <span>Message</span>
+                <textarea name="message" rows={6} placeholder="Tell us about your event — date, headcount, location, what kind of day it is." required />
+              </label>
+            </div>
+            <button type="submit">
+              Send the Message <span aria-hidden>→</span>
+            </button>
+          </form>
 
-            <Link href="/sugar-and-ice/visit" className="si-feature-card">
-              <span className="si-feature-num">02 · Book Us</span>
-              <h3>Book the trailer.</h3>
-              <p>Weddings, festivals, parties, corporate days. Wherever you want dessert made on-site, we&rsquo;ll bring it.</p>
-              <span className="si-feature-link">Request a Quote →</span>
-            </Link>
-          </div>
+          <p className="si-body" style={{ marginTop: 32, opacity: 0.7 }}>
+            Or reach us directly at{' '}
+            <a href="mailto:hello@thesugarandice.com" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+              hello@thesugarandice.com
+            </a>
+            .
+          </p>
         </div>
       </section>
     </>

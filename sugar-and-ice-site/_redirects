@@ -1,3 +1,7 @@
-/sugar-and-ice/*  /:splat  301
-/menu  /  301
-/menu/  /  301
+/sugar-and-ice/*  /  301
+/about       /#about    301
+/about/      /#about    301
+/visit       /#contact  301
+/visit/      /#contact  301
+/menu        /          301
+/menu/       /          301

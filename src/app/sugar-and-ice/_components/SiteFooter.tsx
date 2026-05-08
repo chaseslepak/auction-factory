@@ -15,14 +15,12 @@ export function SiteFooter() {
           </div>
           <div>
             <h4>Explore</h4>
-            <p><Link href="/sugar-and-ice/about">Our Story</Link></p>
-            <p><Link href="/sugar-and-ice/visit">Book Us</Link></p>
+            <p><Link href="/sugar-and-ice#about">About</Link></p>
+            <p><Link href="/sugar-and-ice#contact">Get in Touch</Link></p>
           </div>
           <div>
-            <h4>Follow</h4>
-            <p><a href="#">Instagram</a></p>
-            <p><a href="#">TikTok</a></p>
-            <p><Link href="/sugar-and-ice/visit#quote">Request a Quote</Link></p>
+            <h4>Reach Us</h4>
+            <p><a href="mailto:hello@thesugarandice.com">hello@thesugarandice.com</a></p>
           </div>
         </div>
 
