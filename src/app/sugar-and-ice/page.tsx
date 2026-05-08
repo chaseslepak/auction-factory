@@ -28,10 +28,7 @@ export default function SugarIceHome() {
 
           <div className="si-hero-grid">
             <p className="si-hero-lede">
-              Mini donuts fried to order. Hand-scooped gelato, kettle corn out of the kettle, real coffee, and Boylan dirty sodas &mdash; built on-site for weddings, festivals, parties, and corporate days.
-            </p>
-            <p className="si-hero-sub">
-              Walk up. Order. Watch it get made. Two minutes later you&rsquo;ve got something better than you remember it being.
+              Donuts fried to order. Hand-scooped gelato, kettle corn out of the kettle, craft coffee, and Boylan dirty sodas &mdash; every one of them made on-site, with intentional, gourmet flavors. For weddings, festivals, parties, and corporate days.
             </p>
           </div>
 

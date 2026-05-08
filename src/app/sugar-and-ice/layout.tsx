@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     template: '%s · Sugar + Ice',
   },
   description:
-    'Mini donuts, hand-scooped gelato, kettle corn, real coffee, and Boylan dirty sodas — made to order. Book the trailer for weddings, fairs, parties, and corporate days.',
+    'Donuts, hand-scooped gelato, kettle corn, craft coffee, and Boylan dirty sodas — made to order with intentional, gourmet flavors. Book the trailer for weddings, fairs, parties, and corporate days.',
 };
 
 export default function SugarIceLayout({
