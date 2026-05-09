@@ -5,7 +5,7 @@ import './sugar-ice.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Sugar + Ice — Spun. Scooped. Poured.',
+    default: 'Sugar + Ice — Fried. Scooped. Popped. Poured.',
     template: '%s · Sugar + Ice',
   },
   description:

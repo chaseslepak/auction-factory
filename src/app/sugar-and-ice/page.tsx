@@ -21,7 +21,7 @@ export default function SugarIceHome() {
           </h1>
 
           <div className="si-tag-row">
-            <span className="si-tag-primary">● Spun. Scooped. Poured.</span>
+            <span className="si-tag-primary">● Fried. Scooped. Popped. Poured.</span>
             <span className="si-tag-quiet">Donuts · Gelato · Kettle Corn</span>
             <span className="si-tag-quiet">Coffee · Dirty Sodas</span>
           </div>

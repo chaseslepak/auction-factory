@@ -7,7 +7,7 @@ export function SiteFooter() {
         <div className="si-footer-grid">
           <div>
             <p className="si-footer-tagline">
-              Spun<span className="si-dot">.</span> Scooped<span className="si-dot">.</span> Poured<span className="si-dot">.</span>
+              Fried<span className="si-dot">.</span> Scooped<span className="si-dot">.</span> Popped<span className="si-dot">.</span> Poured<span className="si-dot">.</span>
             </p>
             <a href="https://thesugarandice.com" className="si-footer-domain">
               thesugarandice<span className="si-tld">.com</span>
