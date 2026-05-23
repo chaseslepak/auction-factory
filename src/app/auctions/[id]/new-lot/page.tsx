@@ -9,6 +9,7 @@ import ConditionSlider from '@/components/ConditionSlider';
 import GradientButton from '@/components/GradientButton';
 import SpeechInput from '@/components/SpeechInput';
 import IndeterminateBar from '@/components/IndeterminateBar';
+import { setPendingLot } from '@/lib/pending-lot-store';
 
 export default function NewLotPage() {
   const { id } = useParams<{ id: string }>();
@@ -73,18 +74,21 @@ export default function NewLotPage() {
 
       const listing = await res.json();
 
-      // Store in sessionStorage for the review page
-      sessionStorage.setItem(
-        'pending-lot',
-        JSON.stringify({
-          listing,
-          photos,
-          condition,
-          quantity,
-          notes,
-          nextLotNumber,
-        })
-      );
+      // Photos go through the in-memory store — base64 dataURLs blow past the
+      // browser's sessionStorage quota and throw QuotaExceededError.
+      setPendingLot({ listing, photos, condition, quantity, notes, nextLotNumber });
+
+      // Keep the small fields in sessionStorage so a hard refresh on the
+      // review page can still show the listing (photos will be empty in that
+      // case; the page handles that gracefully).
+      try {
+        sessionStorage.setItem(
+          'pending-lot',
+          JSON.stringify({ listing, condition, quantity, notes, nextLotNumber })
+        );
+      } catch {
+        // Silently ignore — in-memory store is the source of truth.
+      }
 
       router.push(`/auctions/${id}/lots/new/review`);
     } catch (err: any) {

@@ -12,6 +12,7 @@ import IndeterminateBar from '@/components/IndeterminateBar';
 import ReorderablePhotos from '@/components/ReorderablePhotos';
 import ImageZoom from '@/components/ImageZoom';
 import ConditionSlider from '@/components/ConditionSlider';
+import { getPendingLot, clearPendingLot } from '@/lib/pending-lot-store';
 
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
@@ -58,18 +59,28 @@ export default function LotReviewPage() {
 
   useEffect(() => {
     if (isNew) {
-      const pending = sessionStorage.getItem('pending-lot');
-      if (!pending) {
+      // Prefer the in-memory store (has photos); fall back to sessionStorage
+      // for the small fields on a hard refresh.
+      const mem = getPendingLot();
+      const sessionRaw = sessionStorage.getItem('pending-lot');
+      if (!mem && !sessionRaw) {
         router.push(`/auctions/${auctionId}/new-lot`);
         return;
       }
-      const data = JSON.parse(pending);
-      setListing(data.listing);
-      setPhotos(data.photos);
-      setCondition(data.condition);
-      setQuantity(data.quantity);
-      setNotes(data.notes);
-      setNextLotNumber(data.nextLotNumber);
+      if (mem) {
+        setListing(mem.listing);
+        setPhotos(mem.photos);
+        setCondition(mem.condition);
+        setQuantity(mem.quantity);
+        setNotes(mem.notes);
+        setNextLotNumber(mem.nextLotNumber);
+      } else if (sessionRaw) {
+        // Photos were lost on refresh — kick the user back to upload again.
+        router.push(`/auctions/${auctionId}/new-lot`);
+        return;
+      }
+      // Surface a reference to data for the duplicate check below.
+      const data = mem!;
 
       // Check for duplicates in this auction by brand+model
       const checkDuplicates = async () => {
@@ -448,6 +459,7 @@ export default function LotReviewPage() {
 
       // Clear pending data
       sessionStorage.removeItem('pending-lot');
+      clearPendingLot();
       router.push(`/auctions/${auctionId}`);
     } catch (err: any) {
       setError(err.message);
