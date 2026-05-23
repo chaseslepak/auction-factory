@@ -276,7 +276,10 @@ export default function AuctionDetailPage() {
   }, [id]);
 
   const handleResetFromFailed = async () => {
-    // Find the lowest lot number with failed status
+    // Only reset lots that ACTUALLY failed. The previous behavior reset every
+    // lot from the first failure onward — including ones that had already
+    // succeeded — which then caused those to be re-uploaded and AF ended up
+    // with duplicates.
     const failed = lots
       .filter((l: any) => l.af_upload_status === 'failed')
       .sort((a, b) => a.lot_number - b.lot_number);
@@ -286,32 +289,25 @@ export default function AuctionDetailPage() {
       return;
     }
 
-    const firstFailedNum = failed[0].lot_number;
-
-    // Find all lots with lot_number >= firstFailedNum (to preserve order)
-    const lotsToReset = lots
-      .filter((l) => l.lot_number >= firstFailedNum)
-      .sort((a, b) => a.lot_number - b.lot_number);
-
     const confirmed = confirm(
-      `First failed lot is #${firstFailedNum}.\n\n` +
-      `This will reset lot #${firstFailedNum} and all ${lotsToReset.length - 1} lots after it so they can be uploaded again IN ORDER.\n\n` +
-      `IMPORTANT: You must delete all AF lots from #${firstFailedNum} and above in AF admin BEFORE running this retry.\n\n` +
-      `Have you already deleted AF lots ${firstFailedNum}+ in AF admin?`
+      `Retry ${failed.length} failed lot${failed.length > 1 ? 's' : ''} (#${failed[0].lot_number}` +
+        (failed.length > 1 ? `–#${failed[failed.length - 1].lot_number}` : '') +
+        `)?\n\n` +
+        `Only the lots that failed will be re-uploaded. Already-uploaded lots will NOT be touched, so you cannot create AF duplicates.\n\n` +
+        `Note: retried lots will be added to AF at the end of the current list — you may need to fix their order in AF admin afterward.`
     );
     if (!confirmed) return;
 
-    // Reset status for all lots from firstFailedNum onward
     await supabase
       .from('lots')
       .update({ af_upload_status: null, af_upload_error: null })
-      .in('id', lotsToReset.map((l) => l.id));
+      .in('id', failed.map((l) => l.id));
 
     await fetchData();
 
     setUploadMsg({
       type: 'success',
-      text: `Reset ${lotsToReset.length} lots. Now click "Upload to AF" to push them in order.`,
+      text: `Reset ${failed.length} failed lot${failed.length > 1 ? 's' : ''}. Click "Upload to AF" to retry.`,
     });
   };
 
@@ -712,7 +708,7 @@ export default function AuctionDetailPage() {
                   disabled={uploading}
                   className="w-full py-2 rounded-xl border-2 border-orange-400 text-orange-500 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
                 >
-                  Reset from First Failed Lot (maintains order)
+                  Retry Failed Lots Only
                 </button>
               )}
               {uploading && uploadProgress.total > 0 && (
