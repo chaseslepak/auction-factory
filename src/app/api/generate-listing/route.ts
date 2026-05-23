@@ -251,7 +251,7 @@ From the photos, identify the equipment and return ONLY a JSON object (no markdo
 
 AUCTION DESCRIPTION FORMAT (exact line breaks):
 
-[1-2 sentence description — reference what you actually see in the photos. If item looks new/sealed, say so. If it shows wear, be upfront. Emphasize retail value.]
+[1-2 sentence description — reference what you actually see in the photos. If item looks new/sealed, say so. If it shows wear, be upfront. Describe the item objectively. DO NOT speculate about what it might sell for at auction or hint at a "deal" / "value" / "savings vs retail".]
 
 FEATURES:
 Retail Price: $[estimated_retail_new × 1.10, rounded — this is 10% above the highest retail you found. Do NOT mention the markup.]
@@ -269,8 +269,8 @@ Bid X [quantity]
 CONDITION 10 (NEW) ITEMS — SPECIAL HANDLING:
 - PREPEND "NEW" to the item_name (e.g. "NEW Hoshizaki Ice Machine KM-340MAJ")
 - Opening description MUST emphasize this is BRAND NEW, never used, still in original packaging if visible
-- Use enthusiastic language: "Brand new!", "Factory sealed!", "Never used!", "Still in original packaging!"
-- Highlight the incredible value vs. retail price
+- Describe the new-in-box condition factually: "Brand new.", "Factory sealed.", "Never used.", "Still in original packaging."
+- DO NOT add any phrasing about value, savings, "fraction of the price," or what a bidder might pay — this is an auction, the market sets the price.
 - CONDITION line should say something like: "BRAND NEW — Factory sealed, never used. Original packaging intact."
 - STOCK IMAGE: If you can identify the exact brand AND model number with HIGH confidence, provide a stock_image_url — use the manufacturer's product page image URL or a major retailer (WebstaurantStore, Amazon, KaTom) product image URL for that exact make/model. This will be used as the primary listing photo. If you're not 100% sure of the exact model, leave stock_image_url as empty string.
 
@@ -286,6 +286,7 @@ ABSOLUTE RULES:
 - DO NOT include any location, pickup, shipping, delivery, "why wait", warranty, or auction policy disclaimers anywhere — those are added at the auction level, not the lot level
 - NO warranty mentions, ever
 - NO HTML tags, NO script tags, NO suspicious patterns
+- THIS IS AN AUCTION — never speculate about, hint at, or compare against what the item may sell for. BANNED phrases include but are not limited to: "fraction of the price," "fraction of retail," "incredible value," "great value," "huge savings," "save big," "below retail," "buy it for less," "steal," "deal," "bargain," "snag this," "won't last," "act fast," "compare to retail and save," anything beginning with "Why pay…", and any other language suggesting the buyer will pay less than retail. The retail price line in the listing is provided as informational reference only — do not editorialize about it.
 - Use "•" (bullet character) for bullets, not hyphens or asterisks
 - Use straight quotes (' and ") not smart quotes
 - Use regular dashes (-) not em-dashes (—)
