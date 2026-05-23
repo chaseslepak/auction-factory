@@ -3,26 +3,24 @@ import { createClient } from '@/lib/supabase/server';
 
 export const maxDuration = 30;
 
-// Trigger the processor to start using waitUntil for reliability
+// Trigger the processor to start using waitUntil for reliability.
+// Sends the CRON_SECRET in Authorization so /api/jobs/process accepts this
+// server-to-server call (no user cookies are forwarded by server fetch).
 async function triggerProcessor(request: NextRequest) {
   try {
     const origin = request.nextUrl.origin;
     const url = `${origin}/api/jobs/process`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (process.env.CRON_SECRET) {
+      headers.Authorization = `Bearer ${process.env.CRON_SECRET}`;
+    }
 
     try {
       const { waitUntil } = await import('@vercel/functions');
-      waitUntil(
-        fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        }).catch(() => {})
-      );
+      waitUntil(fetch(url, { method: 'POST', headers }).catch(() => {}));
     } catch {
       // Fallback: fire-and-forget
-      fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }).catch(() => {});
+      fetch(url, { method: 'POST', headers }).catch(() => {});
       await new Promise((r) => setTimeout(r, 500));
     }
   } catch {}

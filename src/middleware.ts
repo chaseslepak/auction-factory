@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
 
-const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/jobs/process', '/api/af-keepalive', '/api/browser-upload', '/api/admin-create-user'];
+// /api/jobs/process and /api/af-keepalive accept either Vercel cron (Bearer
+// CRON_SECRET) or an authenticated user; their route handlers enforce that.
+// /api/browser-upload/* are token-protected by the upload_tokens table.
+// /api/admin-create-user requires an authenticated ALLOWED_EMAILS user; we
+// keep it out of the middleware allowlist so middleware redirects unauth'd
+// browser-form calls to /login as usual.
+const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/jobs/process', '/api/af-keepalive', '/api/browser-upload'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
