@@ -335,6 +335,7 @@ export default function AuctionDetailPage() {
 
     let totalSucceeded = 0;
     let totalFailed = 0;
+    let totalSkipped = 0;
     let lastError: string | null = null;
 
     try {
@@ -378,9 +379,13 @@ export default function AuctionDetailPage() {
           }
 
           const succeeded = data.results.filter((r: any) => r.success).length;
+          const skippedBatch = data.results.filter((r: any) => r.skipped).length;
+          // 'failed' for progress-counting purposes includes skipped — they are
+          // not in the queue anymore and shouldn't be retried.
           const failed = data.results.filter((r: any) => !r.success).length;
           totalSucceeded += succeeded;
           totalFailed += failed;
+          totalSkipped += skippedBatch;
 
           setUploadProgress({ current: totalSucceeded + totalFailed, total: unuploaded.length });
           fetchData();
@@ -401,14 +406,18 @@ export default function AuctionDetailPage() {
         }
       }
 
-      if (lastError && totalSucceeded === 0) {
+      const realFailed = totalFailed - totalSkipped;
+      const skippedNote = totalSkipped > 0
+        ? ` (${totalSkipped} already uploaded — skipped to avoid duplicates)`
+        : '';
+      if (lastError && totalSucceeded === 0 && totalSkipped === 0) {
         setUploadMsg({ type: 'error', text: lastError });
       } else {
         setUploadMsg({
-          type: totalFailed === 0 ? 'success' : 'error',
-          text: totalFailed === 0
-            ? `${totalSucceeded} lot${totalSucceeded !== 1 ? 's' : ''} uploaded to AF!`
-            : `${totalSucceeded} uploaded, ${totalFailed} failed${lastError ? `: ${lastError}` : ''}`,
+          type: realFailed === 0 ? 'success' : 'error',
+          text: realFailed === 0
+            ? `${totalSucceeded} lot${totalSucceeded !== 1 ? 's' : ''} uploaded to AF${skippedNote}!`
+            : `${totalSucceeded} uploaded, ${realFailed} failed${skippedNote}${lastError ? `: ${lastError}` : ''}`,
         });
       }
       fetchData();

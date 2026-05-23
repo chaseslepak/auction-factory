@@ -346,23 +346,44 @@ export async function POST(request: NextRequest) {
   }
 
   // Get lots with photos
-  const { data: lots } = await supabase
+  const { data: allRequestedLots } = await supabase
     .from('lots')
     .select('*, lot_photos(*)')
     .in('id', lot_ids)
     .order('lot_number', { ascending: true });
 
-  if (!lots?.length) {
+  if (!allRequestedLots?.length) {
     return NextResponse.json({ error: 'No lots found' }, { status: 404 });
   }
 
-  // Mark lots as uploading
+  // SAFETY GUARD: Never re-upload a lot that's already marked as uploaded.
+  // This is the last line of defense against creating AF duplicates if a
+  // buggy client (or someone hitting this endpoint directly) asks us to.
+  // To intentionally re-upload a single lot, clear its af_upload_status first
+  // (the review page's "Re-upload" button does this after a manual confirm).
+  const lots = allRequestedLots.filter((l: any) => l.af_upload_status !== 'uploaded');
+  const skipped = allRequestedLots.filter((l: any) => l.af_upload_status === 'uploaded');
+
+  const results: { lot_id: string; lot_number: number; success: boolean; error?: string; skipped?: boolean }[] = [];
+  for (const s of skipped) {
+    results.push({
+      lot_id: s.id,
+      lot_number: s.lot_number,
+      success: false,
+      skipped: true,
+      error: 'Already uploaded to AF — refusing to re-send. To intentionally re-upload, clear this lot\'s AF status first (delete from AF, then use the per-lot Re-upload button).',
+    });
+  }
+
+  if (lots.length === 0) {
+    return NextResponse.json({ results });
+  }
+
+  // Mark lots as uploading (only the ones we will actually upload)
   await supabase
     .from('lots')
     .update({ af_upload_status: 'uploading', af_upload_error: null })
-    .in('id', lot_ids);
-
-  const results: { lot_id: string; lot_number: number; success: boolean; error?: string }[] = [];
+    .in('id', lots.map((l: any) => l.id));
 
   for (let i = 0; i < lots.length; i++) {
     const lot = lots[i];
