@@ -12,6 +12,9 @@
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
+  .cgb-gradient-btn {
+    background: linear-gradient(135deg, #FF5A1F 0%, #FFB020 100%);
+  }
 }
 
 /* Condition slider styling */

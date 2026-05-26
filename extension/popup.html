@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="hdr">
+      <img
+        class="logo"
+        src="https://www.crazygoodbuy.com/cdn/shop/files/PNG_f0369a03-aca6-4c71-8cb4-dd63ea2b2d8b.png"
+        alt="Crazy Good Buy"
+      />
+      <span class="hdr-title">Marketplace Poster</span>
+    </header>
+
+    <div class="body">
+      <label class="field">
+        <span>App URL</span>
+        <input id="apiBase" type="url" placeholder="https://your-app.vercel.app" />
+      </label>
+      <label class="field">
+        <span>Token</span>
+        <input id="token" type="text" placeholder="Paste token from the web app" />
+      </label>
+      <button id="connect" class="btn">Connect</button>
+
+      <div id="status" class="status"></div>
+
+      <button id="start" class="btn btn-primary" disabled>Start posting</button>
+      <button id="stop" class="btn btn-ghost" hidden>Stop</button>
+
+      <p class="note">
+        Log into Facebook in this browser first. The extension fills each
+        listing's photos and fields, then pauses for you to review and click
+        <b>Publish</b>.
+      </p>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

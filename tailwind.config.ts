@@ -12,6 +12,12 @@ const config: Config = {
           navy: '#0A1628',
           bg: '#F5F7FA',
         },
+        cgb: {
+          orange: '#FF5A1F',
+          amber: '#FFB020',
+          ink: '#15141F',
+          bg: '#FBF7F2',
+        },
       },
       fontFamily: {
         sans: ['Inter', ...defaultTheme.fontFamily.sans],
