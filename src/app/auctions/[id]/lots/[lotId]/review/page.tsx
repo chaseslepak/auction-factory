@@ -404,7 +404,21 @@ export default function LotReviewPage() {
           .select()
           .single();
 
-        if (lotError) throw lotError;
+        if (lotError) {
+          // Surface a friendly message when two lotters collide on the same
+          // lot number — the DB's unique(auction_id, lot_number) constraint
+          // catches this. Tell the user to bump their starting number.
+          const msg = String(lotError.message || '');
+          if (
+            msg.toLowerCase().includes('duplicate') ||
+            msg.toLowerCase().includes('unique')
+          ) {
+            throw new Error(
+              `Lot #${lotNumber} already exists in this auction — your partner likely just created it. Go back, open "Change start", and pick a higher starting number.`
+            );
+          }
+          throw lotError;
+        }
 
         // Upload photos to storage and create lot_photos records
         let photoIndex = 0;
@@ -456,6 +470,14 @@ export default function LotReviewPage() {
 
         setSaveProgress({ current: i + 1, total: lotsToCreate });
       }
+
+      // Advance this lotter's persisted next-lot-number so the next visit to
+      // new-lot defaults to the right value. Keeps two-lotter coordination
+      // working without anyone having to retype their starting number.
+      const lastSavedNumber = nextLotNumber + lotsToCreate - 1;
+      try {
+        localStorage.setItem(`lotter-next-${auctionId}`, String(lastSavedNumber + 1));
+      } catch {}
 
       // Clear pending data
       sessionStorage.removeItem('pending-lot');
