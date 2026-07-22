@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 
 const sections = [
+  { href: '/admin/hq-upload-queue', title: 'HQ Upload Queue', desc: 'Auctions locations have marked ready — push to AF here' },
   { href: '/admin/sop', title: 'SOP / Manual', desc: 'How to use the Ohio Lotter — step by step guide' },
   { href: '/admin/jobs', title: 'Jobs', desc: 'View background job status, errors, retry failed' },
   { href: '/admin/trash', title: 'Trash', desc: 'Restore or permanently delete removed lots' },

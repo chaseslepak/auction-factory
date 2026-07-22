@@ -275,6 +275,27 @@ export default function AuctionDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  const handleMarkReady = async () => {
+    if (!confirm('Mark this auction as ready for HQ upload?\n\nHQ will push it to Auction Factory using the correct AF admin login.')) return;
+    await supabase
+      .from('auctions')
+      .update({
+        hq_upload_status: 'ready',
+        hq_ready_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+    await fetchData();
+  };
+
+  const handleUnmarkReady = async () => {
+    if (!confirm('Unmark ready? HQ will not push this auction until it\'s marked ready again.')) return;
+    await supabase
+      .from('auctions')
+      .update({ hq_upload_status: null, hq_ready_at: null })
+      .eq('id', id);
+    await fetchData();
+  };
+
   const handleResetFromFailed = async () => {
     // Only reset lots that ACTUALLY failed. The previous behavior reset every
     // lot from the first failure onward — including ones that had already
@@ -307,7 +328,7 @@ export default function AuctionDetailPage() {
 
     setUploadMsg({
       type: 'success',
-      text: `Reset ${failed.length} failed lot${failed.length > 1 ? 's' : ''}. Click "Upload to AF" to retry.`,
+      text: `Reset ${failed.length} failed lot${failed.length > 1 ? 's' : ''}. Click "HQ Push to AF" above to retry.`,
     });
   };
 
@@ -615,7 +636,55 @@ export default function AuctionDetailPage() {
         </Link>
       </div>
 
-      {/* AF Upload Section */}
+      {/* HQ Upload Handoff — locations mark auctions "ready", HQ pushes to AF */}
+      {lots.length > 0 && (
+        <div className="px-4 mb-2">
+          <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              {auction?.hq_upload_status === 'ready' ? (
+                <>
+                  <p className="font-black text-brand-green text-sm">✓ Ready for HQ upload</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    Marked {auction.hq_ready_at ? new Date(auction.hq_ready_at).toLocaleString() : ''}
+                  </p>
+                </>
+              ) : auction?.hq_upload_status === 'uploading' ? (
+                <>
+                  <p className="font-black text-brand-blue text-sm">HQ uploading now…</p>
+                </>
+              ) : auction?.hq_upload_status === 'done' ? (
+                <>
+                  <p className="font-black text-brand-green text-sm">All lots uploaded to AF</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold text-brand-navy text-sm">Ready to hand off to HQ?</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    Mark ready when lotting is complete and HQ will push to AF.
+                  </p>
+                </>
+              )}
+            </div>
+            {auction?.hq_upload_status === 'ready' ? (
+              <button
+                onClick={handleUnmarkReady}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-bold text-gray-500 uppercase flex-shrink-0"
+              >
+                Unmark
+              </button>
+            ) : auction?.hq_upload_status === 'done' || auction?.hq_upload_status === 'uploading' ? null : (
+              <button
+                onClick={handleMarkReady}
+                className="px-4 py-2 rounded-lg bg-brand-green text-white text-xs font-black uppercase tracking-wide flex-shrink-0"
+              >
+                Mark Ready for HQ
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* AF Upload Section (HQ-only — pushes to AF from a browser logged into the correct AF admin account) */}
       {lots.length > 0 && (
         <div className="px-4 mb-2">
           {!afLinked ? (
@@ -683,34 +752,24 @@ export default function AuctionDetailPage() {
                 href={`/auctions/${id}/browser-upload`}
                 className="w-full block text-center py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide"
               >
-                🌐 Browser Upload (recommended)
+                🌐 HQ Push to AF (Browser Upload)
               </Link>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleUploadToAf}
-                  disabled={uploading}
-                  className="flex-1 py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
-                >
-                  {uploading ? 'Uploading...' : 'Server Upload (fallback)'}
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;
-                    await supabase.from('af_auction_map').delete().eq('auction_id', id);
-                    // Reset upload status for all lots in this auction
-                    await supabase
-                      .from('lots')
-                      .update({ af_upload_status: null, af_upload_error: null })
-                      .eq('auction_id', id);
-                    setAfLinked(false);
-                    setAfAuctionId('');
-                    fetchData();
-                  }}
-                  className="px-3 py-3 rounded-xl border border-gray-300 text-gray-400 text-xs"
-                >
-                  Unlink
-                </button>
-              </div>
+              <button
+                onClick={async () => {
+                  if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;
+                  await supabase.from('af_auction_map').delete().eq('auction_id', id);
+                  await supabase
+                    .from('lots')
+                    .update({ af_upload_status: null, af_upload_error: null })
+                    .eq('auction_id', id);
+                  setAfLinked(false);
+                  setAfAuctionId('');
+                  fetchData();
+                }}
+                className="w-full py-2 rounded-xl border border-gray-300 text-gray-400 text-xs font-bold uppercase tracking-wide"
+              >
+                Unlink AF Auction
+              </button>
               {lots.some((l: any) => l.af_upload_status === 'failed') && (
                 <button
                   onClick={handleResetFromFailed}
