@@ -12,13 +12,13 @@ export async function GET(request: NextRequest) {
   if (!token) {
     return new NextResponse('// token required', {
       status: 400,
-      headers: { 'Content-Type': 'application/javascript', ...CORS_HEADERS },
+      headers: { 'Content-Type': 'application/javascript; charset=utf-8', ...CORS_HEADERS },
     });
   }
 
   const origin = request.nextUrl.origin;
 
-  const script = `// Auction Factory Browser Upload — Token: ${token.substring(0, 8)}...
+  const script = `// Auction Factory Browser Upload - Token: ${token.substring(0, 8)}...
 (async () => {
   const TOKEN = '${token}';
   const API = '${origin}';
@@ -162,7 +162,7 @@ export async function GET(request: NextRequest) {
         // AF is actually returning. After that, only log on failure.
         const shouldLog = i < 3 || !success;
         if (shouldLog) {
-          console.log('[AU] lot #' + lot.lot_number + ' →', {
+          console.log('[AU] lot #' + lot.lot_number + ' ->', {
             status: ur.status,
             redirected,
             finalUrl,
@@ -179,7 +179,7 @@ export async function GET(request: NextRequest) {
           const dbg = document.createElement('div');
           dbg.style.cssText = 'margin-top:8px;padding:6px;background:#0f1e33;border-radius:6px;font-family:monospace;font-size:10px;color:#9ca3af;max-height:120px;overflow:auto;word-break:break-all';
           dbg.textContent =
-            'Lot #' + lot.lot_number + ' → status=' + ur.status +
+            'Lot #' + lot.lot_number + ' -> status=' + ur.status +
             ', redirected=' + redirected +
             ', len=' + responseLen +
             ', success=' + success + '\n' +
@@ -192,7 +192,7 @@ export async function GET(request: NextRequest) {
         // we don't mark 49 lots as uploaded on a systemic failure.
         if (i === 0 && !success) {
           setMsg(
-            'FIRST LOT FAILED — stopping to avoid marking rest as uploaded.',
+            'FIRST LOT FAILED - stopping to avoid marking rest as uploaded.',
             'Check the diagnostic panel + browser console; share with support.'
           );
           fail++;
@@ -204,7 +204,7 @@ export async function GET(request: NextRequest) {
               token: TOKEN,
               lot_id: lot.id,
               status: 'failed',
-              error: 'Browser upload aborted — first lot failed (status ' + ur.status +
+              error: 'Browser upload aborted - first lot failed (status ' + ur.status +
                      ', redirected=' + redirected + ', len=' + responseLen + ')',
             }),
           });
@@ -253,7 +253,7 @@ export async function GET(request: NextRequest) {
 
   return new NextResponse(script, {
     headers: {
-      'Content-Type': 'application/javascript',
+      'Content-Type': 'application/javascript; charset=utf-8',
       ...CORS_HEADERS,
     },
   });
