@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { corsHeaders } from '@/lib/browser-upload-cors';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': 'https://www.auctionfactory.com',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request, 'GET, OPTIONS') });
 }
 
 // Serve the browser upload script with token baked in
 export async function GET(request: NextRequest) {
+  const CORS_HEADERS = corsHeaders(request, 'GET, OPTIONS');
   const token = request.nextUrl.searchParams.get('token');
   if (!token) {
     return new NextResponse('// token required', {

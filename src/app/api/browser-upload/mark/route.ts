@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
+import { corsHeaders } from '@/lib/browser-upload-cors';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': 'https://www.auctionfactory.com',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request, 'POST, OPTIONS') });
 }
 
 // Mark a lot as uploaded (called by the browser upload script)
 export async function POST(request: NextRequest) {
+  const CORS_HEADERS = corsHeaders(request, 'POST, OPTIONS');
   const { token, lot_id, status, error } = await request.json();
 
   if (!token || !lot_id) {

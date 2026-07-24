@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
+import { corsHeaders } from '@/lib/browser-upload-cors';
 
 export const maxDuration = 60;
-
-// CORS headers — allow calls from auctionfactory.com
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': 'https://www.auctionfactory.com',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
 
 // AF condition labels matching their dropdown
 const CONDITION_MAP: Record<number, string> = {
@@ -44,11 +38,12 @@ function sanitizeForAF(text: string, maxLength?: number): string {
   return result;
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request, 'GET, POST, OPTIONS') });
 }
 
 export async function GET(request: NextRequest) {
+  const CORS_HEADERS = corsHeaders(request, 'GET, POST, OPTIONS');
   const token = request.nextUrl.searchParams.get('token');
   if (!token) {
     return NextResponse.json({ error: 'token required' }, { status: 400, headers: CORS_HEADERS });
