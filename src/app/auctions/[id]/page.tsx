@@ -769,6 +769,13 @@ export default function AuctionDetailPage() {
                 🌐 HQ Push to AF (Browser Upload)
               </Link>
               <button
+                onClick={handleUploadToAf}
+                disabled={uploading}
+                className="w-full py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
+              >
+                {uploading ? 'Uploading...' : 'Server Upload (fallback)'}
+              </button>
+              <button
                 onClick={async () => {
                   if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;
                   await supabase.from('af_auction_map').delete().eq('auction_id', id);
