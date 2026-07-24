@@ -277,22 +277,36 @@ export default function AuctionDetailPage() {
 
   const handleMarkReady = async () => {
     if (!confirm('Mark this auction as ready for HQ upload?\n\nHQ will push it to Auction Factory using the correct AF admin login.')) return;
-    await supabase
+    const { error } = await supabase
       .from('auctions')
       .update({
         hq_upload_status: 'ready',
         hq_ready_at: new Date().toISOString(),
       })
       .eq('id', id);
+    if (error) {
+      const missingCol = /column .* does not exist/i.test(error.message);
+      setUploadMsg({
+        type: 'error',
+        text: missingCol
+          ? 'Missing DB migration — run supabase/phase9_hq_upload_queue.sql in the Supabase SQL Editor, then try again.'
+          : `Mark Ready failed: ${error.message}`,
+      });
+      return;
+    }
     await fetchData();
   };
 
   const handleUnmarkReady = async () => {
     if (!confirm('Unmark ready? HQ will not push this auction until it\'s marked ready again.')) return;
-    await supabase
+    const { error } = await supabase
       .from('auctions')
       .update({ hq_upload_status: null, hq_ready_at: null })
       .eq('id', id);
+    if (error) {
+      setUploadMsg({ type: 'error', text: `Unmark failed: ${error.message}` });
+      return;
+    }
     await fetchData();
   };
 
