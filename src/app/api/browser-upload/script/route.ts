@@ -129,13 +129,87 @@ export async function GET(request: NextRequest) {
         });
         const ut = await ur.text();
 
-        // Detect success: got 200 back with the form page (not login, not Forbidden)
-        const success =
-          ur.status === 200 &&
-          !ut.includes('Forbidden') &&
-          !ut.includes('psEmail') &&
-          !ut.includes("don't have permission") &&
-          ut.includes('Item Name');
+        // Detect success. Old check ("response contains 'Item Name'") gave
+        // false positives when AF silently re-served the same empty form on
+        // rejection. We now require a stronger positive signal:
+        //   (1) fetch was redirected (AF redirects to a fresh form on save), OR
+        //   (2) response contains a known success phrase.
+        // Then we still check for known failure signals as a veto.
+        const lower = ut.toLowerCase();
+        const redirected = ur.redirected;
+        const finalUrl = ur.url;
+        const responseLen = ut.length;
+
+        const positiveSignal =
+          redirected ||
+          lower.includes('successfully added') ||
+          lower.includes('item added') ||
+          lower.includes('item saved') ||
+          lower.includes('saved successfully');
+
+        const negativeSignal =
+          ur.status !== 200 ||
+          ut.includes('Forbidden') ||
+          ut.includes('psEmail') ||
+          ut.includes("don't have permission") ||
+          lower.includes('please enter') ||
+          lower.includes('is required') ||
+          lower.includes('error');
+
+        const success = positiveSignal && !negativeSignal;
+
+        // Verbose diagnostics for the first 3 uploads so we can see what
+        // AF is actually returning. After that, only log on failure.
+        const shouldLog = i < 3 || !success;
+        if (shouldLog) {
+          console.log('[AU] lot #' + lot.lot_number + ' →', {
+            status: ur.status,
+            redirected,
+            finalUrl,
+            responseLen,
+            positiveSignal,
+            negativeSignal,
+            snippet: ut.substring(0, 500),
+          });
+        }
+
+        // Show the first response in the on-page status panel so the user
+        // doesn't have to open DevTools to see what's going on.
+        if (i === 0) {
+          const dbg = document.createElement('div');
+          dbg.style.cssText = 'margin-top:8px;padding:6px;background:#0f1e33;border-radius:6px;font-family:monospace;font-size:10px;color:#9ca3af;max-height:120px;overflow:auto;word-break:break-all';
+          dbg.textContent =
+            'Lot #' + lot.lot_number + ' → status=' + ur.status +
+            ', redirected=' + redirected +
+            ', len=' + responseLen +
+            ', success=' + success + '\n' +
+            'finalUrl=' + finalUrl + '\n\n' +
+            ut.substring(0, 400);
+          ui.appendChild(dbg);
+        }
+
+        // If the FIRST upload failed, stop the whole batch immediately so
+        // we don't mark 49 lots as uploaded on a systemic failure.
+        if (i === 0 && !success) {
+          setMsg(
+            'FIRST LOT FAILED — stopping to avoid marking rest as uploaded.',
+            'Check the diagnostic panel + browser console; share with support.'
+          );
+          fail++;
+          failedLots.push(lot.lot_number);
+          await fetch(API + '/api/browser-upload/mark', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token: TOKEN,
+              lot_id: lot.id,
+              status: 'failed',
+              error: 'Browser upload aborted — first lot failed (status ' + ur.status +
+                     ', redirected=' + redirected + ', len=' + responseLen + ')',
+            }),
+          });
+          return;
+        }
 
         // Update lotter status
         await fetch(API + '/api/browser-upload/mark', {
@@ -145,7 +219,8 @@ export async function GET(request: NextRequest) {
             token: TOKEN,
             lot_id: lot.id,
             status: success ? 'uploaded' : 'failed',
-            error: success ? null : 'Browser upload failed - status ' + ur.status,
+            error: success ? null : 'Browser upload failed - status ' + ur.status +
+                                     ' (redirected=' + redirected + ', len=' + responseLen + ')',
           }),
         });
 
@@ -154,12 +229,11 @@ export async function GET(request: NextRequest) {
         } else {
           fail++;
           failedLots.push(lot.lot_number);
-          console.error('Lot #' + lot.lot_number + ' failed. Response:', ut.substring(0, 300));
         }
       } catch (e) {
         fail++;
         failedLots.push(lot.lot_number);
-        console.error('Lot #' + lot.lot_number + ' error:', e);
+        console.error('[AU] Lot #' + lot.lot_number + ' error:', e);
       }
 
       // Short delay between uploads (be gentle to AF)
