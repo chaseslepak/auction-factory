@@ -112,6 +112,33 @@ export default function HqUploadQueuePage() {
     setFlippingId(null);
   };
 
+  // Reset every lot in the auction back to unuploaded status and re-flip the
+  // auction to "ready" so HQ can push again from scratch. Use this when the
+  // browser upload falsely marked lots as uploaded but they didn't land on
+  // AF — the safety guard in /api/af-upload would otherwise skip them on retry.
+  const resetAndRetry = async (id: string) => {
+    if (
+      !confirm(
+        'Reset AF status on every lot in this auction and re-queue for HQ upload?\n\n' +
+          'Use this after a browser-upload run that marked lots as uploaded but nothing actually landed on AF. ' +
+          'IMPORTANT: if some lots DID make it to AF, delete those from AF admin first — otherwise the retry will create duplicates.'
+      )
+    )
+      return;
+    setFlippingId(id);
+    await supabase
+      .from('lots')
+      .update({ af_upload_status: null, af_upload_error: null })
+      .eq('auction_id', id)
+      .is('deleted_at', null);
+    await supabase
+      .from('auctions')
+      .update({ hq_upload_status: 'ready', hq_ready_at: new Date().toISOString() })
+      .eq('id', id);
+    await fetchQueue();
+    setFlippingId(null);
+  };
+
   const ready = rows.filter((r) => r.hq_upload_status === 'ready');
   const uploading = rows.filter((r) => r.hq_upload_status === 'uploading');
   const done = rows.filter((r) => r.hq_upload_status === 'done');
@@ -148,6 +175,7 @@ export default function HqUploadQueuePage() {
                 row={r}
                 onOpen={() => markUploading(r.id)}
                 onClear={() => clearStatus(r.id)}
+                onResetAndRetry={() => resetAndRetry(r.id)}
                 flippingId={flippingId}
               />
             ))}
@@ -162,6 +190,7 @@ export default function HqUploadQueuePage() {
                 row={r}
                 onOpen={() => markUploading(r.id)}
                 onClear={() => clearStatus(r.id)}
+                onResetAndRetry={() => resetAndRetry(r.id)}
                 flippingId={flippingId}
               />
             ))}
@@ -176,6 +205,7 @@ export default function HqUploadQueuePage() {
                 row={r}
                 onOpen={() => markUploading(r.id)}
                 onClear={() => clearStatus(r.id)}
+                onResetAndRetry={() => resetAndRetry(r.id)}
                 flippingId={flippingId}
               />
             ))}
@@ -213,11 +243,13 @@ function QueueCard({
   row,
   onOpen,
   onClear,
+  onResetAndRetry,
   flippingId,
 }: {
   row: QueueRow;
   onOpen: () => void;
   onClear: () => void;
+  onResetAndRetry: () => void;
   flippingId: string | null;
 }) {
   const remaining = row.total_lots - row.uploaded_lots;
@@ -232,14 +264,24 @@ function QueueCard({
             {row.hq_ready_at && ` • ready ${new Date(row.hq_ready_at).toLocaleString()}`}
           </p>
         </div>
-        <button
-          onClick={onClear}
-          disabled={busy}
-          className="text-[10px] font-bold text-gray-400 uppercase px-2 py-1 rounded border border-gray-200 disabled:opacity-50 flex-shrink-0"
-          title="Clear from HQ queue"
-        >
-          Clear
-        </button>
+        <div className="flex gap-1 flex-shrink-0">
+          <button
+            onClick={onResetAndRetry}
+            disabled={busy}
+            className="text-[10px] font-bold text-orange-500 uppercase px-2 py-1 rounded border border-orange-200 disabled:opacity-50"
+            title="Reset every lot's AF status and re-queue so HQ can push again"
+          >
+            Reset & Retry
+          </button>
+          <button
+            onClick={onClear}
+            disabled={busy}
+            className="text-[10px] font-bold text-gray-400 uppercase px-2 py-1 rounded border border-gray-200 disabled:opacity-50"
+            title="Clear from HQ queue"
+          >
+            Clear
+          </button>
+        </div>
       </div>
       {row.hq_upload_status !== 'done' && remaining > 0 && (
         <div className="mt-3 flex gap-2">
