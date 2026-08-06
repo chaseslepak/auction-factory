@@ -9,9 +9,12 @@ import Header from '@/components/Header';
 import GradientButton from '@/components/GradientButton';
 import ConfidenceChip from '@/components/ConfidenceChip';
 import ProgressBar from '@/components/ProgressBar';
+import ToastStack, { useToasts } from '@/components/Toast';
+import AfSessionBadge from '@/components/AfSessionBadge';
 
 export default function AuctionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { toasts, show: showToast, dismiss: dismissToast } = useToasts();
   const [auction, setAuction] = useState<Auction | null>(null);
   const [lots, setLots] = useState<LotWithPhotos[]>([]);
   const [loading, setLoading] = useState(true);
@@ -465,7 +468,9 @@ export default function AuctionDetailPage() {
   };
 
   const deleteLot = async (lotId: string) => {
-    if (!confirm('Delete this lot? (Can be restored from trash)')) return;
+    // Look up the lot number for the toast message before we soft-delete it
+    const target = lots.find((l) => l.id === lotId);
+    const label = target ? `Lot #${target.lot_number}` : 'Lot';
 
     // Soft delete — keeps photos and data, just marks as deleted
     await supabase
@@ -473,6 +478,24 @@ export default function AuctionDetailPage() {
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', lotId);
     fetchData();
+
+    // Show a toast with an Undo action. 7s window before the delete becomes
+    // "permanent" (it's still recoverable from /admin/trash after that).
+    showToast({
+      message: `${label} deleted.`,
+      tone: 'info',
+      durationMs: 7000,
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          await supabase
+            .from('lots')
+            .update({ deleted_at: null })
+            .eq('id', lotId);
+          fetchData();
+        },
+      },
+    });
   };
 
   const getPhotoUrl = (path: string) => {
@@ -648,6 +671,10 @@ export default function AuctionDetailPage() {
         <Link href="/settings" className="text-xs text-brand-blue font-medium">
           Settings
         </Link>
+      </div>
+
+      <div className="px-4">
+        <AfSessionBadge />
       </div>
 
       {/* HQ Upload Handoff — locations mark auctions "ready", HQ pushes to AF */}
@@ -1136,6 +1163,7 @@ export default function AuctionDetailPage() {
           <GradientButton>New Lot</GradientButton>
         </Link>
       </div>
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

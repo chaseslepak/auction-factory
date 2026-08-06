@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client';
 import type { Auction } from '@/lib/types';
 import Header from '@/components/Header';
 import GradientButton from '@/components/GradientButton';
+import OnboardingBanner from '@/components/OnboardingBanner';
+import AfSessionBadge from '@/components/AfSessionBadge';
 
 export default function AuctionsPage() {
   const [auctions, setAuctions] = useState<(Auction & { lot_count: number; archived_at?: string | null })[]>([]);
@@ -97,6 +99,8 @@ export default function AuctionsPage() {
       </div>
 
       <div className="p-4 space-y-3">
+        <AfSessionBadge />
+        <OnboardingBanner />
         {loading ? (
           <p className="text-center text-gray-400 py-12">Loading...</p>
         ) : visibleAuctions.length === 0 ? (
