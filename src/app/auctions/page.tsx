@@ -7,7 +7,9 @@ import type { Auction } from '@/lib/types';
 import Header from '@/components/Header';
 import GradientButton from '@/components/GradientButton';
 import OnboardingBanner from '@/components/OnboardingBanner';
+import InstallPrompt from '@/components/InstallPrompt';
 import AfSessionBadge from '@/components/AfSessionBadge';
+import { AuctionCardSkeleton } from '@/components/LoadingSkeleton';
 
 export default function AuctionsPage() {
   const [auctions, setAuctions] = useState<(Auction & { lot_count: number; archived_at?: string | null })[]>([]);
@@ -100,9 +102,14 @@ export default function AuctionsPage() {
 
       <div className="p-4 space-y-3">
         <AfSessionBadge />
+        <InstallPrompt />
         <OnboardingBanner />
         {loading ? (
-          <p className="text-center text-gray-400 py-12">Loading...</p>
+          <div className="space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <AuctionCardSkeleton key={i} />
+            ))}
+          </div>
         ) : visibleAuctions.length === 0 ? (
           <p className="text-center text-gray-400 py-12">
             {showArchived ? 'No archived auctions' : 'No auctions yet. Create your first!'}
