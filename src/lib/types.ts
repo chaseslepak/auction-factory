@@ -6,7 +6,21 @@ export interface Auction {
   status: 'active' | 'closed';
   hq_upload_status: 'ready' | 'uploading' | 'done' | null;
   hq_ready_at: string | null;
+  location_id: string | null;
   lot_count?: number;
+}
+
+export interface Location {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface AllowedUser {
+  email: string;
+  role: 'admin' | 'lotter';
+  location_id: string | null;
+  created_at: string;
 }
 
 export interface Lot {
