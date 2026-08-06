@@ -103,7 +103,7 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen bg-brand-navy flex flex-col items-center justify-center px-6">
+    <div className="min-h-screen brand-backdrop flex flex-col items-center justify-center px-6">
       {/* Logo */}
       <div className="mb-8 text-center">
         <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-black/20 p-2">

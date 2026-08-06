@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-brand-navy flex flex-col items-center justify-center px-6">
+    <div className="min-h-screen brand-backdrop flex flex-col items-center justify-center px-6">
       {/* Logo */}
       <div className="mb-10 text-center">
         <div className="w-72 h-72 bg-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-black/30 p-4">

@@ -28,8 +28,8 @@ export async function GET(request: NextRequest) {
   if (existing) existing.remove();
   const ui = document.createElement('div');
   ui.id = 'au-upload-status';
-  ui.style.cssText = 'position:fixed;top:16px;right:16px;background:#0A1628;color:white;padding:20px;z-index:999999;border-radius:12px;font-family:-apple-system,sans-serif;font-size:14px;max-width:340px;box-shadow:0 10px 40px rgba(0,0,0,0.4);border:2px solid #2E9D5C';
-  ui.innerHTML = '<div id="au-status-title" style="font-weight:bold;margin-bottom:8px">Auction Factory Browser Upload</div><div id="au-status-msg">Fetching lot data...</div><div id="au-status-bar" style="margin-top:10px;height:6px;background:#1a2a3e;border-radius:3px;overflow:hidden"><div id="au-status-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#0B4F8B,#2E9D5C);transition:width 0.3s"></div></div><div id="au-status-sub" style="margin-top:8px;font-size:11px;color:#9ca3af"></div>';
+  ui.style.cssText = 'position:fixed;top:16px;right:16px;background:#0A1628;color:white;padding:20px;z-index:999999;border-radius:12px;font-family:-apple-system,sans-serif;font-size:14px;max-width:340px;box-shadow:0 10px 40px rgba(0,0,0,0.4);border:2px solid #5CB82C';
+  ui.innerHTML = '<div id="au-status-title" style="font-weight:bold;margin-bottom:8px">Auction Factory Browser Upload</div><div id="au-status-msg">Fetching lot data...</div><div id="au-status-bar" style="margin-top:10px;height:6px;background:#1a2a3e;border-radius:3px;overflow:hidden"><div id="au-status-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#1E50B5,#5CB82C);transition:width 0.3s"></div></div><div id="au-status-sub" style="margin-top:8px;font-size:11px;color:#9ca3af"></div>';
   document.body.appendChild(ui);
 
   const setMsg = (msg, sub = '') => {

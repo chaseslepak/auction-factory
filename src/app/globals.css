@@ -3,18 +3,43 @@
 @tailwind utilities;
 
 @layer utilities {
+  /* Primary CTA gradient — bright royal blue -> lime green matching the AF logo */
   .gradient-btn {
-    background: linear-gradient(135deg, #0B4F8B 0%, #2E9D5C 100%);
+    background: linear-gradient(135deg, #1E50B5 0%, #5CB82C 100%);
+    transition: filter 0.15s ease, transform 0.15s ease;
   }
+  .gradient-btn:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .gradient-btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
   .gradient-text {
-    background: linear-gradient(135deg, #0B4F8B 0%, #2E9D5C 100%);
+    background: linear-gradient(135deg, #1E50B5 0%, #5CB82C 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
+
+  /* Subtle branded backdrop for splash / login pages — deep navy at the top
+     that lifts toward a faint hint of the brand blue/green wash. */
+  .brand-backdrop {
+    background:
+      radial-gradient(ellipse 80% 60% at 30% 0%, rgba(30, 80, 181, 0.35) 0%, transparent 60%),
+      radial-gradient(ellipse 80% 60% at 70% 100%, rgba(92, 184, 44, 0.22) 0%, transparent 60%),
+      #0A1628;
+  }
+
+  /* Thin accent bar under headers, using the logo's blue->green gradient */
+  .brand-accent-bar {
+    background: linear-gradient(90deg, #1E50B5 0%, #5CB82C 100%);
+    height: 2px;
+    width: 100%;
+  }
 }
 
-/* Condition slider styling */
+/* Condition slider styling — thumb picks up the lime green */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
@@ -30,15 +55,17 @@ input[type='range']::-webkit-slider-thumb {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #2E9D5C;
+  background: #5CB82C;
   cursor: pointer;
+  box-shadow: 0 0 0 2px rgba(92, 184, 44, 0.25);
 }
 
 input[type='range']::-moz-range-thumb {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #2E9D5C;
+  background: #5CB82C;
   cursor: pointer;
   border: none;
+  box-shadow: 0 0 0 2px rgba(92, 184, 44, 0.25);
 }
