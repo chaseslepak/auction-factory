@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import type { Auction } from '@/lib/types';
@@ -9,15 +9,33 @@ import GradientButton from '@/components/GradientButton';
 import OnboardingBanner from '@/components/OnboardingBanner';
 import InstallPrompt from '@/components/InstallPrompt';
 import AfSessionBadge from '@/components/AfSessionBadge';
+import LocationPicker from '@/components/LocationPicker';
 import { AuctionCardSkeleton } from '@/components/LoadingSkeleton';
+import { useCurrentProfile } from '@/lib/useCurrentProfile';
+
+type AuctionRow = Auction & { lot_count: number; archived_at?: string | null };
 
 export default function AuctionsPage() {
-  const [auctions, setAuctions] = useState<(Auction & { lot_count: number; archived_at?: string | null })[]>([]);
+  const { email, profile, locations, loading: profileLoading, refresh: refreshProfile } =
+    useCurrentProfile();
+  const [auctions, setAuctions] = useState<AuctionRow[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newLocationId, setNewLocationId] = useState('');
   const [loading, setLoading] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
+  // Location filter: undefined = user's default, '' = All, or a specific id
+  const [locationFilter, setLocationFilter] = useState<string | undefined>(undefined);
   const supabase = createClient();
+
+  const isAdmin = profile?.role === 'admin';
+  const userLocationId = profile?.location_id ?? null;
+  // Admin default = All. Lotter default = their assigned location.
+  const activeFilter =
+    locationFilter !== undefined ? locationFilter : isAdmin ? '' : userLocationId ?? '';
+
+  const locationName = (id: string | null | undefined) =>
+    id ? locations.find((l) => l.id === id)?.name ?? '—' : 'Unassigned';
 
   const fetchAuctions = async () => {
     const { data } = await supabase
@@ -40,11 +58,15 @@ export default function AuctionsPage() {
     fetchAuctions();
   }, []);
 
-  const logActivity = async (action: string, entity_id?: string, auction_id?: string, details?: any) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.email) return;
+  const logActivity = async (
+    action: string,
+    entity_id?: string,
+    auction_id?: string,
+    details?: any
+  ) => {
+    if (!email) return;
     await supabase.from('activity_log').insert({
-      user_email: user.email,
+      user_email: email,
       action,
       entity_type: 'auction',
       entity_id,
@@ -56,18 +78,20 @@ export default function AuctionsPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
+    const location_id = isAdmin ? newLocationId || null : userLocationId;
 
     const { data } = await supabase
       .from('auctions')
-      .insert({ name: newName.trim() })
+      .insert({ name: newName.trim(), location_id })
       .select()
       .single();
 
     if (data) {
-      logActivity('created', data.id, data.id, { name: newName.trim() });
+      logActivity('created', data.id, data.id, { name: newName.trim(), location_id });
     }
 
     setNewName('');
+    setNewLocationId('');
     setShowForm(false);
     fetchAuctions();
   };
@@ -81,17 +105,30 @@ export default function AuctionsPage() {
     fetchAuctions();
   };
 
-  const visibleAuctions = auctions.filter((a) => showArchived ? !!a.archived_at : !a.archived_at);
+  const visibleAuctions = useMemo(() => {
+    return auctions.filter((a) => {
+      if (showArchived ? !a.archived_at : !!a.archived_at) return false;
+      if (activeFilter === '') return true; // All
+      return a.location_id === activeFilter;
+    });
+  }, [auctions, showArchived, activeFilter]);
+
   const archivedCount = auctions.filter((a) => !!a.archived_at).length;
+
+  // Show location picker if lotter (or unknown role, since new users default
+  // to lotter) with no location_id set. Skip while profile is still loading
+  // to avoid flashing the picker.
+  const needsLocation =
+    !profileLoading && !isAdmin && !userLocationId && locations.length > 0;
 
   return (
     <div className="min-h-screen bg-brand-bg">
       <Header title="Auctions" />
 
-      <div className="px-4 py-2 flex items-center justify-between">
+      <div className="px-4 py-2 flex items-center justify-between gap-2">
         <button
           onClick={() => setShowArchived(!showArchived)}
-          className="text-xs font-medium text-brand-blue"
+          className="text-xs font-medium text-brand-blue whitespace-nowrap"
         >
           {showArchived ? `← Back to Active` : `View Archived (${archivedCount})`}
         </button>
@@ -99,6 +136,25 @@ export default function AuctionsPage() {
           Admin
         </Link>
       </div>
+
+      {/* Location filter row */}
+      {locations.length > 0 && (userLocationId || isAdmin) && (
+        <div className="px-4 pb-2">
+          <select
+            value={activeFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+          >
+            <option value="">All locations</option>
+            {locations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                {loc.name}
+                {loc.id === userLocationId ? ' (yours)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="p-4 space-y-3">
         <AfSessionBadge />
@@ -112,7 +168,11 @@ export default function AuctionsPage() {
           </div>
         ) : visibleAuctions.length === 0 ? (
           <p className="text-center text-gray-400 py-12">
-            {showArchived ? 'No archived auctions' : 'No auctions yet. Create your first!'}
+            {showArchived
+              ? 'No archived auctions'
+              : activeFilter && activeFilter !== ''
+              ? `No auctions in ${locationName(activeFilter)} yet.`
+              : 'No auctions yet. Create your first!'}
           </p>
         ) : (
           visibleAuctions.map((auction) => (
@@ -125,14 +185,28 @@ export default function AuctionsPage() {
                 className="block p-4 active:bg-gray-50 transition-colors"
               >
                 <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="font-bold text-brand-navy">{auction.name}</h2>
+                  <div className="min-w-0">
+                    <h2 className="font-bold text-brand-navy truncate">{auction.name}</h2>
                     <p className="text-sm text-gray-400 mt-0.5">
                       {auction.lot_count} lot{auction.lot_count !== 1 ? 's' : ''}
+                      {activeFilter === '' && (
+                        <>
+                          {' · '}
+                          <span
+                            className={
+                              auction.location_id
+                                ? 'text-brand-blue'
+                                : 'text-gray-400'
+                            }
+                          >
+                            {locationName(auction.location_id)}
+                          </span>
+                        </>
+                      )}
                     </p>
                   </div>
                   <svg
-                    className="w-5 h-5 text-gray-300"
+                    className="w-5 h-5 text-gray-300 flex-shrink-0"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -159,6 +233,15 @@ export default function AuctionsPage() {
         )}
       </div>
 
+      {/* First-visit location picker (lotters only) */}
+      {needsLocation && (
+        <LocationPicker
+          email={email}
+          locations={locations}
+          onPicked={() => refreshProfile()}
+        />
+      )}
+
       {/* Inline create form */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end">
@@ -177,6 +260,24 @@ export default function AuctionsPage() {
               autoFocus
               className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:border-brand-blue"
             />
+            {isAdmin ? (
+              <select
+                value={newLocationId}
+                onChange={(e) => setNewLocationId(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 text-sm bg-white"
+              >
+                <option value="">Location (leave blank = unassigned)</option>
+                {locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Location: <span className="font-bold">{locationName(userLocationId)}</span>
+              </p>
+            )}
             <div className="flex gap-3">
               <button
                 type="button"
@@ -195,9 +296,7 @@ export default function AuctionsPage() {
 
       {/* Sticky bottom button */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-brand-bg via-brand-bg to-transparent pt-8">
-        <GradientButton onClick={() => setShowForm(true)}>
-          New Auction
-        </GradientButton>
+        <GradientButton onClick={() => setShowForm(true)}>New Auction</GradientButton>
       </div>
     </div>
   );
