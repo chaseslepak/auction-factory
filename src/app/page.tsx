@@ -15,7 +15,7 @@ export default function HomePage() {
           Auction Factory
         </h1>
         <p className="text-gray-400 text-lg tracking-[0.2em] uppercase mt-2">
-          Ohio Lotter
+          Official Lotter
         </p>
       </div>
 

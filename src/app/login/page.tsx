@@ -116,7 +116,7 @@ function LoginForm() {
           Auction Factory
         </h1>
         <p className="text-gray-400 text-sm tracking-[0.15em] uppercase mt-1">
-          Ohio Lotter
+          Official Lotter
         </p>
       </div>
 

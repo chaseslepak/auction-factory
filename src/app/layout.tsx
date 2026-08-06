@@ -29,13 +29,13 @@ const inter = localFont({
 });
 
 export const metadata: Metadata = {
-  title: 'Ohio Lotter | Auction Factory',
+  title: 'Auction Factory Official Lotter',
   description: 'Photograph restaurant equipment and generate auction listings',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Ohio Lotter',
+    title: 'AF Official Lotter',
   },
 };
 

@@ -1,6 +1,6 @@
 {
-  "name": "Auction Factory - Ohio Lotter",
-  "short_name": "Ohio Lotter",
+  "name": "Auction Factory Official Lotter",
+  "short_name": "AF Official Lotter",
   "description": "Photograph restaurant equipment and generate auction listings",
   "start_url": "/auctions",
   "scope": "/",
