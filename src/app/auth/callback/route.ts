@@ -4,7 +4,7 @@ import { createServerClient } from '@supabase/ssr';
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/distribute';
+  const next = searchParams.get('next') ?? '/auctions';
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=no_code`);
