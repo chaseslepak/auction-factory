@@ -1,7 +1,7 @@
-# Ohio Lotter — Internal SOP & Instruction Manual
+# Auction Factory Official Lotter — SOP & Instruction Manual
 
-**Auction Factory Ohio | Standard Operating Procedure**
-**Version:** 1.0 | **Last Updated:** April 2026
+**Auction Factory | Standard Operating Procedure**
+**Version:** 2.0 | **Last Updated:** August 2026
 
 ---
 
@@ -9,28 +9,31 @@
 
 1. [Overview](#overview)
 2. [Getting Started](#getting-started)
-3. [Creating an Auction](#creating-an-auction)
-4. [Lotting Items](#lotting-items)
-5. [Reviewing & Editing Lots](#reviewing--editing-lots)
-6. [Stock Images & Pricing](#stock-images--pricing)
-7. [Uploading to Auction Factory](#uploading-to-auction-factory)
-8. [Managing Your Auction](#managing-your-auction)
-9. [Admin Panel](#admin-panel)
-10. [Troubleshooting](#troubleshooting)
+3. [Locations](#locations)
+4. [Creating an Auction](#creating-an-auction)
+5. [Lotting Items](#lotting-items)
+6. [Reviewing & Editing Lots](#reviewing--editing-lots)
+7. [Stock Images & Pricing](#stock-images--pricing)
+8. [Uploading to Auction Factory](#uploading-to-auction-factory)
+9. [Managing Your Auction](#managing-your-auction)
+10. [Admin Panel](#admin-panel)
+11. [Troubleshooting](#troubleshooting)
+12. [Quick Reference](#quick-reference)
 
 ---
 
 ## Overview
 
-The Ohio Lotter is a mobile-first web app that lets warehouse staff photograph restaurant equipment and instantly generate professional auction listings using AI. Listings are then uploaded directly to the Auction Factory backend.
+The Auction Factory Official Lotter is a mobile-first web app that lets warehouse staff photograph items and instantly generate professional auction listings using AI. Listings are then uploaded directly to the Auction Factory backend by HQ.
 
-**App URL:** https://auction-factory.vercel.app
+**App URL:** https://lotter.auctionfactory.com
 
 **What it does:**
-- Snap photos of equipment from your phone
+- Snap photos of items from your phone
 - AI identifies the item, writes the description, finds retail pricing
-- Upload listings directly to Auction Factory with one click
+- HQ pushes the finished auction live on Auction Factory
 - Works on iPhone, Android, or desktop
+- Per-location scoping so each AF location sees only their own auctions
 
 ---
 
@@ -38,35 +41,56 @@ The Ohio Lotter is a mobile-first web app that lets warehouse staff photograph r
 
 ### First-Time Login
 
-1. Open **auction-factory.vercel.app** on your phone or computer
+1. Open **https://lotter.auctionfactory.com** on your phone or computer
 2. Enter your authorized email address
 3. Tap **Send Magic Link**
-4. Check your email for the login link
-5. Click the link — you'll be signed in automatically
+4. Check your email — click the link to sign in
 
-**Note:** Magic links expire after 1 hour. If it doesn't work, request a new one.
+**If the magic link is slow or doesn't arrive**, tap "Use password instead" on the login screen. Your admin can set your initial password. To create your own, tap **Set Password** and follow the emailed reset link.
 
-### Installing on Your Phone (Optional)
+### Installing on Your Phone
 
-**iPhone:**
-1. Open the app in Safari
-2. Tap the Share button (square with arrow)
-3. Tap **Add to Home Screen**
-4. Name it "Ohio Lotter" and tap Add
+The app is a PWA — install it to your home screen for a real-app experience (fullscreen, no browser bar). On first visit, you'll see an "Install the lotter" card at the top.
 
-**Android:**
-1. Open the app in Chrome
-2. Tap the three-dot menu
-3. Tap **Install App** or **Add to Home Screen**
+**iPhone (Safari):**
+1. Tap the Share button (square with arrow) at the bottom
+2. Tap **Add to Home Screen**
+3. Tap **Add**
+
+**Android (Chrome):**
+1. Tap **Install** in the app's "Install the lotter" card, or
+2. Tap the three-dot menu → **Install App**
+
+### First-Time Location Setup
+
+If you're a lotter (not admin), the first time you visit the Auctions page you'll be asked to **pick your location** (e.g. Texas, California, Mideast). This determines which auctions you see. Ask your admin to change it later if needed.
+
+---
+
+## Locations
+
+Each AF location has its own bucket of auctions. Lotters only see auctions from their assigned location — this keeps each location's work separate.
+
+**Above the auctions list**, you'll see a location dropdown:
+- Defaults to **your location**
+- Pick **All locations** to see auctions from every location
+- Pick a specific location to peek at another (nothing is hidden — this is a filter, not a permission wall)
+
+**When you create an auction**, it's automatically stamped with your location. Admins can pick any location when creating.
+
+**Admins** see all locations by default and can filter to any single one via the dropdown.
+
+To rename or add locations, edit the `locations` table in Supabase → Table Editor.
 
 ---
 
 ## Creating an Auction
 
 1. From the **Auctions** page, tap **New Auction**
-2. Enter the auction name (e.g., "Ohio - T&M #3")
-3. Tap **Create**
-4. Your new auction appears in the list — tap it to start lotting
+2. Enter the auction name (e.g., "Texas - Restaurant Blowout #4")
+3. If you're an admin, pick the location from the dropdown. Lotters skip this — your location is auto-stamped.
+4. Tap **Create**
+5. Your new auction appears in the list — tap it to start lotting
 
 ---
 
@@ -90,6 +114,7 @@ This is the core workflow — what you'll do in the warehouse.
 - Get the brand name/logo in at least one shot
 - Shoot the model number plate if visible
 - Include all sides for large equipment
+- The app will warn you if a photo is very low resolution — retake if you see the yellow "Low quality" badge
 
 ### Step 2: Set Condition
 
@@ -128,6 +153,13 @@ Tap **Generate Listing** and wait 10-20 seconds. The AI will:
 - Write a professional auction description
 - Assign a confidence level (high/medium/low)
 
+### Lotting with a Partner
+
+Two lotters can work the same auction in parallel:
+1. Before lotting, each person taps "Change start" on the new-lot page
+2. Person A stays at lot 1, Person B starts at (say) lot 100
+3. You won't collide as long as you leave a buffer between starting numbers
+
 ---
 
 ## Reviewing & Editing Lots
@@ -155,6 +187,10 @@ After generating, you'll see the review screen.
 - **Range / Dupes**: Toggle to Range, enter how many identical lots (e.g., "8" creates lots #X through #X+7 with identical data)
 - Tap **Save Lots**
 
+### Undoing a Delete
+
+If you delete a lot by mistake, a yellow **Undo** toast appears at the bottom for ~5 seconds. Tap it to restore. After that, admins can still recover the lot from **Admin → Trash**.
+
 ### Editing After Save
 
 1. From the auction detail page, tap any lot to open it
@@ -177,7 +213,7 @@ In edit mode on a saved lot:
 ### Automatic Stock Images
 
 When you generate a listing, the AI automatically:
-1. Searches WebstaurantStore for the exact brand+model
+1. Searches retailer sites for the exact brand+model
 2. Verifies the match with AI vision
 3. Downloads the stock image and sets it as the primary photo
 4. Pulls the real retail price from the search results
@@ -212,15 +248,26 @@ Sources checked (highest wins):
 
 ## Uploading to Auction Factory
 
-### First Time: Link Your AF Auction
+Most locations do **not** upload directly. When your auction is fully lotted, hand it off to HQ (Chase) via the **Mark Ready for HQ** button. HQ pushes it live for you.
+
+If you're a lotter with direct upload permission, follow the AF Browser Upload flow below.
+
+### Hand Off to HQ (Recommended for Locations)
+
+1. Finish lotting all items
+2. On the auction detail page, tap **Mark Ready for HQ**
+3. HQ gets notified — they'll push it to AF for you
+4. You'll see status change from "Ready" → "Uploading" → "Done"
+
+### First Time: Link Your AF Auction (Direct Upload Only)
 
 1. In the auction detail page, tap **Link AF Auction for Upload**
 2. Select your auction from the dropdown (fetched from AF admin)
 3. Tap **Link**
 
-### Browser Upload (Recommended)
+### Browser Upload (Direct — Recommended When Uploading Yourself)
 
-This is the most reliable method. It runs from your browser.
+This is the most reliable direct method. It runs from your browser.
 
 1. **Log into AF admin** in Chrome: go to auctionfactory.com/admin
 2. Navigate to any page inside /admin (stay logged in)
@@ -283,7 +330,20 @@ On the auction detail page, in the stats card, tap **Export to CSV** to download
 
 ## Admin Panel
 
-Access via **Admin** link on the auctions list page.
+Access via **Admin** link on the auctions list page. Admin access only.
+
+### Users
+
+Manage who can access the app:
+- Add users by email
+- Set role: **Admin** (sees all locations) or **Lotter** (only their location)
+- Assign each lotter their **location** via the dropdown under their row
+- Remove users
+- **Important:** authorized emails must also be in the `ALLOWED_EMAILS` env var on Vercel — the app is gated at the middleware level
+
+### HQ Upload Queue
+
+The queue of auctions locations have marked "Ready for HQ". Click into any queued auction to push it live via Browser Upload.
 
 ### Jobs
 
@@ -298,14 +358,6 @@ View and restore soft-deleted lots:
 - **Restore** brings a lot back to its auction
 - **Delete** permanently removes it (irreversible)
 - **Empty Trash** purges everything
-
-### Users
-
-Manage who can access the app:
-- Add users by email
-- Set role: **Admin** (full access) or **Lotter** (can lot and upload)
-- Remove users
-- Note: also need to add to ALLOWED_EMAILS env var on Vercel
 
 ### Activity Log
 
@@ -330,20 +382,22 @@ Update the Auction Factory session cookie:
 3. Type `document.cookie` and copy the result
 4. Paste in Settings and save
 
-**Note:** With Browser Upload, you rarely need to update this anymore.
+**Note:** With Browser Upload, you rarely need to update this anymore. A small red indicator appears in the header if the AF session goes stale.
 
 ---
 
 ## Troubleshooting
 
-### "Send Magic Link" not working
-- Wait 10-15 minutes (Supabase rate limits to ~3-4 per hour)
-- Check spam folder
-- Make sure your email is in the authorized list
+### "Email rate limited" or magic link doesn't arrive
+- Supabase's default SMTP caps at ~3-4 emails/hour project-wide
+- Use the **"Use password instead"** link on the login page
+- If you don't have a password set, ask an admin to set one for you
+- Long-term fix: HQ is wiring custom SMTP (Resend)
 
 ### Magic link bounces back to login
 - Link expired (>1 hour old) — request a new one
 - Link already used — each link works once
+- "Not authorized" red banner — your email isn't in the `ALLOWED_EMAILS` env var yet, ask HQ
 
 ### "AI returned invalid JSON"
 - The AI's response had formatting issues
@@ -370,11 +424,19 @@ Update the Auction Factory session cookie:
 ### App crashes / white screen
 - The error boundary should show a "Reload App" button
 - If not, clear your browser cache and reload
+- Errors are automatically reported to Sentry so HQ can see them
 
 ### Offline in the warehouse
 - The app shows an orange "Offline" banner
 - You can still take photos — they'll be saved locally
 - When back online, tap "Sync now" to process them
+
+### Location dropdown is empty
+- Ask HQ to run the phase-10 migration in Supabase (`phase10_locations.sql`)
+- Then have HQ assign you a location in Admin → Users
+
+### I picked the wrong location on first login
+- Ask an admin to change it in Admin → Users → your row → location dropdown
 
 ---
 
@@ -385,19 +447,22 @@ Update the Auction Factory session cookie:
 | Create auction | Auctions page > New Auction |
 | Lot an item | Auction > New Lot > photos + condition > Generate |
 | Edit a lot | Tap lot > Edit Listing > Save Changes |
-| Upload to AF | Auction > Browser Upload > paste script in AF console |
+| Hand off to HQ | Auction > Mark Ready for HQ |
+| Upload to AF (direct) | Auction > Browser Upload > paste script in AF console |
 | Find stock images | Auction > Find Stock Images button |
 | Deep rescan | Auction > Select > pick lots > Deep Rescan |
 | Bulk edit prices | Auction > Select > pick lots > Edit > set multiplier |
 | Export data | Auction > stats card > Export to CSV |
-| Manage users | Admin > Users |
+| Manage users + locations | Admin > Users |
+| View HQ queue | Admin > HQ Upload Queue |
 | View costs | Admin > API Costs |
 | Restore deleted lot | Admin > Trash > Restore |
 | Archive auction | Auctions list > Archive |
+| Filter by location | Location dropdown at top of Auctions list |
 
 ---
 
 ## Contact
 
-For technical issues with the app, contact the development team.
+For technical issues with the app, contact HQ (Chase Slepak).
 For AF admin access or auction setup, contact Chase Slepak.
