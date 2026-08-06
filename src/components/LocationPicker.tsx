@@ -41,8 +41,8 @@ export default function LocationPicker({ email, locations, onPicked }: Props) {
         <div>
           <h2 className="font-black text-brand-navy text-lg">Pick your location</h2>
           <p className="text-sm text-gray-500 mt-1">
-            You'll only see auctions from this location. Ask an admin if you need
-            to change it later.
+            You&apos;ll only see auctions from this location. Ask an admin if
+            you need to change it later.
           </p>
         </div>
 
