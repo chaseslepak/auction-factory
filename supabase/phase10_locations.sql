@@ -19,6 +19,20 @@ select 'Location ' || i
 from generate_series(1, 13) as i
 on conflict (name) do nothing;
 
+-- allowed_users: created here for projects that never ran the
+-- af-social-automation schema. Idempotent.
+create table if not exists public.allowed_users (
+  email text primary key,
+  role text not null default 'lotter' check (role in ('admin', 'lotter')),
+  created_at timestamptz not null default now()
+);
+
+-- Seed the current admin so they don't get locked out. Adjust the email
+-- if this project's admin is different.
+insert into public.allowed_users (email, role)
+values ('chase.slepak@gmail.com', 'admin')
+on conflict (email) do update set role = 'admin';
+
 -- Assign a location to each lotter (nullable so unassigned users can be
 -- prompted to pick on first login).
 alter table public.allowed_users
@@ -30,3 +44,15 @@ alter table public.auctions
   add column if not exists location_id uuid references public.locations(id);
 
 create index if not exists auctions_location_id_idx on public.auctions(location_id);
+
+-- RLS: authenticated users can read/write both tables (matches the
+-- existing pattern in phase2_schema.sql — auth gate is at the app level).
+alter table public.locations enable row level security;
+drop policy if exists "auth_all_locations" on public.locations;
+create policy "auth_all_locations" on public.locations
+  for all to authenticated using (true) with check (true);
+
+alter table public.allowed_users enable row level security;
+drop policy if exists "auth_all_allowed_users" on public.allowed_users;
+create policy "auth_all_allowed_users" on public.allowed_users
+  for all to authenticated using (true) with check (true);
