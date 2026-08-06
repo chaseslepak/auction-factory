@@ -1,8 +1,10 @@
-# Browser Upload — The Fix
+# Browser Upload — Technical Reference
 
-The long-term solution is deployed. Instead of Vercel sending upload requests to AF (which gets blocked by mod_security), the uploads now run **from your own browser** using your real AF session.
+**End-user docs:** see [SOP.md](SOP.md) "Uploading to Auction Factory". This file covers setup + how it works under the hood.
 
-## Setup (one-time)
+Uploads run **from your own browser** using your real AF session — avoiding AF's mod_security bot protection that blocks server-side upload attempts.
+
+## First-time setup
 
 ### 1. Run the SQL migration in Supabase
 
@@ -24,8 +26,8 @@ create policy "auth_insert_upload_tokens" on public.upload_tokens for insert to 
 create policy "auth_delete_upload_tokens" on public.upload_tokens for delete to authenticated using (true);
 ```
 
-### 2. Wait for Vercel deploy
-Check Vercel dashboard — latest deploy should say "Browser Upload: run uploads from user's real AF browser session".
+### 2. Verify Vercel is deployed
+Ensure the latest `main` deployment is live (Vercel dashboard → auction-factory → Deployments → top row is "Ready").
 
 ## Using it
 
