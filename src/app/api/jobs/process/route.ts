@@ -4,6 +4,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { processStockImageJob } from '@/lib/stock-image-processor';
 import { processDeepRescanJob } from '@/lib/deep-rescan-processor';
+import { processPlatformContentJob, processFbPagePostJob } from '@/lib/platform-job-processors';
 
 export const maxDuration = 60;
 
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
         .from('jobs')
         .select('*')
         .eq('status', 'pending')
-        .in('type', ['refresh_stock_images', 'deep_rescan'])
+        .in('type', ['refresh_stock_images', 'deep_rescan', 'generate_platform_content', 'post_fb_page'])
         .order('created_at', { ascending: true })
         .limit(1);
 
@@ -95,6 +96,10 @@ export async function POST(request: NextRequest) {
         const processor =
           job.type === 'deep_rescan'
             ? processDeepRescanJob(supabase, anthropic, job.lot_id)
+            : job.type === 'generate_platform_content'
+            ? processPlatformContentJob(supabase, anthropic, job)
+            : job.type === 'post_fb_page'
+            ? processFbPagePostJob(supabase, job)
             : processStockImageJob(supabase, anthropic, job.lot_id);
 
         // Deep rescan gets a longer timeout (uses Opus)
@@ -142,7 +147,7 @@ export async function POST(request: NextRequest) {
       .from('jobs')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending')
-      .in('type', ['refresh_stock_images', 'deep_rescan']);
+      .in('type', ['refresh_stock_images', 'deep_rescan', 'generate_platform_content', 'post_fb_page']);
 
     // Self-invoke: await the fetch briefly to ensure it's dispatched
     // We don't wait for the full response, just long enough to guarantee
