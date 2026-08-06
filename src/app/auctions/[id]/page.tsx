@@ -11,6 +11,7 @@ import ConfidenceChip from '@/components/ConfidenceChip';
 import ProgressBar from '@/components/ProgressBar';
 import ToastStack, { useToasts } from '@/components/Toast';
 import AfSessionBadge from '@/components/AfSessionBadge';
+import { LotCardSkeleton } from '@/components/LoadingSkeleton';
 
 export default function AuctionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -652,7 +653,11 @@ export default function AuctionDetailPage() {
     return (
       <div className="min-h-screen bg-brand-bg">
         <Header title="Loading..." backHref="/auctions" />
-        <p className="text-center text-gray-400 py-12">Loading...</p>
+        <div className="p-4 space-y-3">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <LotCardSkeleton key={i} />
+          ))}
+        </div>
       </div>
     );
   }
