@@ -1,22 +1,38 @@
 {
-  "name": "Auction Factory - Ohio Lotter",
-  "short_name": "Ohio Lotter",
+  "name": "Auction Factory Official Lotter",
+  "short_name": "AF Official Lotter",
   "description": "Photograph restaurant equipment and generate auction listings",
-  "start_url": "/",
+  "start_url": "/auctions",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0A1628",
-  "theme_color": "#0B4F8B",
+  "theme_color": "#1E50B5",
   "orientation": "portrait",
+  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Auction",
+      "url": "/auctions",
+      "description": "Create or manage auctions"
+    },
+    {
+      "name": "Admin",
+      "url": "/admin",
+      "description": "Admin panel"
     }
   ]
 }

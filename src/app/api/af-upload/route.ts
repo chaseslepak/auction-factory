@@ -264,7 +264,9 @@ async function uploadLotToAF(
     if (err.name === 'AbortError' || err.message?.includes('aborted')) {
       return { success: false, error: 'TIMEOUT_UNCERTAIN: upload may have succeeded on AF' };
     }
-    return { success: false, error: err.message };
+    // Network-layer error (DNS, connection refused, TLS): no HTTP response
+    // from AF at all, so safe to retry.
+    return { success: false, error: `NETWORK_ERROR: ${err.message}` };
   }
 }
 
@@ -280,6 +282,17 @@ export async function POST(request: NextRequest) {
 
   if (!auction_id || !lot_ids?.length) {
     return NextResponse.json({ error: 'auction_id and lot_ids required' }, { status: 400 });
+  }
+
+  // Hard cap: each lot can take up to ~43s (40s timeout + 3s delay). On a 60s
+  // Vercel function this means 1 lot per call is the only truly safe batch.
+  // Allow up to 3 as a guardrail for small manual retries, but reject anything
+  // larger so we don't hit function timeouts and leave lots in uploading state.
+  if (lot_ids.length > 3) {
+    return NextResponse.json(
+      { error: `Batch too large (${lot_ids.length}). Max 3 lots per call — the client should batch.` },
+      { status: 400 }
+    );
   }
 
   // Get AF session cookie
@@ -333,23 +346,44 @@ export async function POST(request: NextRequest) {
   }
 
   // Get lots with photos
-  const { data: lots } = await supabase
+  const { data: allRequestedLots } = await supabase
     .from('lots')
     .select('*, lot_photos(*)')
     .in('id', lot_ids)
     .order('lot_number', { ascending: true });
 
-  if (!lots?.length) {
+  if (!allRequestedLots?.length) {
     return NextResponse.json({ error: 'No lots found' }, { status: 404 });
   }
 
-  // Mark lots as uploading
+  // SAFETY GUARD: Never re-upload a lot that's already marked as uploaded.
+  // This is the last line of defense against creating AF duplicates if a
+  // buggy client (or someone hitting this endpoint directly) asks us to.
+  // To intentionally re-upload a single lot, clear its af_upload_status first
+  // (the review page's "Re-upload" button does this after a manual confirm).
+  const lots = allRequestedLots.filter((l: any) => l.af_upload_status !== 'uploaded');
+  const skipped = allRequestedLots.filter((l: any) => l.af_upload_status === 'uploaded');
+
+  const results: { lot_id: string; lot_number: number; success: boolean; error?: string; skipped?: boolean }[] = [];
+  for (const s of skipped) {
+    results.push({
+      lot_id: s.id,
+      lot_number: s.lot_number,
+      success: false,
+      skipped: true,
+      error: 'Already uploaded to AF — refusing to re-send. To intentionally re-upload, clear this lot\'s AF status first (delete from AF, then use the per-lot Re-upload button).',
+    });
+  }
+
+  if (lots.length === 0) {
+    return NextResponse.json({ results });
+  }
+
+  // Mark lots as uploading (only the ones we will actually upload)
   await supabase
     .from('lots')
     .update({ af_upload_status: 'uploading', af_upload_error: null })
-    .in('id', lot_ids);
-
-  const results: { lot_id: string; lot_number: number; success: boolean; error?: string }[] = [];
+    .in('id', lots.map((l: any) => l.id));
 
   for (let i = 0; i < lots.length; i++) {
     const lot = lots[i];
@@ -374,7 +408,9 @@ export async function POST(request: NextRequest) {
         storage_path: p.storage_path,
       }));
 
-    // Retry up to 2 times on transient failures
+    // Retry up to 2 times, but ONLY on network-layer errors where we got
+    // no HTTP response from AF at all. Any HTTP response (even 500) means AF
+    // may have processed the request — retrying would create duplicates.
     let result = await uploadLotToAF(
       lot,
       photos,
@@ -383,14 +419,7 @@ export async function POST(request: NextRequest) {
       isLast ? 'exit' : 'next'
     );
     let retryCount = 0;
-    while (!result.success && retryCount < 2) {
-      // Don't retry session expired errors
-      if (result.error?.includes('session expired')) break;
-      // Don't retry timeouts — the upload may have succeeded on AF's side
-      if (result.error?.includes('TIMEOUT_UNCERTAIN')) break;
-      // Don't retry Forbidden — same data will fail again, go straight to placeholder
-      if (result.error?.includes('FORBIDDEN_BY_AF')) break;
-      // Wait before retry
+    while (!result.success && retryCount < 2 && result.error?.startsWith('NETWORK_ERROR:')) {
       await new Promise((r) => setTimeout(r, 1000 * (retryCount + 1)));
       result = await uploadLotToAF(
         lot,

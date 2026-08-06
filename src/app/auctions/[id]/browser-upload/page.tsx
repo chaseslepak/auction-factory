@@ -34,10 +34,10 @@ export default function BrowserUploadPage() {
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
-  // Loader loaderScript: downloads the full loaderScript from our server and runs it.
+  // Loader script: downloads the full script from our server and runs it.
   // This keeps what the user pastes short and always up-to-date.
   const loaderScript = token
-    ? `fetch('${origin}/api/browser-upload/loaderScript?token=${token}').then(r=>r.text()).then(eval);`
+    ? `fetch('${origin}/api/browser-upload/script?token=${token}').then(r=>r.text()).then(eval);`
     : '';
 
   const copyScript = async () => {
@@ -93,7 +93,7 @@ export default function BrowserUploadPage() {
                 {copied ? '✓ Copied to clipboard' : 'Copy Script'}
               </button>
               <details>
-                <summary className="text-xs text-gray-400 cursor-pointer">Show raw loaderScript</summary>
+                <summary className="text-xs text-gray-400 cursor-pointer">Show raw script</summary>
                 <pre className="mt-2 text-xs bg-gray-50 p-2 rounded overflow-auto max-h-60 font-mono">
                   {loaderScript}
                 </pre>

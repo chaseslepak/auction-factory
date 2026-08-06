@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { processStockImageJob } from '@/lib/stock-image-processor';
@@ -12,13 +13,27 @@ const PER_JOB_TIMEOUT_MS = 40000; // 40 seconds max per job
 const TIME_BUDGET_MS = 45000; // Leave headroom before function timeout
 
 // This endpoint processes pending jobs from the queue.
-// Can be called by:
-// 1. The enqueue endpoint (to start processing)
-// 2. Self-invocation (to chain more batches)
-// 3. Vercel cron (as a fallback to resume stuck jobs)
-// 4. Manually via the client
+// Authentication: accepts either Vercel cron (Authorization: Bearer
+// CRON_SECRET), server-to-server self-invocation with the same Bearer, or an
+// authenticated user (so client polling / "kick the processor" calls work).
+// Without one of those, returns 401 so the endpoint cannot be used as a free
+// trigger for Anthropic API spend.
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = request.headers.get('authorization') || '';
+  const isCronOrServer =
+    !!cronSecret && authHeader === `Bearer ${cronSecret}`;
+
+  if (!isCronOrServer) {
+    // Fall back to user-session auth
+    const userClient = createClient();
+    const { data: { user } } = await userClient.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  }
 
   // Use service role client to bypass RLS
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -142,19 +157,29 @@ export async function POST(request: NextRequest) {
       const selfInvokeUrl = `${origin}/api/jobs/process`;
 
       try {
-        // Try waitUntil first (preferred)
+        // Try waitUntil first (preferred). Pass the CRON_SECRET so the auth
+        // check in the target invocation accepts this server-to-server call.
+        const selfInvokeHeaders: Record<string, string> = process.env.CRON_SECRET
+          ? { Authorization: `Bearer ${process.env.CRON_SECRET}` }
+          : {};
         const { waitUntil } = await import('@vercel/functions');
         waitUntil(
-          fetch(selfInvokeUrl, { method: 'POST' }).then(() => {}).catch(() => {})
+          fetch(selfInvokeUrl, { method: 'POST', headers: selfInvokeHeaders })
+            .then(() => {})
+            .catch(() => {})
         );
       } catch {
         // Fallback: race the fetch with a short timeout
         // The fetch gets dispatched to the network before the timeout hits
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1500);
+        const selfInvokeHeaders: Record<string, string> = process.env.CRON_SECRET
+          ? { Authorization: `Bearer ${process.env.CRON_SECRET}` }
+          : {};
         try {
           await fetch(selfInvokeUrl, {
             method: 'POST',
+            headers: selfInvokeHeaders,
             signal: controller.signal,
           });
         } catch {

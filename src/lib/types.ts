@@ -4,6 +4,8 @@ export interface Auction {
   created_by: string;
   created_at: string;
   status: 'active' | 'closed';
+  hq_upload_status: 'ready' | 'uploading' | 'done' | null;
+  hq_ready_at: string | null;
   lot_count?: number;
 }
 

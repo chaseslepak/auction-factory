@@ -11,6 +11,8 @@ import ProgressBar from '@/components/ProgressBar';
 import IndeterminateBar from '@/components/IndeterminateBar';
 import ReorderablePhotos from '@/components/ReorderablePhotos';
 import ImageZoom from '@/components/ImageZoom';
+import ConditionSlider from '@/components/ConditionSlider';
+import { getPendingLot, clearPendingLot } from '@/lib/pending-lot-store';
 
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
@@ -57,18 +59,28 @@ export default function LotReviewPage() {
 
   useEffect(() => {
     if (isNew) {
-      const pending = sessionStorage.getItem('pending-lot');
-      if (!pending) {
+      // Prefer the in-memory store (has photos); fall back to sessionStorage
+      // for the small fields on a hard refresh.
+      const mem = getPendingLot();
+      const sessionRaw = sessionStorage.getItem('pending-lot');
+      if (!mem && !sessionRaw) {
         router.push(`/auctions/${auctionId}/new-lot`);
         return;
       }
-      const data = JSON.parse(pending);
-      setListing(data.listing);
-      setPhotos(data.photos);
-      setCondition(data.condition);
-      setQuantity(data.quantity);
-      setNotes(data.notes);
-      setNextLotNumber(data.nextLotNumber);
+      if (mem) {
+        setListing(mem.listing);
+        setPhotos(mem.photos);
+        setCondition(mem.condition);
+        setQuantity(mem.quantity);
+        setNotes(mem.notes);
+        setNextLotNumber(mem.nextLotNumber);
+      } else if (sessionRaw) {
+        // Photos were lost on refresh — kick the user back to upload again.
+        router.push(`/auctions/${auctionId}/new-lot`);
+        return;
+      }
+      // Surface a reference to data for the duplicate check below.
+      const data = mem!;
 
       // Check for duplicates in this auction by brand+model
       const checkDuplicates = async () => {
@@ -143,6 +155,8 @@ export default function LotReviewPage() {
   };
 
   const [reuploading, setReuploading] = useState(false);
+  const [findingStockImage, setFindingStockImage] = useState(false);
+  const [stockImageMsg, setStockImageMsg] = useState<string | null>(null);
 
   const handleUpdateExisting = async () => {
     if (!listing || !existingLot) return;
@@ -227,6 +241,74 @@ export default function LotReviewPage() {
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleFindStockImage = async () => {
+    if (!existingLot) return;
+    setFindingStockImage(true);
+    setStockImageMsg(null);
+    try {
+      const enqueueRes = await fetch('/api/jobs/enqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auction_id: auctionId,
+          lot_ids: [existingLot.id],
+        }),
+      });
+      const enqueueData = await enqueueRes.json();
+      if (!enqueueRes.ok || enqueueData.error) {
+        throw new Error(enqueueData.error || enqueueData.message || 'Enqueue failed');
+      }
+      if (enqueueData.enqueued === 0) {
+        setStockImageMsg(enqueueData.message || 'Nothing to enqueue.');
+        setFindingStockImage(false);
+        return;
+      }
+
+      // Poll until this lot's job is no longer pending/processing
+      const pollJob = async (): Promise<void> => {
+        try {
+          const { data: jobs } = await supabase
+            .from('jobs')
+            .select('status, error')
+            .eq('type', 'refresh_stock_images')
+            .eq('lot_id', existingLot.id)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          const job = jobs?.[0];
+
+          // Kick the processor if the job is still pending and nothing's picked it up
+          if (job?.status === 'pending' || job?.status === 'processing') {
+            fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
+            setTimeout(pollJob, 3000);
+            return;
+          }
+
+          // Done — refetch the lot to pick up any new stock image/pricing
+          const { data: fresh } = await supabase
+            .from('lots')
+            .select('*, lot_photos(*)')
+            .eq('id', existingLot.id)
+            .single();
+          if (fresh) setExistingLot(fresh as LotWithPhotos);
+
+          if (job?.status === 'failed') {
+            setStockImageMsg(`Search failed: ${job.error || 'unknown error'}`);
+          } else {
+            setStockImageMsg('Stock image search complete.');
+          }
+        } catch {
+          setStockImageMsg('Search finished (status unknown).');
+        } finally {
+          setFindingStockImage(false);
+        }
+      };
+      setTimeout(pollJob, 2000);
+    } catch (err: any) {
+      setStockImageMsg(err.message);
+      setFindingStockImage(false);
     }
   };
 
@@ -322,7 +404,21 @@ export default function LotReviewPage() {
           .select()
           .single();
 
-        if (lotError) throw lotError;
+        if (lotError) {
+          // Surface a friendly message when two lotters collide on the same
+          // lot number — the DB's unique(auction_id, lot_number) constraint
+          // catches this. Tell the user to bump their starting number.
+          const msg = String(lotError.message || '');
+          if (
+            msg.toLowerCase().includes('duplicate') ||
+            msg.toLowerCase().includes('unique')
+          ) {
+            throw new Error(
+              `Lot #${lotNumber} already exists in this auction — your partner likely just created it. Go back, open "Change start", and pick a higher starting number.`
+            );
+          }
+          throw lotError;
+        }
 
         // Upload photos to storage and create lot_photos records
         let photoIndex = 0;
@@ -375,8 +471,17 @@ export default function LotReviewPage() {
         setSaveProgress({ current: i + 1, total: lotsToCreate });
       }
 
+      // Advance this lotter's persisted next-lot-number so the next visit to
+      // new-lot defaults to the right value. Keeps two-lotter coordination
+      // working without anyone having to retype their starting number.
+      const lastSavedNumber = nextLotNumber + lotsToCreate - 1;
+      try {
+        localStorage.setItem(`lotter-next-${auctionId}`, String(lastSavedNumber + 1));
+      } catch {}
+
       // Clear pending data
       sessionStorage.removeItem('pending-lot');
+      clearPendingLot();
       router.push(`/auctions/${auctionId}`);
     } catch (err: any) {
       setError(err.message);
@@ -439,12 +544,20 @@ export default function LotReviewPage() {
       return { ...photo!, display_order: i };
     });
     setExistingLot({ ...existingLot, lot_photos: updated } as LotWithPhotos);
-    // Then persist
+    // Persist to database
     await fetch('/api/lot-photos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lot_id: existingLot.id, photo_ids: photoIds }),
     });
+    // Always re-fetch from DB — on success this confirms the order stuck,
+    // on failure the UI snaps back to DB truth.
+    const { data } = await supabase
+      .from('lots')
+      .select('*, lot_photos(*)')
+      .eq('id', lotId)
+      .single();
+    if (data) setExistingLot(data as LotWithPhotos);
   };
 
   const handleAddPhotos = async (files: FileList | null) => {
@@ -659,6 +772,7 @@ export default function LotReviewPage() {
                     className="w-full mt-0.5 px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
                   />
                 </div>
+                <ConditionSlider value={condition} onChange={setCondition} />
               </>
             ) : (
               <>
@@ -680,6 +794,10 @@ export default function LotReviewPage() {
                     {displayListing.category}
                   </p>
                 )}
+                <p>
+                  <span className="font-medium text-gray-400">Condition:</span>{' '}
+                  {condition}/10
+                </p>
               </>
             )}
           </div>
@@ -759,6 +877,33 @@ export default function LotReviewPage() {
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Per-lot stock image search (existing lots only) */}
+        {!isNew && existingLot && (
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-2">
+              Stock Image
+            </h3>
+            <p className="text-xs text-gray-500 mb-3">
+              Search WebstaurantStore + the web for a stock image and current retail price for this lot.
+            </p>
+            <button
+              onClick={handleFindStockImage}
+              disabled={findingStockImage}
+              className="w-full py-2 rounded-lg border-2 border-brand-blue text-brand-blue font-bold text-sm uppercase tracking-wide disabled:opacity-50"
+            >
+              {findingStockImage ? 'Searching…' : 'Find Stock Image'}
+            </button>
+            {findingStockImage && (
+              <div className="mt-3">
+                <IndeterminateBar label="Searching..." />
+              </div>
+            )}
+            {stockImageMsg && !findingStockImage && (
+              <p className="mt-3 text-xs text-gray-600">{stockImageMsg}</p>
+            )}
           </div>
         )}
 

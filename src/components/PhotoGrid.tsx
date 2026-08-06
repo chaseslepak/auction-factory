@@ -1,9 +1,30 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { processImage } from '@/lib/image-utils';
 
 const MAX_PHOTOS = 10;
+
+// After processing, image-utils resizes to a max 1024px on the long edge and
+// jpeg-encodes at 0.85. A "healthy" resized photo lands at 80KB+ and 900px+
+// on the long edge. Anything smaller almost certainly means the source was
+// tiny (thumbnail, screenshot from a distance) and the AI descriptions will
+// be poor. Warn before letting the user submit.
+const MIN_ACCEPTABLE_BYTES = 40_000;
+const MIN_ACCEPTABLE_LONG_EDGE = 600;
+
+async function inspectDataUrl(dataUrl: string): Promise<{ bytes: number; longEdge: number }> {
+  // dataUrl looks like: data:image/jpeg;base64,XXXXX
+  const base64 = dataUrl.split(',', 2)[1] || '';
+  const bytes = Math.round(base64.length * 3 / 4);
+  const longEdge = await new Promise<number>((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(Math.max(img.naturalWidth, img.naturalHeight));
+    img.onerror = () => resolve(0);
+    img.src = dataUrl;
+  });
+  return { bytes, longEdge };
+}
 
 export default function PhotoGrid({
   photos,
@@ -15,6 +36,8 @@ export default function PhotoGrid({
   disabled?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [lowQualityIndexes, setLowQualityIndexes] = useState<number[]>([]);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -24,6 +47,35 @@ export default function PhotoGrid({
     const toProcess = Array.from(files).slice(0, remaining);
 
     const processed = await Promise.all(toProcess.map(processImage));
+
+    // Check quality of the newly added photos and surface a friendly warning
+    // if any look too small/blurry to give the AI a fighting chance.
+    const baseIndex = photos.length;
+    const newLowQuality: number[] = [];
+    let smallestBytes = Infinity;
+    let smallestEdge = Infinity;
+    for (let i = 0; i < processed.length; i++) {
+      const stats = await inspectDataUrl(processed[i]);
+      if (
+        stats.bytes < MIN_ACCEPTABLE_BYTES ||
+        stats.longEdge < MIN_ACCEPTABLE_LONG_EDGE
+      ) {
+        newLowQuality.push(baseIndex + i);
+        smallestBytes = Math.min(smallestBytes, stats.bytes);
+        smallestEdge = Math.min(smallestEdge, stats.longEdge);
+      }
+    }
+    setLowQualityIndexes((prev) => [...prev, ...newLowQuality]);
+    if (newLowQuality.length > 0) {
+      setWarning(
+        `${newLowQuality.length} photo${newLowQuality.length > 1 ? 's' : ''} may be too low-resolution — the AI description will be worse. ` +
+          `Smallest: ${Math.round(smallestBytes / 1024)}KB, ${smallestEdge}px. ` +
+          `Retake closer / with more light if possible.`
+      );
+    } else {
+      setWarning(null);
+    }
+
     onPhotosChange([...photos, ...processed]);
 
     // Reset input so the same file can be re-selected
@@ -32,49 +84,67 @@ export default function PhotoGrid({
 
   const removePhoto = (index: number) => {
     onPhotosChange(photos.filter((_, i) => i !== index));
+    setLowQualityIndexes((prev) =>
+      prev.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i))
+    );
   };
 
   return (
-    <div className="grid grid-cols-3 gap-2">
-      {photos.map((photo, i) => (
-        <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-gray-200">
-          <img
-            src={photo}
-            alt={`Photo ${i + 1}`}
-            className="w-full h-full object-cover"
-          />
-          {!disabled && (
-            <button
-              onClick={() => removePhoto(i)}
-              className="absolute top-1 right-1 w-6 h-6 bg-black/60 rounded-full text-white text-xs flex items-center justify-center"
-              aria-label="Remove photo"
-            >
-              X
-            </button>
-          )}
+    <>
+      {warning && (
+        <div className="mb-2 rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+          {warning}
         </div>
-      ))}
-
-      {photos.length < MAX_PHOTOS && !disabled && (
-        <button
-          onClick={() => inputRef.current?.click()}
-          className="aspect-square rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 hover:border-brand-blue hover:text-brand-blue transition-colors"
-        >
-          <svg className="w-8 h-8 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          <span className="text-xs font-medium">Add Photo</span>
-        </button>
       )}
+      <div className="grid grid-cols-3 gap-2">
+        {photos.map((photo, i) => (
+          <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-gray-200">
+            <img
+              src={photo}
+              alt={`Photo ${i + 1}`}
+              className="w-full h-full object-cover"
+            />
+            {lowQualityIndexes.includes(i) && (
+              <div
+                className="absolute bottom-1 left-1 right-1 bg-yellow-500/90 text-black text-[10px] font-bold uppercase text-center py-0.5 rounded"
+                title="This photo is low resolution — the AI description will be poor"
+              >
+                Low quality
+              </div>
+            )}
+            {!disabled && (
+              <button
+                onClick={() => removePhoto(i)}
+                className="absolute top-1 right-1 w-6 h-6 bg-black/60 rounded-full text-white text-xs flex items-center justify-center"
+                aria-label="Remove photo"
+              >
+                X
+              </button>
+            )}
+          </div>
+        ))}
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        onChange={handleFiles}
-        className="hidden"
-      />
-    </div>
+        {photos.length < MAX_PHOTOS && !disabled && (
+          <button
+            onClick={() => inputRef.current?.click()}
+            className="aspect-square rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 hover:border-brand-blue hover:text-brand-blue transition-colors"
+          >
+            <svg className="w-8 h-8 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            <span className="text-xs font-medium">Add Photo</span>
+          </button>
+        )}
+
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleFiles}
+          className="hidden"
+        />
+      </div>
+    </>
   );
 }

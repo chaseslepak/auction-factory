@@ -7,8 +7,15 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          blue: '#0B4F8B',
-          green: '#2E9D5C',
+          // Primary blue + green tuned to match the AF logo:
+          // - blue: bright royal blue from the A letter
+          // - green: bright lime green from the F letter
+          blue: '#1E50B5',
+          'blue-dark': '#0F2E6E',
+          'blue-light': '#4A7DD9',
+          green: '#5CB82C',
+          'green-dark': '#3D8B0F',
+          'green-light': '#8FD65E',
           navy: '#0A1628',
           bg: '#F5F7FA',
         },

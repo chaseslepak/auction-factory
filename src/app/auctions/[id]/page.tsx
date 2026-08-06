@@ -9,9 +9,12 @@ import Header from '@/components/Header';
 import GradientButton from '@/components/GradientButton';
 import ConfidenceChip from '@/components/ConfidenceChip';
 import ProgressBar from '@/components/ProgressBar';
+import ToastStack, { useToasts } from '@/components/Toast';
+import AfSessionBadge from '@/components/AfSessionBadge';
 
 export default function AuctionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { toasts, show: showToast, dismiss: dismissToast } = useToasts();
   const [auction, setAuction] = useState<Auction | null>(null);
   const [lots, setLots] = useState<LotWithPhotos[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,7 +169,7 @@ export default function AuctionDetailPage() {
   };
 
   const handleRefreshStockImages = async () => {
-    if (!confirm('Search for stock images and pricing for all lots with known brand+model?\n\nThis runs in the background — you can close this tab and come back later.')) return;
+    if (!confirm('Search for stock images and pricing for all "new in box" (condition 10) lots with known brand+model?\n\nThis runs in the background — you can close this tab and come back later.\n\nTo search on a non-"new in box" lot, open that lot and use its "Find Stock Image" button.')) return;
     setRefreshing(true);
     setUploadMsg(null);
     setRefreshProgress({ current: 0, total: 0 });
@@ -275,8 +278,46 @@ export default function AuctionDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  const handleMarkReady = async () => {
+    if (!confirm('Mark this auction as ready for HQ upload?\n\nHQ will push it to Auction Factory using the correct AF admin login.')) return;
+    const { error } = await supabase
+      .from('auctions')
+      .update({
+        hq_upload_status: 'ready',
+        hq_ready_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+    if (error) {
+      const missingCol = /column .* does not exist/i.test(error.message);
+      setUploadMsg({
+        type: 'error',
+        text: missingCol
+          ? 'Missing DB migration — run supabase/phase9_hq_upload_queue.sql in the Supabase SQL Editor, then try again.'
+          : `Mark Ready failed: ${error.message}`,
+      });
+      return;
+    }
+    await fetchData();
+  };
+
+  const handleUnmarkReady = async () => {
+    if (!confirm('Unmark ready? HQ will not push this auction until it\'s marked ready again.')) return;
+    const { error } = await supabase
+      .from('auctions')
+      .update({ hq_upload_status: null, hq_ready_at: null })
+      .eq('id', id);
+    if (error) {
+      setUploadMsg({ type: 'error', text: `Unmark failed: ${error.message}` });
+      return;
+    }
+    await fetchData();
+  };
+
   const handleResetFromFailed = async () => {
-    // Find the lowest lot number with failed status
+    // Only reset lots that ACTUALLY failed. The previous behavior reset every
+    // lot from the first failure onward — including ones that had already
+    // succeeded — which then caused those to be re-uploaded and AF ended up
+    // with duplicates.
     const failed = lots
       .filter((l: any) => l.af_upload_status === 'failed')
       .sort((a, b) => a.lot_number - b.lot_number);
@@ -286,32 +327,25 @@ export default function AuctionDetailPage() {
       return;
     }
 
-    const firstFailedNum = failed[0].lot_number;
-
-    // Find all lots with lot_number >= firstFailedNum (to preserve order)
-    const lotsToReset = lots
-      .filter((l) => l.lot_number >= firstFailedNum)
-      .sort((a, b) => a.lot_number - b.lot_number);
-
     const confirmed = confirm(
-      `First failed lot is #${firstFailedNum}.\n\n` +
-      `This will reset lot #${firstFailedNum} and all ${lotsToReset.length - 1} lots after it so they can be uploaded again IN ORDER.\n\n` +
-      `IMPORTANT: You must delete all AF lots from #${firstFailedNum} and above in AF admin BEFORE running this retry.\n\n` +
-      `Have you already deleted AF lots ${firstFailedNum}+ in AF admin?`
+      `Retry ${failed.length} failed lot${failed.length > 1 ? 's' : ''} (#${failed[0].lot_number}` +
+        (failed.length > 1 ? `–#${failed[failed.length - 1].lot_number}` : '') +
+        `)?\n\n` +
+        `Only the lots that failed will be re-uploaded. Already-uploaded lots will NOT be touched, so you cannot create AF duplicates.\n\n` +
+        `Note: retried lots will be added to AF at the end of the current list — you may need to fix their order in AF admin afterward.`
     );
     if (!confirmed) return;
 
-    // Reset status for all lots from firstFailedNum onward
     await supabase
       .from('lots')
       .update({ af_upload_status: null, af_upload_error: null })
-      .in('id', lotsToReset.map((l) => l.id));
+      .in('id', failed.map((l) => l.id));
 
     await fetchData();
 
     setUploadMsg({
       type: 'success',
-      text: `Reset ${lotsToReset.length} lots. Now click "Upload to AF" to push them in order.`,
+      text: `Reset ${failed.length} failed lot${failed.length > 1 ? 's' : ''}. Click "HQ Push to AF" above to retry.`,
     });
   };
 
@@ -339,6 +373,7 @@ export default function AuctionDetailPage() {
 
     let totalSucceeded = 0;
     let totalFailed = 0;
+    let totalSkipped = 0;
     let lastError: string | null = null;
 
     try {
@@ -382,9 +417,13 @@ export default function AuctionDetailPage() {
           }
 
           const succeeded = data.results.filter((r: any) => r.success).length;
+          const skippedBatch = data.results.filter((r: any) => r.skipped).length;
+          // 'failed' for progress-counting purposes includes skipped — they are
+          // not in the queue anymore and shouldn't be retried.
           const failed = data.results.filter((r: any) => !r.success).length;
           totalSucceeded += succeeded;
           totalFailed += failed;
+          totalSkipped += skippedBatch;
 
           setUploadProgress({ current: totalSucceeded + totalFailed, total: unuploaded.length });
           fetchData();
@@ -405,14 +444,18 @@ export default function AuctionDetailPage() {
         }
       }
 
-      if (lastError && totalSucceeded === 0) {
+      const realFailed = totalFailed - totalSkipped;
+      const skippedNote = totalSkipped > 0
+        ? ` (${totalSkipped} already uploaded — skipped to avoid duplicates)`
+        : '';
+      if (lastError && totalSucceeded === 0 && totalSkipped === 0) {
         setUploadMsg({ type: 'error', text: lastError });
       } else {
         setUploadMsg({
-          type: totalFailed === 0 ? 'success' : 'error',
-          text: totalFailed === 0
-            ? `${totalSucceeded} lot${totalSucceeded !== 1 ? 's' : ''} uploaded to AF!`
-            : `${totalSucceeded} uploaded, ${totalFailed} failed${lastError ? `: ${lastError}` : ''}`,
+          type: realFailed === 0 ? 'success' : 'error',
+          text: realFailed === 0
+            ? `${totalSucceeded} lot${totalSucceeded !== 1 ? 's' : ''} uploaded to AF${skippedNote}!`
+            : `${totalSucceeded} uploaded, ${realFailed} failed${skippedNote}${lastError ? `: ${lastError}` : ''}`,
         });
       }
       fetchData();
@@ -425,7 +468,9 @@ export default function AuctionDetailPage() {
   };
 
   const deleteLot = async (lotId: string) => {
-    if (!confirm('Delete this lot? (Can be restored from trash)')) return;
+    // Look up the lot number for the toast message before we soft-delete it
+    const target = lots.find((l) => l.id === lotId);
+    const label = target ? `Lot #${target.lot_number}` : 'Lot';
 
     // Soft delete — keeps photos and data, just marks as deleted
     await supabase
@@ -433,6 +478,24 @@ export default function AuctionDetailPage() {
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', lotId);
     fetchData();
+
+    // Show a toast with an Undo action. 7s window before the delete becomes
+    // "permanent" (it's still recoverable from /admin/trash after that).
+    showToast({
+      message: `${label} deleted.`,
+      tone: 'info',
+      durationMs: 7000,
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          await supabase
+            .from('lots')
+            .update({ deleted_at: null })
+            .eq('id', lotId);
+          fetchData();
+        },
+      },
+    });
   };
 
   const getPhotoUrl = (path: string) => {
@@ -610,7 +673,59 @@ export default function AuctionDetailPage() {
         </Link>
       </div>
 
-      {/* AF Upload Section */}
+      <div className="px-4">
+        <AfSessionBadge />
+      </div>
+
+      {/* HQ Upload Handoff — locations mark auctions "ready", HQ pushes to AF */}
+      {lots.length > 0 && (
+        <div className="px-4 mb-2">
+          <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              {auction?.hq_upload_status === 'ready' ? (
+                <>
+                  <p className="font-black text-brand-green text-sm">✓ Ready for HQ upload</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    Marked {auction.hq_ready_at ? new Date(auction.hq_ready_at).toLocaleString() : ''}
+                  </p>
+                </>
+              ) : auction?.hq_upload_status === 'uploading' ? (
+                <>
+                  <p className="font-black text-brand-blue text-sm">HQ uploading now…</p>
+                </>
+              ) : auction?.hq_upload_status === 'done' ? (
+                <>
+                  <p className="font-black text-brand-green text-sm">All lots uploaded to AF</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold text-brand-navy text-sm">Ready to hand off to HQ?</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    Mark ready when lotting is complete and HQ will push to AF.
+                  </p>
+                </>
+              )}
+            </div>
+            {auction?.hq_upload_status === 'ready' ? (
+              <button
+                onClick={handleUnmarkReady}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-bold text-gray-500 uppercase flex-shrink-0"
+              >
+                Unmark
+              </button>
+            ) : auction?.hq_upload_status === 'done' || auction?.hq_upload_status === 'uploading' ? null : (
+              <button
+                onClick={handleMarkReady}
+                className="px-4 py-2 rounded-lg bg-brand-green text-white text-xs font-black uppercase tracking-wide flex-shrink-0"
+              >
+                Mark Ready for HQ
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* AF Upload Section (HQ-only — pushes to AF from a browser logged into the correct AF admin account) */}
       {lots.length > 0 && (
         <div className="px-4 mb-2">
           {!afLinked ? (
@@ -678,41 +793,38 @@ export default function AuctionDetailPage() {
                 href={`/auctions/${id}/browser-upload`}
                 className="w-full block text-center py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide"
               >
-                🌐 Browser Upload (recommended)
+                🌐 HQ Push to AF (Browser Upload)
               </Link>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleUploadToAf}
-                  disabled={uploading}
-                  className="flex-1 py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
-                >
-                  {uploading ? 'Uploading...' : 'Server Upload (fallback)'}
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;
-                    await supabase.from('af_auction_map').delete().eq('auction_id', id);
-                    // Reset upload status for all lots in this auction
-                    await supabase
-                      .from('lots')
-                      .update({ af_upload_status: null, af_upload_error: null })
-                      .eq('auction_id', id);
-                    setAfLinked(false);
-                    setAfAuctionId('');
-                    fetchData();
-                  }}
-                  className="px-3 py-3 rounded-xl border border-gray-300 text-gray-400 text-xs"
-                >
-                  Unlink
-                </button>
-              </div>
+              <button
+                onClick={handleUploadToAf}
+                disabled={uploading}
+                className="w-full py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
+              >
+                {uploading ? 'Uploading...' : 'Server Upload (fallback)'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;
+                  await supabase.from('af_auction_map').delete().eq('auction_id', id);
+                  await supabase
+                    .from('lots')
+                    .update({ af_upload_status: null, af_upload_error: null })
+                    .eq('auction_id', id);
+                  setAfLinked(false);
+                  setAfAuctionId('');
+                  fetchData();
+                }}
+                className="w-full py-2 rounded-xl border border-gray-300 text-gray-400 text-xs font-bold uppercase tracking-wide"
+              >
+                Unlink AF Auction
+              </button>
               {lots.some((l: any) => l.af_upload_status === 'failed') && (
                 <button
                   onClick={handleResetFromFailed}
                   disabled={uploading}
                   className="w-full py-2 rounded-xl border-2 border-orange-400 text-orange-500 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
                 >
-                  Reset from First Failed Lot (maintains order)
+                  Retry Failed Lots Only
                 </button>
               )}
               {uploading && uploadProgress.total > 0 && (
@@ -1051,6 +1163,7 @@ export default function AuctionDetailPage() {
           <GradientButton>New Lot</GradientButton>
         </Link>
       </div>
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
