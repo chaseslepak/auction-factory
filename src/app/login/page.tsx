@@ -106,11 +106,13 @@ function LoginForm() {
     <div className="min-h-screen bg-brand-navy flex flex-col items-center justify-center px-6">
       {/* Logo */}
       <div className="mb-8 text-center">
-        <div className="w-16 h-16 gradient-btn rounded-xl flex items-center justify-center mx-auto mb-4">
-          <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M14.22 6.157l2.747-4.12a.674.674 0 011.12 0l2.747 4.12c.135.202.112.47-.056.646l-5.502 5.784a.674.674 0 01-.977 0L8.797 6.803a.5.5 0 01-.056-.646L11.488 2.037a.674.674 0 011.12 0l1.612 4.12z" />
-            <path d="M5 17h14v2H5zm0 4h14v2H5z" />
-          </svg>
+        <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-black/20 p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/icons/af-mark.png"
+            alt="Auction Factory"
+            className="w-full h-full object-contain"
+          />
         </div>
         <h1 className="text-white font-black text-lg tracking-[0.2em] uppercase">
           Auction Factory
