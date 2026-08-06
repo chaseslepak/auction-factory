@@ -27,6 +27,7 @@
 The Auction Factory Official Lotter is a mobile-first web app that lets warehouse staff photograph items and instantly generate professional auction listings using AI. Listings are then uploaded directly to the Auction Factory backend by HQ.
 
 **App URL:** https://lotter.auctionfactory.com
+**Manual URL (this doc, always current):** https://lotter.auctionfactory.com/manual
 
 **What it does:**
 - Snap photos of items from your phone
