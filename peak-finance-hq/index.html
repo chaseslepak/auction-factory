@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Daily Spend Cap — Peak Finance HQ</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0f0f0f;--card:#1a1a1a;--card2:#222;--border:#333;--gold:#c9a84c;--green:#50c878;--red:#ff6b6b;--amber:#e08c30;--white:#fff;--off:#ddd;--sub:#aaa;--mono:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+body{background:var(--bg);color:var(--white);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:0 0 80px}
+.tab-bar{width:100%;max-width:480px;display:flex;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:50}
+.tab{flex:1;padding:14px 0;font-family:var(--mono);font-size:12px;font-weight:bold;letter-spacing:.12em;color:var(--sub);text-transform:uppercase;text-align:center;cursor:pointer;border:none;background:#0f0f0f;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;-webkit-appearance:none}
+.tab.active{color:#c9a84c;border-bottom-color:#c9a84c}
+.tab-content{display:none;width:100%;max-width:480px;padding:20px 14px 0}
+.tab-content.active{display:block}
+.app-header{width:100%;max-width:480px;display:flex;align-items:center;justify-content:space-between;padding:18px 14px 14px;border-bottom:1px solid var(--border)}
+.logo{font-family:var(--mono);font-size:11px;font-weight:bold;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
+.date-lbl{font-family:var(--mono);font-size:12px;color:var(--off)}
+.lbl{font-family:var(--mono);font-size:15px;font-weight:bold;letter-spacing:.2em;color:var(--sub);text-transform:uppercase;margin-bottom:9px}
+.inp-wrap{position:relative;flex:1}
+.inp-wrap .sym{position:absolute;left:13px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:18px;color:var(--gold);pointer-events:none;z-index:1}
+input[type=number],input[type=text]{background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--white);font-family:var(--mono);font-size:17px;padding:14px 12px 14px 36px;width:100%;outline:none;-moz-appearance:textfield;appearance:textfield;transition:border-color .15s}
+.big-amt-inp{background:#222222 !important;border:1px solid #333333 !important;border-radius:10px;color:#ffffff !important;font-family:var(--mono);font-size:48px !important;font-weight:bold;padding:28px 14px 28px 56px !important;width:100%;outline:none;-moz-appearance:textfield;appearance:textfield;transition:border-color .15s;-webkit-text-fill-color:#ffffff !important}
+input::placeholder{color:#555}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+input:focus{border-color:var(--gold)}
+.btn{background:var(--gold);color:#000;border:none;border-radius:8px;font-family:var(--mono);font-size:13px;font-weight:bold;letter-spacing:.1em;padding:14px 20px;cursor:pointer;white-space:nowrap;-webkit-appearance:none;display:block;transition:opacity .15s,transform .1s}
+.btn:active{transform:scale(.96);opacity:.85}
+.btn.ghost{background:transparent;border:1px solid var(--border);color:var(--off);padding:10px 14px;font-size:12px}
+.btn.ghost:active{background:var(--card2);color:var(--white)}
+#cap-setup{margin-bottom:24px}
+.cap-row{display:flex;gap:10px;align-items:stretch}
+#gauge-section{margin-bottom:16px;display:none}
+.gauge-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 18px 16px}
+.gauge-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px}
+.rem-lbl{font-family:var(--mono);font-size:15px;font-weight:bold;letter-spacing:.2em;color:var(--sub);text-transform:uppercase;margin-bottom:6px}
+.rem-amt{font-family:var(--mono);font-size:42px;font-weight:bold;line-height:1;transition:color .3s}
+.cap-info{text-align:right;flex-shrink:0}
+.cap-info-lbl{font-family:var(--mono);font-size:14px;font-weight:bold;letter-spacing:.18em;color:var(--sub);text-transform:uppercase;margin-bottom:3px}
+.cap-base{font-family:var(--mono);font-size:20px;color:var(--sub);margin-bottom:2px}
+.cap-effective{font-family:var(--mono);font-size:20px;color:var(--gold);cursor:pointer;display:block;margin-bottom:3px}
+.cap-hint{font-family:var(--mono);font-size:14px;color:var(--sub);margin-bottom:9px}
+.cap-edit-row{display:none;align-items:center;gap:5px;margin-bottom:9px}
+.cap-edit-row.on{display:flex}
+.cap-edit-inp-wrap{position:relative}
+.cap-edit-sym{position:absolute;left:7px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:13px;color:var(--gold);pointer-events:none}
+.cap-edit-inp{font-family:var(--mono);font-size:15px;color:var(--white);background:var(--card2);border:1px solid var(--gold);border-radius:6px;padding:6px 7px 6px 20px;width:100px;outline:none;-moz-appearance:textfield;appearance:textfield}
+.cap-edit-inp::-webkit-outer-spin-button,.cap-edit-inp::-webkit-inner-spin-button{-webkit-appearance:none}
+.cap-ok{background:var(--gold);border:none;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:bold;color:#000;padding:6px 10px;cursor:pointer;-webkit-appearance:none}
+.cap-x{background:none;border:1px solid var(--border);border-radius:5px;font-family:var(--mono);font-size:11px;color:var(--sub);padding:6px 8px;cursor:pointer;-webkit-appearance:none}
+.progress-track{height:6px;background:var(--card2);border-radius:3px;overflow:hidden;margin-bottom:9px}
+.progress-fill{height:100%;border-radius:3px;width:0%;background:var(--green);transition:width .45s cubic-bezier(.4,0,.2,1),background .3s}
+.progress-meta{display:flex;justify-content:space-between;font-family:var(--mono);font-size:18px;color:var(--off)}
+.mtd-lbl{font-family:var(--mono);font-size:20px;color:var(--sub);margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+#done-banner{display:none;background:#200a0a;border:1px solid var(--red);border-radius:12px;padding:18px;text-align:center;margin-bottom:18px}
+.done-icon{font-size:28px;margin-bottom:6px}
+.done-title{font-family:var(--mono);font-size:14px;font-weight:bold;color:var(--red);letter-spacing:.1em;margin-bottom:5px}
+.done-sub{font-family:var(--mono);font-size:12px;color:var(--off)}
+#running-card{margin-bottom:16px;display:none}
+.running-inner{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.rl-lbl{font-family:var(--mono);font-size:15px;font-weight:bold;letter-spacing:.18em;color:var(--sub);text-transform:uppercase;margin-bottom:4px}
+.rl-val{font-family:var(--mono);font-size:26px;font-weight:bold}
+.running-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.rl-since{font-family:var(--mono);font-size:16px;color:var(--sub)}
+.rl-reset{background:none;border:1px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:14px;color:var(--sub);padding:5px 10px;cursor:pointer;-webkit-appearance:none;letter-spacing:.08em}
+.rl-reset:active{background:var(--card2);color:var(--white)}
+#receipt-section{margin-bottom:22px;display:none}
+.receipt-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;gap:10px;align-items:stretch}
+.big-amt-wrap{position:relative;flex:1}
+.big-amt-wrap .sym{position:absolute;left:16px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:28px;color:#c9a84c;pointer-events:none;z-index:1}
+.big-amt-inp{background:#222222;border:1px solid #333333;border-radius:10px;color:#ffffff;font-family:var(--mono);font-size:48px;font-weight:bold;padding:28px 14px 28px 56px;width:100%;outline:none;-moz-appearance:textfield;appearance:textfield;transition:border-color .15s;-webkit-text-fill-color:#ffffff}
+.big-amt-inp::-webkit-outer-spin-button,.big-amt-inp::-webkit-inner-spin-button{-webkit-appearance:none}
+.big-amt-inp::placeholder{color:#444;-webkit-text-fill-color:#444}
+.big-amt-inp:focus{border-color:#c9a84c}
+.log-btn{background:#c9a84c;color:#000000;border:none;border-radius:10px;font-family:var(--mono);font-size:16px;font-weight:bold;letter-spacing:.08em;padding:28px 22px;cursor:pointer;-webkit-appearance:none;flex-shrink:0;transition:opacity .15s,transform .1s}
+.log-btn:active{transform:scale(.95);opacity:.85}
+#log-section{display:none}
+.log-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:11px}
+.receipt-list{display:flex;flex-direction:column;gap:7px}
+.receipt-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:13px 14px;display:flex;align-items:center;gap:9px;animation:fadeIn .18s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.ri-time{font-family:var(--mono);font-size:16px;color:var(--sub);flex-shrink:0}
+.ri-amt{font-family:var(--mono);font-size:18px;font-weight:bold;color:var(--red);flex-shrink:0}
+.ri-del{background:none;border:none;color:#666;cursor:pointer;font-size:20px;line-height:1;padding:2px 5px;-webkit-appearance:none}
+.ri-del:active{color:var(--red)}
+.empty-state{text-align:center;padding:24px;font-family:var(--mono);font-size:17px;color:var(--sub);letter-spacing:.08em}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.cal-month{font-family:var(--mono);font-size:14px;font-weight:bold;color:var(--white);letter-spacing:.1em}
+.cal-arrow{background:none;border:1px solid var(--border);border-radius:6px;color:var(--off);font-size:16px;padding:6px 12px;cursor:pointer;-webkit-appearance:none}
+.cal-arrow:active{background:var(--card2)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:16px}
+.cal-dow{font-family:var(--mono);font-size:14px;color:var(--sub);text-align:center;padding:4px 0}
+.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;border:1px solid transparent;transition:border-color .15s}
+.cal-day.empty{cursor:default}
+.cal-day.today{border-color:var(--gold)}
+.cal-day.selected{background:var(--gold);border-color:var(--gold)}
+.cal-day.has-data:not(.selected){background:var(--card)}
+.cal-day-num{font-family:var(--mono);font-size:13px;font-weight:bold;color:var(--white)}
+.cal-day.selected .cal-day-num{color:#000}
+.cal-day.today:not(.selected) .cal-day-num{color:var(--gold)}
+.cal-day.empty .cal-day-num{color:#333}
+.cal-pip{width:5px;height:5px;border-radius:50%;margin-top:2px}
+.cal-day.selected .cal-pip{background:#000}
+.day-detail{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px;animation:fadeIn .2s ease}
+.dd-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+.dd-date{font-family:var(--mono);font-size:13px;font-weight:bold;color:var(--white)}
+.dd-delta{font-family:var(--mono);font-size:20px;font-weight:bold}
+.dd-meta{font-family:var(--mono);font-size:20px;color:var(--off);margin-bottom:12px}
+.dd-receipts{display:flex;flex-direction:column;gap:6px}
+.dd-receipt{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--card2);border-radius:8px}
+.dd-time{font-family:var(--mono);font-size:16px;color:var(--sub)}
+.dd-amt{font-family:var(--mono);font-size:13px;font-weight:bold;color:var(--red)}
+.dd-empty{font-family:var(--mono);font-size:12px;color:var(--sub);text-align:center;padding:16px}
+.dd-bar-track{height:5px;background:var(--card2);border-radius:3px;overflow:hidden;margin-bottom:10px}
+.dd-bar-fill{height:100%;border-radius:3px}
+.c-g{color:var(--green)}.c-r{color:var(--red)}.c-a{color:var(--amber)}
+.loading-overlay{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;gap:14px}
+.loading-overlay.hidden{display:none}
+.loading-logo{font-family:var(--mono);font-size:12px;font-weight:bold;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
+.loading-msg{font-family:var(--mono);font-size:12px;color:var(--sub)}
+.spinner{width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite}
+.setup-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:flex-start;justify-content:center;z-index:998;padding:32px 16px;overflow-y:auto}
+.setup-card{width:100%;max-width:440px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:26px 22px}
+.setup-title{font-family:var(--mono);font-size:19px;font-weight:bold;color:var(--white);letter-spacing:.02em;margin-bottom:8px}
+.setup-sub{font-family:var(--mono);font-size:13px;line-height:1.5;color:var(--sub);margin-bottom:20px}
+.setup-lbl{display:block;font-family:var(--mono);font-size:11px;font-weight:bold;letter-spacing:.12em;color:var(--sub);text-transform:uppercase;margin-bottom:6px}
+.setup-inp{background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--white);font-family:var(--mono);font-size:14px;padding:13px 12px;width:100%;outline:none;margin-bottom:16px;transition:border-color .15s}
+.setup-inp:focus{border-color:var(--gold)}
+.setup-err{font-family:var(--mono);font-size:12px;color:var(--red);min-height:16px;line-height:1.4}
+.setup-help{font-family:var(--mono);font-size:11px;line-height:1.5;color:var(--sub);margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
+.reconnect-link{display:block;width:100%;text-align:center;background:none;border:none;color:var(--sub);font-family:var(--mono);font-size:12px;letter-spacing:.06em;padding:14px 0 4px;cursor:pointer;-webkit-appearance:none;text-decoration:underline}
+.reconnect-link:active{color:var(--white)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.dd-add-row{display:flex;gap:8px;align-items:center;margin-top:12px}
+.dd-amt-wrap{position:relative;flex:1}
+.dd-amt-wrap .sym{position:absolute;left:11px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:16px;color:#c9a84c;pointer-events:none;z-index:1}
+.dd-amt-inp{background:#222;border:1px solid #333;border-radius:8px;color:#fff;font-family:var(--mono);font-size:20px;font-weight:bold;padding:12px 10px 12px 30px;width:100%;outline:none;-moz-appearance:textfield;appearance:textfield;-webkit-text-fill-color:#fff}
+.dd-amt-inp::-webkit-outer-spin-button,.dd-amt-inp::-webkit-inner-spin-button{-webkit-appearance:none}
+.dd-amt-inp:focus{border-color:#c9a84c}
+.dd-log-btn{background:#c9a84c;color:#000;border:none;border-radius:8px;font-family:var(--mono);font-size:13px;font-weight:bold;padding:12px 16px;cursor:pointer;-webkit-appearance:none;flex-shrink:0}
+.dd-log-btn:active{opacity:.8}
+.dd-del{background:none;border:none;color:#555;cursor:pointer;font-size:18px;padding:2px 6px;-webkit-appearance:none;flex-shrink:0}
+.dd-del:active{color:var(--red)}
+.dd-effective{font-family:var(--mono);font-size:20px;color:var(--sub);margin-bottom:10px}
+.range-inp{background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--white);font-family:var(--mono);font-size:14px;padding:11px 10px;flex:1;outline:none;color-scheme:dark}
+.range-inp:focus{border-color:var(--gold)}
+#range-result{margin-top:14px}
+.range-total{font-family:var(--mono);font-size:22px;font-weight:bold;color:var(--white);margin-bottom:3px}
+.range-sub{font-family:var(--mono);font-size:18px;color:var(--sub)}
+/* --- Envelope budgeting extension --- */
+.env-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px}
+.env-form-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px}
+.env-field{display:flex;flex-direction:column;gap:4px}
+.env-field label{font-family:var(--mono);font-size:11px;color:var(--sub);letter-spacing:.08em;text-transform:uppercase}
+.env-field input[type=text],.env-field input[type=number],.env-field select,.env-field input[type=date]{background:var(--card2);border:1px solid var(--border);color:var(--white);font-family:var(--mono);font-size:14px;padding:9px 8px;border-radius:8px;outline:none;color-scheme:dark}
+.env-field input:focus,.env-field select:focus{border-color:var(--gold)}
+.env-checkbox{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--off);padding-bottom:9px}
+.env-table{width:100%;border-collapse:collapse}
+.env-table th{text-align:left;font-family:var(--mono);font-size:11px;color:var(--sub);letter-spacing:.08em;text-transform:uppercase;padding:6px 6px;border-bottom:1px solid var(--border)}
+.env-table td{font-family:var(--mono);font-size:13px;padding:9px 6px;border-bottom:1px solid var(--border)}
+.env-table tr:last-child td{border-bottom:none}
+.env-link{color:var(--gold);background:none;border:none;cursor:pointer;font-family:var(--mono);font-size:12px;text-decoration:underline;padding:0;margin-right:10px;-webkit-appearance:none}
+.env-link.danger{color:var(--red)}
+#log-category-wrap{margin-bottom:10px}
+#log-category-wrap select{
+width:100%;
+font-family:var(--sans);
+font-size:18px;
+font-weight:bold;
+background:var(--gold);
+color:#000;
+border:none;
+border-radius:10px;
+padding:14px 16px;
+outline:none;
+-webkit-appearance:none;
+appearance:none;
+cursor:pointer;
+}
+</style>
+</head>
+<body>
+<div class="loading-overlay" id="loading">
+<div class="loading-logo">Peak Finance HQ</div>
+<div class="spinner"></div>
+<div class="loading-msg" id="loading-msg">Connecting...</div>
+</div>
+<div class="setup-overlay" id="setup" style="display:none">
+<div class="setup-card">
+<div class="loading-logo" style="margin-bottom:4px">Peak Finance HQ</div>
+<div class="setup-title" id="setup-title">Connect your database</div>
+<div class="setup-sub">Paste the two values from your Supabase project (Settings &rarr; API). They&rsquo;re saved on this device only &mdash; you never have to edit code.</div>
+<label class="setup-lbl">Project URL</label>
+<input type="text" id="setup-url" class="setup-inp" placeholder="https://xxxxxxxx.supabase.co" autocomplete="off" autocapitalize="off" spellcheck="false">
+<label class="setup-lbl">Anon public key</label>
+<input type="text" id="setup-key" class="setup-inp" placeholder="eyJhbGciOi..." autocomplete="off" autocapitalize="off" spellcheck="false">
+<div class="setup-err" id="setup-err"></div>
+<button class="btn" id="setup-btn" onclick="saveSupabaseCreds()" style="width:100%;margin-top:14px;padding:15px 20px">CONNECT</button>
+<button class="reconnect-link" id="setup-cancel" style="display:none" onclick="cancelReconnect()">Cancel</button>
+<div class="setup-help">Don&rsquo;t have these yet? See the README for a 10-minute Supabase walkthrough. The anon key is safe to use in a personal single-user app like this.</div>
+</div>
+</div>
+<div class="app-header">
+<span class="logo">Peak Finance HQ</span>
+<div class="header-right">
+<span class="date-lbl" id="date-lbl"></span>
+</div>
+</div>
+<div class="tab-bar">
+<button class="tab active" onclick="switchTab('today')">Dashboard</button>
+<button class="tab" onclick="switchTab('calendar')">Calendar</button>
+<button class="tab" onclick="switchTab('envelopes')">Settings</button>
+</div>
+<!-- TODAY -->
+<div class="tab-content active" id="tab-today">
+<div id="cap-setup">
+<div class="lbl">Set Daily Cap <span id="cap-setup-note" style="font-size:10px;color:var(--sub);letter-spacing:.05em;font-weight:normal;text-transform:none"></span></div>
+<div class="cap-row">
+<div class="inp-wrap"><span class="sym">$</span><input type="number" id="cap-input" placeholder="0" min="0" step="0.01" inputmode="decimal"></div>
+<button class="btn" onclick="setCap()">SET CAP</button>
+</div>
+</div>
+<div id="done-banner"><div class="done-icon">🚫</div><div class="done-title">CAP HIT — YOU'RE DONE</div><div class="done-sub">Come back tomorrow. The system works because you do.</div></div>
+<div id="gauge-section">
+<div class="gauge-card">
+<div class="gauge-top" style="justify-content:center;text-align:center">
+<div>
+<div class="rem-lbl">Remaining Allowance</div>
+<div class="rem-amt c-g" id="rem-amt">$0.00</div>
+</div>
+</div>
+<div class="progress-track"><div class="progress-fill" id="prog-bar"></div></div>
+<div class="progress-meta"><span>$0</span><span id="spent-lbl">$0.00 spent</span><span id="cap-end-lbl">$0</span></div>
+<div class="mtd-lbl" id="mtd-lbl" style="text-align:center"></div>
+</div>
+</div>
+<div class="env-card">
+<table class="env-table" id="env-dash-table">
+<thead><tr><th>Category</th><th>Cap</th><th>Spent</th><th>Remaining</th><th>Days Left</th></tr></thead>
+<tbody id="env-dash-body"></tbody>
+</table>
+<div id="env-detail-body"></div>
+</div>
+<div id="receipt-section">
+<div class="receipt-card" style="flex-direction:column">
+<div id="log-category-wrap">
+<select id="log-category"></select>
+</div>
+<div style="display:flex;gap:10px;align-items:stretch">
+<div class="big-amt-wrap">
+<span class="sym" style="font-size:40px;left:16px;top:50%;transform:translateY(-50%);position:absolute;pointer-events:none;z-index:1;color:#c9a84c">$</span>
+<input class="big-amt-inp" type="number" id="r-amt" placeholder="0" min="0.01" step="0.01" inputmode="decimal">
+</div>
+<button class="log-btn" onclick="addReceipt()">LOG</button>
+</div>
+</div>
+</div>
+<div id="log-section">
+<div class="log-hdr"><div class="lbl" style="margin:0">Today's Receipts</div><button class="btn ghost" onclick="clearToday()">CLEAR ALL</button></div>
+<div class="receipt-list" id="receipt-list"></div>
+</div>
+</div>
+<!-- CALENDAR -->
+<div class="tab-content" id="tab-calendar">
+<div class="cal-nav">
+<button class="cal-arrow" onclick="calPrev()">‹</button>
+<span class="cal-month" id="cal-month"></span>
+<button class="cal-arrow" onclick="calNext()">›</button>
+</div>
+<div class="cal-grid" id="cal-grid"></div>
+<div id="day-detail"></div>
+<div class="day-detail" style="margin-top:16px">
+<div class="lbl" style="margin-bottom:12px">Spent By Date Range</div>
+<div style="display:flex;gap:8px;margin-bottom:12px">
+<input type="date" id="range-start" class="range-inp">
+<input type="date" id="range-end" class="range-inp">
+</div>
+<button class="btn" onclick="calcRange()" style="width:100%">CALCULATE</button>
+<div id="range-result"></div>
+</div>
+</div>
+<!-- ENVELOPES / SETTINGS -->
+<div class="tab-content" id="tab-envelopes">
+<div class="env-card">
+<div class="cap-info-lbl">Daily Allowance Cap</div>
+<div class="cap-base" id="cap-base"></div>
+<span class="cap-effective" id="cap-static" onclick="startCapEdit()">$0.00</span>
+<div class="cap-hint" id="cap-hint">Tap to edit base</div>
+<div class="cap-edit-row" id="cap-edit-row">
+<div class="cap-edit-inp-wrap"><span class="cap-edit-sym">$</span><input class="cap-edit-inp" type="number" id="cap-edit-inp" min="0.01" step="0.01" inputmode="decimal"></div>
+<button class="cap-ok" onclick="confirmCapEdit()">OK</button>
+<button class="cap-x" onclick="cancelCapEdit()">✕</button>
+</div>
+</div>
+<!-- RUNNING BALANCE — past days only -->
+<div id="running-card">
+<div class="running-inner">
+<div>
+<div class="rl-lbl">Running Balance</div>
+<div class="rl-val" id="rl-val">+$0.00</div>
+</div>
+<div class="running-right">
+<div class="rl-since" id="rl-since"></div>
+<button class="rl-reset" onclick="resetRunning()">RESET</button>
+</div>
+</div>
+</div>
+<div class="env-card">
+<div class="lbl" id="cat-form-title">Add Category</div>
+<div class="env-form-row">
+<div class="env-field"><label>Name</label><input type="text" id="cat-name" placeholder="e.g. Animal Feed"></div>
+<div class="env-field"><label>Monthly Cap</label><input type="number" id="cat-cap" min="0" step="0.01" placeholder="0"></div>
+<div class="env-checkbox"><input type="checkbox" id="cat-rollover"><span>Rollover</span></div>
+<button class="btn" id="cat-submit-btn" onclick="submitCategory()">ADD</button>
+<button class="btn ghost" id="cat-cancel-btn" style="display:none" onclick="cancelCategoryEdit()">CANCEL</button>
+</div>
+<table class="env-table" id="cat-list-table">
+<thead><tr><th>Name</th><th>Cap</th><th>Rollover</th><th></th></tr></thead>
+<tbody id="cat-list-body"></tbody>
+</table>
+</div>
+
+<div class="env-card">
+<div class="lbl">Transfer</div>
+<div class="env-form-row">
+<div class="env-field"><label>From</label><select id="tr-from"></select></div>
+<div class="env-field"><label>To</label><select id="tr-to"></select></div>
+<div class="env-field"><label>Amount</label><input type="number" id="tr-amount" min="0.01" step="0.01" placeholder="0"></div>
+<div class="env-field"><label>Date</label><input type="date" id="tr-date"></div>
+<div class="env-field" style="flex:1;min-width:120px"><label>Note</label><input type="text" id="tr-note"></div>
+<button class="btn" onclick="submitTransfer()">TRANSFER</button>
+</div>
+<div id="tr-error" style="font-family:var(--mono);font-size:12px;color:var(--red)"></div>
+</div>
+<button class="reconnect-link" onclick="openReconnect()">Change Supabase connection</button>
+</div>
+<script>
+// --- Supabase connection ---
+// Credentials are entered once through the in-app setup screen (or the
+// "Change Supabase connection" link on the Settings tab) and stored in
+// this device's localStorage — no code editing required. If you'd rather
+// hardcode them, replace the two empty strings below.
+var SUPA_URL_KEY='pfhq_supa_url',SUPA_KEY_KEY='pfhq_supa_key';
+var SUPA_URL='';
+var SUPA_KEY='';
+try{SUPA_URL=localStorage.getItem(SUPA_URL_KEY)||SUPA_URL;SUPA_KEY=localStorage.getItem(SUPA_KEY_KEY)||SUPA_KEY;}catch(e){}
+var TODAY=isoDate(new Date());
+function pad2(n){return n<10?'0'+n:''+n;}
+function isoDate(d){return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());}
+function parseISO(s){var p=s.split('-');return new Date(parseInt(p[0],10),parseInt(p[1],10)-1,parseInt(p[2],10));}
+var todayCap=null,todayReceipts=[],allDays=[];
+var calYear=new Date().getFullYear(),calMonth=new Date().getMonth(),selectedDate=null;
+var RESET_KEY='pfhq_running_reset',CAP_KEY='pfhq_default_cap';
+var resetAnchor=null,defaultCap=null;
+// --- Envelope budgeting extension state ---
+var categories=[],categoryLogsAll=[],transfersAll=[],editingCategoryId=null,expandedCategoryId=null;
+var categoriesById={}; // id -> name, includes archived categories (for labeling old logs)
+var DAILY_ALLOWANCE_VALUE='__daily__';
+document.getElementById('date-lbl').textContent=new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+try{var _ra=localStorage.getItem(RESET_KEY);resetAnchor=_ra?new Date(_ra):null;}catch(e){}
+try{var _dc=localStorage.getItem(CAP_KEY);defaultCap=_dc?parseFloat(_dc):null;}catch(e){}
+function api(method,path,body){
+var opts={method:method,headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'return=representation'}};
+if(body) opts.body=JSON.stringify(body);
+return fetch(SUPA_URL+'/rest/v1/'+path,opts).then(function(r){
+if(!r.ok) return r.text().then(function(t){throw new Error(t);});
+return r.status===204?null:r.json();
+});
+}
+function saveSetting(key,value){
+// Upsert: try PATCH first (row already exists), fall back to POST if nothing matched
+return api('PATCH','settings?key=eq.'+key,{value:String(value),updated_at:new Date().toISOString()}).then(function(rows){
+if(!rows||rows.length===0){
+return api('POST','settings',{key:key,value:String(value),updated_at:new Date().toISOString()});
+}
+return rows;
+});
+}
+function saveDefaultCap(v){
+saveSetting('default_cap',v).catch(function(){});
+}
+function getDailyAllowanceTransferNet(){
+// Net effect of all transfers touching Daily Allowance (from/to null),
+// dated on or before today and on/after the running-balance reset
+// anchor (if set) — same window used for the day-by-day running
+// balance below, so a transfer behaves like an extra day's delta.
+var upto=parseISO(TODAY);
+return transfersAll.filter(function(t){
+var d=parseISO(t.date);
+if(d>upto) return false;
+if(resetAnchor&&d<resetAnchor) return false;
+return t.to_category_id===null||t.from_category_id===null;
+}).reduce(function(net,t){
+if(t.to_category_id===null) net+=t.amount;
+if(t.from_category_id===null) net-=t.amount;
+return net;
+},0);
+}
+function getRunningBalance(){
+var pastDays=allDays.filter(function(d){return d.date!==TODAY;});
+if(resetAnchor) pastDays=pastDays.filter(function(d){return parseISO(d.date)>=resetAnchor;});
+var base=pastDays.reduce(function(t,d){
+var s=d.receipts.reduce(function(a,r){return a+r.amount;},0);
+return t+(d.cap-s);
+},0);
+return base+getDailyAllowanceTransferNet();
+}
+function effectiveCap(){
+if(todayCap===null) return 0;
+return Math.max(todayCap+getRunningBalance(),0);
+}
+window.switchTab=function(name){
+document.querySelectorAll('.tab').forEach(function(t,i){t.classList.toggle('active',['today','calendar','envelopes'][i]===name);});
+document.querySelectorAll('.tab-content').forEach(function(c){c.classList.remove('active');});
+document.getElementById('tab-'+name).classList.add('active');
+if(name==='calendar') renderCalendar();
+if(name==='today') renderEnvelopeDashboard();
+if(name==='envelopes') renderCategorySetupList();
+};
+function loadAll(){
+document.getElementById('loading-msg').textContent='Loading data...';
+return Promise.all([
+api('GET','receipts?order=created_at.asc&select=*'),
+api('GET','settings?select=*'),
+api('GET','categories?active=eq.true&order=created_at.asc&select=*'),
+api('GET','category_logs?select=*'),
+api('GET','transfers?select=*'),
+api('GET','categories?select=id,name') // unfiltered — used only to label archived categories' history
+]).then(function(results){
+var rows=results[0]||[],settings=results[1]||[];
+categories=results[2]||[];
+categoryLogsAll=results[3]||[];
+transfersAll=results[4]||[];
+categoriesById={};
+(results[5]||[]).forEach(function(c){categoriesById[c.id]=c.name;});
+var capSetting=settings.find(function(s){return s.key==='default_cap';});
+if(capSetting&&parseFloat(capSetting.value)>0){
+defaultCap=parseFloat(capSetting.value);
+try{localStorage.setItem(CAP_KEY,defaultCap);}catch(e){}
+}
+var resetSetting=settings.find(function(s){return s.key==='running_reset_anchor';});
+if(resetSetting&&resetSetting.value){
+resetAnchor=new Date(resetSetting.value);
+try{localStorage.setItem(RESET_KEY,resetSetting.value);}catch(e){}
+}
+var byDate={};
+rows.forEach(function(r){
+if(!byDate[r.date]) byDate[r.date]={date:r.date,cap:0,receipts:[]};
+// Always keep the highest cap value seen — immune to row ordering
+if(r.cap>byDate[r.date].cap) byDate[r.date].cap=r.cap;
+// Only push real spend rows — never cap markers
+if(r.amount>0&&r.description!=='__cap__') byDate[r.date].receipts.push({id:r.id,amount:r.amount,time:new Date(r.created_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})});
+});
+allDays=Object.values(byDate).sort(function(a,b){return parseISO(b.date)-parseISO(a.date);});
+var td=byDate[TODAY];
+todayCap=td?td.cap:null;
+todayReceipts=td?td.receipts:[];
+if(todayCap===null&&defaultCap!==null){
+todayCap=defaultCap;
+allDays.unshift({date:TODAY,cap:defaultCap,receipts:[]});
+api('POST','receipts',{date:TODAY,cap:defaultCap,description:'__cap__',amount:0}).catch(function(){});
+}
+// Gap-fill: credit full cap for missing days since the MOST RECENT tracked day
+// Only look back 60 days max to avoid runaway compounding
+if(defaultCap!==null&&allDays.length>0){
+var todayD=parseISO(TODAY);
+var cutoff=new Date(todayD); cutoff.setDate(cutoff.getDate()-60);
+// Find most recent tracked day as start point (not oldest)
+var recentTracked=parseISO(allDays[0].date); // newest first
+var gapStart=recentTracked>cutoff?recentTracked:cutoff;
+var cursor=new Date(gapStart);
+cursor.setDate(cursor.getDate()+1);
+var hadGaps=false;
+while(cursor<todayD){
+var ds=isoDate(cursor);
+if(!byDate[ds]){
+// Only add to local allDays — write to DB only if not already there
+allDays.push({date:ds,cap:defaultCap,receipts:[]});
+byDate[ds]={date:ds,cap:defaultCap,receipts:[]};
+api('POST','receipts',{date:ds,cap:defaultCap,description:'__cap__',amount:0}).catch(function(){});
+hadGaps=true;
+}
+cursor.setDate(cursor.getDate()+1);
+}
+if(hadGaps) allDays.sort(function(a,b){return parseISO(b.date)-parseISO(a.date);});
+}
+document.getElementById('loading').classList.add('hidden');
+render();
+renderCategoryDropdowns();
+renderCategorySetupList();
+renderEnvelopeDashboard();
+try{var n=document.getElementById('cap-setup-note');if(n&&defaultCap)n.textContent='(current: '+fmt(defaultCap)+')';}catch(e){}
+}).catch(function(e){onConnectionError(e);});
+}
+function fmt(n,sign){var abs=String(Math.ceil(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g,',');if(sign)return(n>=0?'+':'-')+'$'+abs;return'$'+abs;}
+function show(id,v){document.getElementById(id).style.display=v?'block':'none';}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function totalSpent(){return todayReceipts.reduce(function(t,r){return t+r.amount;},0);}
+function render(){
+var has=todayCap!==null;
+show('cap-setup',!has); show('gauge-section',has); show('receipt-section',has); show('log-section',has);
+if(!has) return;
+var rb=getRunningBalance();
+var effCap=Math.max(todayCap+rb,0);
+var s=totalSpent();
+var rem=Math.max(effCap-s,0);
+var pct=effCap>0?Math.min(s/effCap*100,100):100;
+var done=rem<=0;
+var ra=document.getElementById('rem-amt');
+ra.textContent=fmt(rem);
+ra.className='rem-amt '+(pct<60?'c-g':pct<85?'c-a':'c-r');
+document.getElementById('cap-static').textContent=fmt(effCap);
+var baseEl=document.getElementById('cap-base');
+if(Math.abs(rb)>0.005){
+baseEl.textContent=fmt(todayCap)+fmt(rb,true);
+} else {
+baseEl.textContent='';
+}
+document.getElementById('spent-lbl').textContent=fmt(s)+' spent';
+document.getElementById('cap-end-lbl').textContent=fmt(effCap);
+var bar=document.getElementById('prog-bar');
+bar.style.width=pct+'%';
+bar.style.background=pct<60?'var(--green)':pct<85?'var(--amber)':'var(--red)';
+show('done-banner',done);
+var rs=document.getElementById('receipt-section');
+rs.style.opacity=done?'0.3':'1';
+rs.style.pointerEvents=done?'none':'';
+renderReceipts();
+renderRunning(rb);
+renderMTD();
+renderEnvelopeDashboard();
+}
+function renderMTD(){
+var monthStart=TODAY.slice(0,8)+'01'; // first of current month, ISO
+var days=allDays.filter(function(d){return d.date>=monthStart&&d.date<=TODAY;});
+var total=0;
+days.forEach(function(d){total+=d.receipts.reduce(function(t,r){return t+r.amount;},0);});
+var monthName=parseISO(TODAY).toLocaleDateString('en-US',{month:'long'});
+document.getElementById('mtd-lbl').textContent=fmt(total)+' spent since '+monthName+' 1';
+}
+function renderReceipts(){
+var list=document.getElementById('receipt-list');
+if(todayReceipts.length===0){list.innerHTML='<div class="empty-state">NO RECEIPTS YET</div>';return;}
+list.innerHTML='';
+var rev=todayReceipts.slice().reverse();
+for(var i=0;i<rev.length;i++){
+var r=rev[i],d=document.createElement('div');
+d.className='receipt-item';
+d.innerHTML='<span class="ri-time">'+esc(r.time)+'</span><span class="ri-amt" style="flex:1;text-align:right;margin-right:10px">−'+fmt(r.amount)+'</span><button class="ri-del" data-id="'+r.id+'">×</button>';
+list.appendChild(d);
+}
+list.querySelectorAll('.ri-del').forEach(function(btn){
+btn.addEventListener('click',function(){deleteReceipt(this.getAttribute('data-id'));});
+});
+}
+function renderRunning(rb){
+var rc=document.getElementById('running-card');
+rc.style.display='block';
+var el=document.getElementById('rl-val');
+el.textContent=fmt(rb,true);
+el.className='rl-val '+(rb>=0?'c-g':'c-r');
+var sinceEl=document.getElementById('rl-since');
+if(resetAnchor) sinceEl.textContent='since '+resetAnchor.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+else sinceEl.textContent=allDays.filter(function(d){return d.date!==TODAY;}).length>0?'all-time':'first day';
+}
+window.resetRunning=function(){
+if(!confirm('Reset running balance to zero from today?')) return;
+var now=new Date();
+resetAnchor=now;
+try{localStorage.setItem(RESET_KEY,now.toISOString());}catch(e){}
+saveSetting('running_reset_anchor',now.toISOString()).catch(function(){});
+render();
+};
+function renderCalendar(){
+var months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+document.getElementById('cal-month').textContent=months[calMonth]+' '+calYear;
+var grid=document.getElementById('cal-grid'); grid.innerHTML='';
+['Su','Mo','Tu','We','Th','Fr','Sa'].forEach(function(d){var el=document.createElement('div');el.className='cal-dow';el.textContent=d;grid.appendChild(el);});
+var first=new Date(calYear,calMonth,1).getDay();
+var days=new Date(calYear,calMonth+1,0).getDate();
+var dataMap={};
+// Build running balance per day (cumulative from oldest to newest)
+var asc=allDays.slice().sort(function(a,b){return parseISO(a.date)-parseISO(b.date);});
+var runningBal=0;
+asc.forEach(function(d){
+var s=d.receipts.reduce(function(t,r){return t+r.amount;},0);
+var effCap=Math.max(d.cap+runningBal,0);
+var delta=d.cap-s;
+dataMap[d.date]={cap:d.cap,effCap:effCap,spent:s,delta:delta,runningBefore:runningBal,receipts:d.receipts};
+runningBal+=delta;
+});
+for(var i=0;i<first;i++){var el=document.createElement('div');el.className='cal-day empty';el.innerHTML='<span class="cal-day-num"></span>';grid.appendChild(el);}
+for(var day=1;day<=days;day++){
+var d=new Date(calYear,calMonth,day),ds=isoDate(d),data=dataMap[ds];
+var isToday=ds===TODAY,isSel=ds===selectedDate;
+var el=document.createElement('div');
+el.className='cal-day'+(data?' has-data':'')+(isToday?' today':'')+(isSel?' selected':'');
+var pipColor=data?(data.delta>=0?'var(--green)':'var(--red)'):'transparent';
+el.innerHTML='<span class="cal-day-num">'+day+'</span>'+(data?'<div class="cal-pip" style="background:'+pipColor+'"></div>':'');
+if(data||isToday)(function(dateStr){el.addEventListener('click',function(){selectedDate=dateStr;renderCalendar();renderDayDetail(dateStr);});})(ds);
+grid.appendChild(el);
+}
+if(selectedDate) renderDayDetail(selectedDate);
+else document.getElementById('day-detail').innerHTML='';
+}
+function renderDayDetail(dateStr){
+var dd=document.getElementById('day-detail');
+var dayData=allDays.find(function(x){return x.date===dateStr;});
+if(!dayData){dd.innerHTML='<div class="day-detail"><div class="dd-empty">No data for this day.</div></div>';return;}
+// Recompute effective cap using running balance before this day
+// Only use days within 60 days of the selected date to avoid phantom compounding
+var targetDate=parseISO(dateStr);
+var asc=allDays.slice()
+.filter(function(d){var dd=parseISO(d.date);return dd<targetDate&&(!resetAnchor||dd>=resetAnchor);})
+.sort(function(a,b){return parseISO(a.date)-parseISO(b.date);});
+var runBefore=0;
+for(var i=0;i<asc.length;i++){
+var ps=asc[i].receipts.reduce(function(t,r){return t+r.amount;},0);
+// Delta = base cap - spent (not effective cap - spent, to avoid exponential compounding)
+runBefore+=asc[i].cap-ps;
+}
+var effCap=Math.max(dayData.cap+runBefore,0);
+var spent=dayData.receipts.reduce(function(t,r){return t+r.amount;},0);
+var delta=effCap-spent;
+var pct=effCap>0?Math.min(spent/effCap*100,100):0;
+var bc=pct<=100?'var(--green)':'var(--red)';
+var dateLabel=parseISO(dateStr).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+var isPast=dateStr!==TODAY;
+var html='<div class="day-detail">';
+html+='<div class="dd-header"><span class="dd-date">'+dateLabel+'</span><span class="dd-delta '+(delta>=0?'c-g':'c-r')+'">'+fmt(delta,true)+'</span></div>';
+html+='<div class="dd-bar-track"><div class="dd-bar-fill" style="width:'+Math.min(pct,100)+'%;background:'+bc+'"></div></div>';
+if(Math.abs(runBefore)>0.5){
+html+='<div class="dd-effective">'+fmt(dayData.cap)+' base '+fmt(runBefore,true)+' balance = '+fmt(effCap)+'</div>';
+}
+html+='<div class="dd-meta">'+fmt(spent)+' spent of '+fmt(effCap)+' cap</div>';
+html+='<div class="dd-receipts">';
+if(!dayData.receipts.length){html+='<div class="dd-empty">No receipts logged.</div>';}
+else{dayData.receipts.forEach(function(r){
+html+='<div class="dd-receipt"><span class="dd-time">'+esc(r.time)+'</span><span class="dd-amt" style="margin-left:auto">−'+fmt(r.amount)+'</span>';
+if(isPast) html+='<button class="dd-del" data-id="'+r.id+'" data-date="'+esc(dateStr)+'" onclick="deletePastReceipt(this)">×</button>';
+html+='</div>';
+});}
+html+='</div>';
+if(isPast){
+html+='<div class="dd-add-row">';
+html+='<div class="dd-amt-wrap"><span class="sym">$</span><input class="dd-amt-inp" type="number" id="dd-inp-'+esc(dateStr)+'" placeholder="0" min="1" step="1" inputmode="decimal"></div>';
+html+='<button class="dd-log-btn" data-date="'+esc(dateStr)+'" onclick="addPastReceipt(this)">LOG</button>';
+html+='</div>';
+}
+// Category envelope logs for this day — separate from Daily Allowance
+// receipts above, since they draw against a different cap entirely.
+var catLogsForDay=categoryLogsAll.filter(function(l){return l.date===dateStr;});
+if(catLogsForDay.length>0||categories.length>0){
+html+='<div class="lbl" style="margin-top:16px;margin-bottom:9px">Category</div>';
+if(catLogsForDay.length>0){
+html+='<div class="dd-receipts">';
+catLogsForDay.forEach(function(l){
+var name=categoriesById[l.category_id]||'Unknown Category';
+var dt=new Date(l.created_at);
+var time=dt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+html+='<div class="dd-receipt"><span class="dd-time">'+esc(name)+' · '+esc(time)+'</span><span class="dd-amt" style="margin-left:auto">−'+fmt(l.amount)+'</span>';
+html+='<button class="dd-del" data-catlog-id="'+l.id+'" data-date="'+esc(dateStr)+'" onclick="deletePastCategoryLog(this)">×</button>';
+html+='</div>';
+});
+html+='</div>';
+}else{
+html+='<div class="dd-empty">No category receipts logged.</div>';
+}
+if(isPast&&categories.length>0){
+html+='<div class="dd-add-row">';
+html+='<select id="dd-cat-select-'+esc(dateStr)+'" class="range-inp" style="flex:0 0 auto;max-width:130px">';
+categories.forEach(function(c){html+='<option value="'+c.id+'">'+esc(c.name)+'</option>';});
+html+='</select>';
+html+='<div class="dd-amt-wrap"><span class="sym">$</span><input class="dd-amt-inp" type="number" id="dd-cat-inp-'+esc(dateStr)+'" placeholder="0" min="1" step="1" inputmode="decimal"></div>';
+html+='<button class="dd-log-btn" data-date="'+esc(dateStr)+'" onclick="addPastCategoryLog(this)">LOG</button>';
+html+='</div>';
+}
+}
+html+='</div>';
+dd.innerHTML=html;
+}
+window.addPastCategoryLog=function(btn){
+var dateStr=btn.getAttribute('data-date');
+var sel=document.getElementById('dd-cat-select-'+dateStr);
+var inp=document.getElementById('dd-cat-inp-'+dateStr);
+if(!sel||!inp) return;
+var categoryId=sel.value;
+var amt=parseFloat(inp.value);
+if(!amt||amt<=0){inp.style.borderColor='var(--red)';setTimeout(function(){inp.style.borderColor='';},700);return;}
+api('POST','category_logs',{category_id:categoryId,amount:amt,date:dateStr,note:null}).then(function(rows){
+var row=Array.isArray(rows)?rows[0]:rows;
+categoryLogsAll.push(row);
+renderEnvelopeDashboard();
+renderCalendar();
+renderDayDetail(dateStr);
+}).catch(function(){});
+};
+window.deletePastCategoryLog=function(btn){
+var id=btn.getAttribute('data-catlog-id');
+var dateStr=btn.getAttribute('data-date');
+if(!confirm('Delete this logged receipt?')) return;
+api('DELETE','category_logs?id=eq.'+id).then(function(){
+categoryLogsAll=categoryLogsAll.filter(function(l){return l.id!==id;});
+renderEnvelopeDashboard();
+renderCalendar();
+renderDayDetail(dateStr);
+}).catch(function(){});
+};
+window.addPastReceipt=function(btnOrDate){
+var dateStr=typeof btnOrDate==='string'?btnOrDate:btnOrDate.getAttribute('data-date');
+var inp=document.getElementById('dd-inp-'+dateStr);
+if(!inp) return;
+var amt=parseFloat(inp.value);
+if(!amt||amt<=0){inp.style.borderColor='var(--red)';setTimeout(function(){inp.style.borderColor='';},700);return;}
+var dayData=allDays.find(function(x){return x.date===dateStr;});
+if(!dayData) return;
+inp.value='';
+api('POST','receipts',{date:dateStr,cap:dayData.cap,description:null,amount:amt}).then(function(rows){
+var row=Array.isArray(rows)?rows[0]:rows;
+var time=new Date(row.created_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+dayData.receipts.push({id:row.id,amount:amt,time:time});
+renderCalendar();
+render();
+}).catch(function(){});
+};
+window.deletePastReceipt=function(btn){
+var id=btn.getAttribute('data-id');
+var dateStr=btn.getAttribute('data-date');
+if(!confirm('Delete this receipt?')) return;
+api('DELETE','receipts?id=eq.'+id).then(function(){
+var dayData=allDays.find(function(x){return x.date===dateStr;});
+if(dayData) dayData.receipts=dayData.receipts.filter(function(r){return r.id!==id;});
+renderCalendar();
+render();
+}).catch(function(){});
+};
+window.calPrev=function(){calMonth--;if(calMonth<0){calMonth=11;calYear--;}renderCalendar();};
+window.calNext=function(){calMonth++;if(calMonth>11){calMonth=0;calYear++;}renderCalendar();};
+window.calcRange=function(){
+var s=document.getElementById('range-start').value;
+var e=document.getElementById('range-end').value;
+var out=document.getElementById('range-result');
+if(!s||!e){out.innerHTML='<div class="range-sub c-r">Pick a start and end date</div>';return;}
+if(s>e){out.innerHTML='<div class="range-sub c-r">Start date must be before end date</div>';return;}
+var days=allDays.filter(function(d){return d.date>=s&&d.date<=e;});
+var total=0;
+days.forEach(function(d){total+=d.receipts.reduce(function(t,r){return t+r.amount;},0);});
+var dayCount=(parseISO(e)-parseISO(s))/86400000+1;
+var avg=dayCount>0?total/dayCount:0;
+out.innerHTML='<div class="range-total">'+fmt(total)+'</div><div class="range-sub">spent over '+dayCount+' day'+(dayCount!==1?'s':'')+' &middot; avg '+fmt(avg)+'/day</div>';
+};
+window.setCap=function(){
+var v=parseFloat(document.getElementById('cap-input').value);
+if(!v||v<=0){shake('cap-input');return;}
+todayCap=v;todayReceipts=[];defaultCap=v;
+try{localStorage.setItem(CAP_KEY,v);}catch(e){}
+saveDefaultCap(v);
+api('POST','receipts',{date:TODAY,cap:v,description:'__cap__',amount:0}).then(function(){
+allDays=allDays.filter(function(d){return d.date!==TODAY;});
+allDays.unshift({date:TODAY,cap:v,receipts:[]});
+render();
+}).catch(function(){});
+};
+window.addReceipt=function(){
+var catSel=document.getElementById('log-category');
+var selected=catSel?catSel.value:DAILY_ALLOWANCE_VALUE;
+var amt=parseFloat(document.getElementById('r-amt').value);
+if(!amt||amt<=0){shake('r-amt');return;}
+document.getElementById('r-amt').value='';
+document.getElementById('r-amt').focus();
+if(selected&&selected!==DAILY_ALLOWANCE_VALUE){
+// Logging against a category envelope, not Daily Allowance.
+api('POST','category_logs',{category_id:selected,amount:amt,date:TODAY,note:null}).then(function(rows){
+var row=Array.isArray(rows)?rows[0]:rows;
+categoryLogsAll.push(row);
+renderEnvelopeDashboard();
+}).catch(function(){});
+return;
+}
+api('POST','receipts',{date:TODAY,cap:todayCap,description:null,amount:amt}).then(function(rows){
+var row=Array.isArray(rows)?rows[0]:rows;
+var time=new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+todayReceipts.push({id:row.id,amount:amt,time:time});
+var td=allDays.find(function(d){return d.date===TODAY;});
+if(td) td.receipts=todayReceipts.slice();
+render();
+}).catch(function(){});
+};
+function deleteReceipt(id){
+api('DELETE','receipts?id=eq.'+id).then(function(){
+todayReceipts=todayReceipts.filter(function(r){return r.id!==id;});
+var td=allDays.find(function(d){return d.date===TODAY;});
+if(td) td.receipts=todayReceipts.slice();
+render();
+}).catch(function(){});
+}
+window.clearToday=function(){
+if(!confirm('Clear all receipts for today?')) return;
+api('DELETE','receipts?date=eq.'+encodeURIComponent(TODAY)+'&amount=gt.0').then(function(){
+todayReceipts=[];
+var td=allDays.find(function(d){return d.date===TODAY;});
+if(td) td.receipts=[];
+render();
+}).catch(function(){});
+};
+window.startCapEdit=function(){
+document.getElementById('cap-static').style.display='none';
+document.getElementById('cap-hint').style.display='none';
+document.getElementById('cap-base').style.display='none';
+document.getElementById('cap-edit-row').classList.add('on');
+var inp=document.getElementById('cap-edit-inp');
+inp.value=todayCap?todayCap.toFixed(2):'';
+inp.focus();inp.select();
+};
+window.confirmCapEdit=function(){
+var v=parseFloat(document.getElementById('cap-edit-inp').value);
+if(!v||v<=0){shake('cap-edit-inp');return;}
+todayCap=v;defaultCap=v;
+try{localStorage.setItem(CAP_KEY,v);}catch(e){}
+saveDefaultCap(v);
+cancelCapEdit();
+api('PATCH','receipts?date=eq.'+encodeURIComponent(TODAY),{cap:v}).then(function(){
+var td=allDays.find(function(d){return d.date===TODAY;});
+if(td) td.cap=v;
+render();
+}).catch(function(){});
+};
+window.cancelCapEdit=function(){
+document.getElementById('cap-edit-row').classList.remove('on');
+document.getElementById('cap-static').style.display='';
+document.getElementById('cap-hint').style.display='';
+document.getElementById('cap-base').style.display='';
+};
+document.getElementById('cap-edit-inp').addEventListener('keydown',function(e){if(e.key==='Enter')confirmCapEdit();if(e.key==='Escape')cancelCapEdit();});
+function shake(id){var el=document.getElementById(id);el.style.borderColor='var(--red)';if(el.animate)el.animate([{transform:'translateX(0)'},{transform:'translateX(-5px)'},{transform:'translateX(5px)'},{transform:'translateX(-3px)'},{transform:'translateX(3px)'},{transform:'translateX(0)'}],{duration:260});setTimeout(function(){el.style.borderColor='';},700);}
+document.getElementById('cap-input').addEventListener('keydown',function(e){if(e.key==='Enter')setCap();});
+document.getElementById('r-amt').addEventListener('keydown',function(e){if(e.key==='Enter')addReceipt();});
+
+// ============================================================
+// Envelope budgeting extension — categories, category_logs, transfers
+// ============================================================
+
+function monthOf(dateStr){return dateStr.slice(0,7);} // 'YYYY-MM' from a YYYY-MM-DD string
+function daysLeftInMonth(dateStr){
+var d=parseISO(dateStr);
+var last=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
+return last-d.getDate()+1;
+}
+
+function loadEnvelopeData(){
+return Promise.all([
+api('GET','categories?active=eq.true&order=created_at.asc&select=*'),
+api('GET','category_logs?select=*'),
+api('GET','transfers?select=*'),
+api('GET','categories?select=id,name')
+]).then(function(results){
+categories=results[0]||[];
+categoryLogsAll=results[1]||[];
+transfersAll=results[2]||[];
+categoriesById={};
+(results[3]||[]).forEach(function(c){categoriesById[c.id]=c.name;});
+renderCategoryDropdowns();
+renderCategorySetupList();
+renderEnvelopeDashboard();
+render(); // Daily Allowance running balance may depend on transfersAll
+if(document.getElementById('tab-calendar').classList.contains('active')) renderCalendar();
+}).catch(function(e){console.error('envelope reload error',e);});
+}
+
+// Computes this month's spent/remaining for one category, carrying
+// rollover forward month over month if category.rollover is true.
+// Mirrors the Daily Allowance model (unused amount carries indefinitely)
+// but applied monthly instead of daily.
+function computeCategoryStatus(cat){
+var createdMonth=monthOf(cat.created_at.slice(0,10));
+var todayMonth=monthOf(TODAY);
+var logsForCat=categoryLogsAll.filter(function(l){return l.category_id===cat.id;});
+var inForCat=transfersAll.filter(function(t){return t.to_category_id===cat.id;});
+var outForCat=transfersAll.filter(function(t){return t.from_category_id===cat.id;});
+
+function spentInMonth(mk){
+return logsForCat.filter(function(l){return monthOf(l.date)===mk;}).reduce(function(t,l){return t+l.amount;},0);
+}
+function netTransferInMonth(mk){
+var inSum=inForCat.filter(function(t){return monthOf(t.date)===mk;}).reduce(function(t,r){return t+r.amount;},0);
+var outSum=outForCat.filter(function(t){return monthOf(t.date)===mk;}).reduce(function(t,r){return t+r.amount;},0);
+return inSum-outSum;
+}
+
+var incomingCarry=0;
+if(cat.rollover){
+var cursor=parseISO(createdMonth+'-01');
+var todayMonthStart=parseISO(todayMonth+'-01');
+while(cursor<todayMonthStart){
+var mk=cursor.getFullYear()+'-'+pad2(cursor.getMonth()+1);
+var spentM=spentInMonth(mk);
+var netTM=netTransferInMonth(mk);
+var effCapM=cat.monthly_cap+netTM+incomingCarry;
+incomingCarry=effCapM-spentM;
+cursor=new Date(cursor.getFullYear(),cursor.getMonth()+1,1);
+}
+}
+
+var spentThisMonth=spentInMonth(todayMonth);
+var netTransfersThisMonth=netTransferInMonth(todayMonth);
+var effectiveCap=cat.monthly_cap+netTransfersThisMonth+(cat.rollover?incomingCarry:0);
+var remaining=effectiveCap-spentThisMonth;
+
+return {
+category:cat,
+spentThisMonth:spentThisMonth,
+effectiveCap:effectiveCap,
+remaining:remaining,
+overspent:remaining<0,
+daysLeftInMonth:daysLeftInMonth(TODAY)
+};
+}
+
+function renderEnvelopeDashboard(){
+var body=document.getElementById('env-dash-body');
+if(!body) return;
+body.innerHTML='';
+if(categories.length===0){body.innerHTML='<tr><td colspan="5" class="dd-empty">No categories yet.</td></tr>';document.getElementById('env-detail-body').innerHTML='';return;}
+categories.forEach(function(cat){
+var st=computeCategoryStatus(cat);
+var tr=document.createElement('tr');
+tr.style.cursor='pointer';
+if(cat.id===expandedCategoryId) tr.style.background='var(--card2)';
+tr.innerHTML='<td>'+esc(cat.name)+'</td><td>'+fmt(st.effectiveCap)+'</td><td>'+fmt(st.spentThisMonth)+'</td>'+
+'<td class="'+(st.overspent?'c-r':'c-g')+'" style="font-weight:bold">'+fmt(st.remaining)+'</td>'+
+'<td>'+st.daysLeftInMonth+'</td>';
+tr.addEventListener('click',function(){
+expandedCategoryId=(expandedCategoryId===cat.id)?null:cat.id;
+renderEnvelopeDashboard();
+});
+body.appendChild(tr);
+});
+renderCategoryDetail();
+}
+
+// Shows the individual logged entries (this month) for whichever
+// category row was last clicked — this is what was missing: the
+// dashboard only showed totals, not where a logged amount actually went.
+function renderCategoryDetail(){
+var wrap=document.getElementById('env-detail-body');
+if(!wrap) return;
+if(!expandedCategoryId){wrap.innerHTML='';return;}
+var cat=categories.find(function(c){return c.id===expandedCategoryId;});
+if(!cat){wrap.innerHTML='';expandedCategoryId=null;return;}
+var todayMonth=monthOf(TODAY);
+var logs=categoryLogsAll
+.filter(function(l){return l.category_id===cat.id&&monthOf(l.date)===todayMonth;})
+.sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at);});
+var html='<div class="lbl" style="margin-top:16px;margin-bottom:9px">'+esc(cat.name)+' — This Month’s Log</div>';
+if(logs.length===0){
+html+='<div class="dd-empty">No receipts logged yet this month.</div>';
+}else{
+html+='<div class="receipt-list">';
+logs.forEach(function(l){
+var dt=new Date(l.created_at);
+var stamp=dt.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+html+='<div class="receipt-item"><span class="ri-time">'+esc(stamp)+'</span><span class="ri-amt" style="flex:1;text-align:right;margin-right:10px">−'+fmt(l.amount)+'</span><button class="ri-del" data-id="'+l.id+'">×</button></div>';
+});
+html+='</div>';
+}
+wrap.innerHTML=html;
+wrap.querySelectorAll('.ri-del').forEach(function(btn){
+btn.addEventListener('click',function(){deleteCategoryLog(this.getAttribute('data-id'));});
+});
+}
+
+function deleteCategoryLog(id){
+if(!confirm('Delete this logged receipt?')) return;
+api('DELETE','category_logs?id=eq.'+id).then(function(){
+categoryLogsAll=categoryLogsAll.filter(function(l){return l.id!==id;});
+renderEnvelopeDashboard();
+}).catch(function(){});
+}
+
+function renderCategorySetupList(){
+var body=document.getElementById('cat-list-body');
+if(!body) return;
+body.innerHTML='';
+if(categories.length===0){body.innerHTML='<tr><td colspan="4" class="dd-empty">No categories yet.</td></tr>';return;}
+categories.forEach(function(cat){
+var tr=document.createElement('tr');
+tr.innerHTML='<td>'+esc(cat.name)+'</td><td>'+fmt(cat.monthly_cap)+'</td><td>'+(cat.rollover?'Yes':'No')+'</td>'+
+'<td><button class="env-link" data-id="'+cat.id+'" data-action="edit">Edit</button><button class="env-link danger" data-id="'+cat.id+'" data-action="archive">Archive</button></td>';
+body.appendChild(tr);
+});
+body.querySelectorAll('.env-link').forEach(function(btn){
+btn.addEventListener('click',function(){
+var id=this.getAttribute('data-id');
+var action=this.getAttribute('data-action');
+if(action==='archive') archiveCategoryRow(id);
+else startCategoryEdit(id);
+});
+});
+}
+
+window.submitCategory=function(){
+var name=document.getElementById('cat-name').value.trim();
+var cap=parseFloat(document.getElementById('cat-cap').value);
+var rollover=document.getElementById('cat-rollover').checked;
+if(!name||!cap||cap<0){shake('cat-cap');return;}
+if(editingCategoryId){
+api('PATCH','categories?id=eq.'+editingCategoryId,{name:name,monthly_cap:cap,rollover:rollover}).then(function(){
+cancelCategoryEdit();
+loadEnvelopeData();
+}).catch(function(){});
+}else{
+api('POST','categories',{name:name,monthly_cap:cap,rollover:rollover,active:true}).then(function(){
+document.getElementById('cat-name').value='';
+document.getElementById('cat-cap').value='';
+document.getElementById('cat-rollover').checked=false;
+loadEnvelopeData();
+}).catch(function(){});
+}
+};
+
+window.startCategoryEdit=function(id){
+var cat=categories.find(function(c){return c.id===id;});
+if(!cat) return;
+editingCategoryId=id;
+document.getElementById('cat-name').value=cat.name;
+document.getElementById('cat-cap').value=cat.monthly_cap;
+document.getElementById('cat-rollover').checked=cat.rollover;
+document.getElementById('cat-form-title').textContent='Edit Category';
+document.getElementById('cat-submit-btn').textContent='SAVE';
+document.getElementById('cat-cancel-btn').style.display='';
+};
+
+window.cancelCategoryEdit=function(){
+editingCategoryId=null;
+document.getElementById('cat-name').value='';
+document.getElementById('cat-cap').value='';
+document.getElementById('cat-rollover').checked=false;
+document.getElementById('cat-form-title').textContent='Add Category';
+document.getElementById('cat-submit-btn').textContent='ADD';
+document.getElementById('cat-cancel-btn').style.display='none';
+};
+
+function archiveCategoryRow(id){
+if(!confirm('Archive this category? History is kept, it just stops showing up as active.')) return;
+api('PATCH','categories?id=eq.'+id,{active:false}).then(function(){loadEnvelopeData();}).catch(function(){});
+}
+
+function renderCategoryDropdowns(){
+var opts='<option value="'+DAILY_ALLOWANCE_VALUE+'">Daily Allowance</option>';
+categories.forEach(function(c){opts+='<option value="'+c.id+'">'+esc(c.name)+'</option>';});
+['log-category','tr-from','tr-to'].forEach(function(id){
+var el=document.getElementById(id);
+if(el){var cur=el.value;el.innerHTML=opts;if(cur)el.value=cur;}
+});
+var trDate=document.getElementById('tr-date');
+if(trDate&&!trDate.value) trDate.value=TODAY;
+}
+
+window.submitTransfer=function(){
+var from=document.getElementById('tr-from').value;
+var to=document.getElementById('tr-to').value;
+var amt=parseFloat(document.getElementById('tr-amount').value);
+var date=document.getElementById('tr-date').value||TODAY;
+var note=document.getElementById('tr-note').value.trim();
+var errEl=document.getElementById('tr-error');
+errEl.textContent='';
+if(!amt||amt<=0){errEl.textContent='Enter a positive amount.';return;}
+if(from===to){errEl.textContent='From and To must be different.';return;}
+var fromId=from===DAILY_ALLOWANCE_VALUE?null:from;
+var toId=to===DAILY_ALLOWANCE_VALUE?null:to;
+api('POST','transfers',{from_category_id:fromId,to_category_id:toId,amount:amt,date:date,note:note||null}).then(function(){
+document.getElementById('tr-amount').value='';
+document.getElementById('tr-note').value='';
+loadEnvelopeData();
+}).catch(function(e){errEl.textContent='Transfer failed.';console.error(e);});
+};
+
+// ============================================================
+// First-run / reconnect setup — enter Supabase creds in-app,
+// stored in this device's localStorage. No code editing needed.
+// ============================================================
+function showSetup(opts){
+opts=opts||{};
+document.getElementById('loading').classList.add('hidden');
+var setup=document.getElementById('setup');
+setup.style.display='flex';
+document.getElementById('setup-url').value=SUPA_URL||'';
+document.getElementById('setup-key').value=SUPA_KEY||'';
+document.getElementById('setup-err').textContent=opts.error||'';
+document.getElementById('setup-title').textContent=opts.title||'Connect your database';
+// Offer Cancel only when we already have working creds to fall back to.
+document.getElementById('setup-cancel').style.display=(SUPA_URL&&SUPA_KEY&&opts.cancelable)?'block':'none';
+var urlInp=document.getElementById('setup-url');
+if(!SUPA_URL) urlInp.focus();
+}
+window.saveSupabaseCreds=function(){
+var url=document.getElementById('setup-url').value.trim().replace(/\/+$/,'');
+var key=document.getElementById('setup-key').value.trim();
+var err=document.getElementById('setup-err');
+if(!/^https?:\/\//.test(url)){err.textContent='Project URL should start with https://';return;}
+if(key.length<20){err.textContent='That anon key looks too short — copy the full key.';return;}
+SUPA_URL=url;SUPA_KEY=key;
+try{localStorage.setItem(SUPA_URL_KEY,url);localStorage.setItem(SUPA_KEY_KEY,key);}catch(e){}
+document.getElementById('setup').style.display='none';
+document.getElementById('loading').classList.remove('hidden');
+document.getElementById('loading-msg').textContent='Connecting...';
+loadAll();
+};
+window.openReconnect=function(){
+showSetup({title:'Change Supabase connection',cancelable:true});
+};
+window.cancelReconnect=function(){
+document.getElementById('setup').style.display='none';
+document.getElementById('loading').classList.add('hidden');
+};
+function onConnectionError(e){
+console.error(e);
+// Surface the setup screen so bad/expired keys (or missing tables) can be
+// fixed without editing code. Keeps whatever was entered so it can be tweaked.
+showSetup({
+title:'Couldn’t connect',
+error:'Connection failed. Double-check the URL and anon key, and that you ran schema.sql.',
+cancelable:true
+});
+}
+document.getElementById('setup-key').addEventListener('keydown',function(e){if(e.key==='Enter')saveSupabaseCreds();});
+function boot(){
+if(SUPA_URL&&SUPA_KEY){loadAll();}
+else{showSetup({title:'Connect your database'});}
+}
+boot();
+</script>
+</body>
+</html>
