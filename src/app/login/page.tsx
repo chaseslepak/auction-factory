@@ -115,7 +115,7 @@ function LoginForm() {
           />
         </div>
         <h1 className="text-white font-black text-lg tracking-[0.2em] uppercase">
-          AF Social Automation
+          Auction Factory
         </h1>
         <p className="text-gray-400 text-sm tracking-[0.15em] uppercase mt-1">
           Official Lotter
