@@ -61,7 +61,7 @@ export default function AuditPage() {
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <p className="text-sm text-gray-500">
             Fetches the linked AF auction and compares its lots against this
-            auction's lots in the lotter. Read-only — nothing is changed.
+            auction&apos;s lots in the lotter. Read-only — nothing is changed.
           </p>
           <div className="mt-3">
             <GradientButton onClick={runAudit} loading={loading}>
