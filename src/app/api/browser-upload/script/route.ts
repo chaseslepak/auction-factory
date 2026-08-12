@@ -15,13 +15,22 @@ export async function GET(request: NextRequest) {
       headers: { 'Content-Type': 'application/javascript; charset=utf-8', ...CORS_HEADERS },
     });
   }
+  const lotsParam = request.nextUrl.searchParams.get('lots') || '';
 
   const origin = request.nextUrl.origin;
 
-  const script = `// Auction Factory Browser Upload - Token: ${token.substring(0, 8)}...
+  const exportUrl =
+    origin +
+    '/api/browser-upload/export?token=' +
+    encodeURIComponent(token) +
+    (lotsParam ? '&lots=' + encodeURIComponent(lotsParam) : '');
+
+  const script = `// Auction Factory Browser Upload - Token: ${token.substring(0, 8)}...${lotsParam ? ` (lots=${lotsParam})` : ''}
 (async () => {
   const TOKEN = '${token}';
   const API = '${origin}';
+  const EXPORT_URL = ${JSON.stringify(exportUrl)};
+  const LOTS_PARAM = ${JSON.stringify(lotsParam)};
 
   // Create status UI
   const existing = document.getElementById('au-upload-status');
@@ -42,7 +51,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // Fetch lot data
-    const res = await fetch(API + '/api/browser-upload/export?token=' + TOKEN);
+    const res = await fetch(EXPORT_URL);
     if (!res.ok) {
       const errText = await res.text();
       setMsg('ERROR: ' + errText.substring(0, 200));
@@ -54,13 +63,21 @@ export async function GET(request: NextRequest) {
       return;
     }
     if (!data.lots || data.lots.length === 0) {
-      setMsg('No lots to upload', 'All lots already uploaded');
+      setMsg('No lots to upload', LOTS_PARAM ? 'None of the requested lots exist' : 'All lots already uploaded');
       return;
     }
 
     const afAuc = data.af_auction_id;
     const lots = data.lots;
-    setMsg('Got ' + lots.length + ' lots', 'Loading AF form...');
+    const first = lots[0].lot_number;
+    const last = lots[lots.length - 1].lot_number;
+    const scopeMsg = LOTS_PARAM
+      ? 'Range ' + LOTS_PARAM + ' -> ' + lots.length + ' lots (#' + first + ' -> #' + last + ')'
+      : lots.length + ' lots (#' + first + ' -> #' + last + ')';
+    if (data.missing && data.missing.length) {
+      console.warn('[AU] Requested lots not in lotter: ' + data.missing.join(','));
+    }
+    setMsg(scopeMsg, 'Loading AF form...');
 
     // Fetch the add_item form to get hidden fields
     const formUrl = '/admin/add_item_2new.php?auction=' + afAuc;

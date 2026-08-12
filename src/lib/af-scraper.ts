@@ -52,7 +52,12 @@ function parseAuctionName(html: string): string {
   return 'Unknown Auction';
 }
 
-// Parse all items from the auction listing page
+// Parse all items from the auction listing page.
+// NOTE: falling back to the loop index for lot_number is a bug — it makes
+// page 2's items collide with page 1's (the classic "+200 offset" the
+// audit page hit). Instead: leave lot_number null when we can't parse it
+// and let the caller decide. Also make the regex tolerant of whitespace,
+// nbsp, and comma-thousands separators seen on some AF pages.
 function parseAuctionItems(html: string): ScrapedAFItem[] {
   const items: ScrapedAFItem[] = [];
 
@@ -62,9 +67,16 @@ function parseAuctionItems(html: string): ScrapedAFItem[] {
   for (let i = 1; i < itemBlocks.length; i++) {
     const block = itemBlocks[i];
 
-    // Extract lot number (first number after the split point)
-    const lotMatch = block.match(/^\s*(\d+)/);
-    const lot_number = lotMatch ? parseInt(lotMatch[1]) : i;
+    // Strip HTML tags for lot-number extraction only, then grab the first
+    // run of digits (optionally with thousands commas / non-breaking space
+    // padding).
+    const lotHeader = block.slice(0, 200).replace(/<[^>]*>/g, '');
+    const lotMatch = lotHeader.match(/[\s ]*([\d,]+)/);
+    let lot_number: number | null = null;
+    if (lotMatch) {
+      const parsed = parseInt(lotMatch[1].replace(/,/g, ''), 10);
+      if (!Number.isNaN(parsed)) lot_number = parsed;
+    }
 
     // Extract item detail link and item ID
     const detailMatch = block.match(/item_detail\.php\?item=(\d+)/);
