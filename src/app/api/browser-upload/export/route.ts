@@ -42,11 +42,46 @@ export async function OPTIONS(request: NextRequest) {
   return new NextResponse(null, { status: 204, headers: corsHeaders(request, 'GET, POST, OPTIONS') });
 }
 
+// Parse a lots= range string like "183-227,249-279,251" into a sorted
+// deduped list of integers. Returns null if the string can't be parsed
+// (any bad segment fails the whole thing so callers know to reject).
+function parseLotsParam(raw: string): number[] | null {
+  const out = new Set<number>();
+  const segments = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  for (const seg of segments) {
+    const rangeMatch = seg.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rangeMatch) {
+      const from = parseInt(rangeMatch[1], 10);
+      const to = parseInt(rangeMatch[2], 10);
+      if (Number.isNaN(from) || Number.isNaN(to) || from > to) return null;
+      for (let n = from; n <= to; n++) out.add(n);
+      continue;
+    }
+    if (/^\d+$/.test(seg)) {
+      out.add(parseInt(seg, 10));
+      continue;
+    }
+    return null;
+  }
+  return Array.from(out).sort((a, b) => a - b);
+}
+
 export async function GET(request: NextRequest) {
   const CORS_HEADERS = corsHeaders(request, 'GET, POST, OPTIONS');
   const token = request.nextUrl.searchParams.get('token');
   if (!token) {
     return NextResponse.json({ error: 'token required' }, { status: 400, headers: CORS_HEADERS });
+  }
+  const lotsParam = request.nextUrl.searchParams.get('lots');
+  let requestedLots: number[] | null = null;
+  if (lotsParam) {
+    requestedLots = parseLotsParam(lotsParam);
+    if (requestedLots === null) {
+      return NextResponse.json(
+        { error: `Bad lots param: ${lotsParam}. Use "183-227,249-279,251" format.` },
+        { status: 400, headers: CORS_HEADERS }
+      );
+    }
   }
 
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -78,14 +113,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'No AF auction linked' }, { status: 400, headers: CORS_HEADERS });
   }
 
-  // Get all lots that haven't been uploaded yet, sorted by lot_number
-  const { data: lots } = await supabase
+  // When `lots=` is supplied, return exactly those numbers regardless of
+  // upload status. Otherwise fall back to "everything not yet uploaded".
+  // AF numbers items by insertion order — the returned array order becomes
+  // AF lot numbering — so both branches sort ascending by lot_number.
+  let query = supabase
     .from('lots')
     .select('*, lot_photos(*)')
     .eq('auction_id', tokenRow.auction_id)
     .is('deleted_at', null)
-    .neq('af_upload_status', 'uploaded')
     .order('lot_number', { ascending: true });
+
+  if (requestedLots !== null) {
+    query = query.in('lot_number', requestedLots);
+  } else {
+    query = query.neq('af_upload_status', 'uploaded');
+  }
+
+  const { data: lots } = await query;
 
   // Shape data for the browser script
   const shaped = (lots || []).map((lot: any) => ({
@@ -115,11 +160,21 @@ export async function GET(request: NextRequest) {
       .map((p: any) => supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl),
   }));
 
+  // Compute which requested lots don't exist in the lotter, so callers
+  // can tell if they typed a bad number.
+  let missing: number[] | undefined;
+  if (requestedLots !== null) {
+    const present = new Set(shaped.map((l) => l.lot_number));
+    missing = requestedLots.filter((n) => !present.has(n));
+    if (missing.length === 0) missing = undefined;
+  }
+
   return NextResponse.json(
     {
       af_auction_id: mapping.af_auction_id,
       total: shaped.length,
       lots: shaped,
+      ...(missing ? { missing } : {}),
     },
     { headers: CORS_HEADERS }
   );

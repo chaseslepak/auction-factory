@@ -4,9 +4,19 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Header from '@/components/Header';
 
+interface Preview {
+  total: number;
+  first?: number;
+  last?: number;
+  missing?: number[];
+}
+
 export default function BrowserUploadPage() {
   const { id } = useParams<{ id: string }>();
   const [token, setToken] = useState<string | null>(null);
+  const [lotsRange, setLotsRange] = useState('');
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,10 +44,53 @@ export default function BrowserUploadPage() {
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
-  // Loader script: downloads the full script from our server and runs it.
-  // This keeps what the user pastes short and always up-to-date.
-  const loaderScript = token
-    ? `fetch('${origin}/api/browser-upload/script?token=${token}').then(r=>r.text()).then(eval);`
+  // Preview what the export would return with the current token + range
+  const runPreview = async () => {
+    if (!token) return;
+    setPreviewing(true);
+    setPreview(null);
+    setError(null);
+    try {
+      const url =
+        `${origin}/api/browser-upload/export?token=${encodeURIComponent(token)}` +
+        (lotsRange.trim() ? `&lots=${encodeURIComponent(lotsRange.trim())}` : '');
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      const nums = (data.lots || []).map((l: any) => l.lot_number);
+      setPreview({
+        total: data.lots?.length || 0,
+        first: nums[0],
+        last: nums[nums.length - 1],
+        missing: data.missing,
+      });
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  // Auto-preview when token appears or the range changes
+  useEffect(() => {
+    if (!token) {
+      setPreview(null);
+      return;
+    }
+    const t = setTimeout(runPreview, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, lotsRange]);
+
+  const loaderUrl = token
+    ? `${origin}/api/browser-upload/script?token=${encodeURIComponent(token)}` +
+      (lotsRange.trim() ? `&lots=${encodeURIComponent(lotsRange.trim())}` : '')
+    : '';
+  const loaderScript = loaderUrl
+    ? `fetch('${loaderUrl}').then(r=>r.text()).then(eval);`
     : '';
 
   const copyScript = async () => {
@@ -82,13 +135,63 @@ export default function BrowserUploadPage() {
           </button>
         ) : (
           <>
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-3">
+              <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide">
+                Optional: lot range
+              </h3>
+              <p className="text-xs text-gray-500">
+                Leave blank to push every lot not yet uploaded. Or specify exact numbers to
+                push — ignores the &ldquo;already uploaded&rdquo; flag. Format:{' '}
+                <code className="text-brand-blue">183-227,249-279,251</code>.
+              </p>
+              <input
+                type="text"
+                value={lotsRange}
+                onChange={(e) => setLotsRange(e.target.value)}
+                placeholder="e.g. 183-227"
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-brand-blue"
+              />
+              {previewing ? (
+                <p className="text-xs text-gray-400">Previewing…</p>
+              ) : preview ? (
+                <div className="text-xs">
+                  {preview.total === 0 ? (
+                    <p className="text-red-600">
+                      Nothing to push{lotsRange.trim() ? ` for range "${lotsRange.trim()}"` : ''}.
+                    </p>
+                  ) : (
+                    <p className="text-brand-navy">
+                      Will push <strong>{preview.total}</strong> lot
+                      {preview.total === 1 ? '' : 's'}
+                      {preview.first != null && (
+                        <>
+                          {' '}(<strong>#{preview.first}</strong>
+                          {preview.last != null && preview.last !== preview.first && (
+                            <>
+                              {' → '}<strong>#{preview.last}</strong>
+                            </>
+                          )})
+                        </>
+                      )}
+                    </p>
+                  )}
+                  {preview.missing && preview.missing.length > 0 && (
+                    <p className="text-yellow-700 mt-1">
+                      Requested but not in lotter: {preview.missing.join(', ')}
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
             <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
               <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-2">
                 Script ready — valid 24 hours
               </h3>
               <button
                 onClick={copyScript}
-                className="w-full py-3 rounded-lg bg-brand-green text-white font-bold text-sm uppercase tracking-wide mb-3"
+                disabled={!preview || preview.total === 0}
+                className="w-full py-3 rounded-lg bg-brand-green text-white font-bold text-sm uppercase tracking-wide mb-3 disabled:opacity-50"
               >
                 {copied ? '✓ Copied to clipboard' : 'Copy Script'}
               </button>
@@ -100,7 +203,11 @@ export default function BrowserUploadPage() {
               </details>
             </div>
             <button
-              onClick={() => setToken(null)}
+              onClick={() => {
+                setToken(null);
+                setPreview(null);
+                setLotsRange('');
+              }}
               className="w-full py-2 text-xs font-bold text-gray-400"
             >
               Generate new token
