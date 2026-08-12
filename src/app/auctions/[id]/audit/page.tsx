@@ -29,6 +29,38 @@ export default function AuditPage() {
   const [result, setResult] = useState<AuditResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetResult, setResetResult] = useState<{ reset_count: number } | null>(
+    null
+  );
+
+  const resetMissing = async () => {
+    if (!result) return;
+    const count = result.only_in_lotter.length;
+    if (!confirm(`Reset ${count} lots to pending so they'll be picked up by the next Browser Upload?`)) {
+      return;
+    }
+    setResetting(true);
+    setResetResult(null);
+    try {
+      const res = await fetch(`/api/audit-auction/${id}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+      } else {
+        setResetResult({ reset_count: data.reset_count });
+        await runAudit();
+      }
+    } catch (err: any) {
+      setError(err?.message || String(err));
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const runAudit = async () => {
     setLoading(true);
@@ -58,16 +90,32 @@ export default function AuditPage() {
       <Header title="Audit AF vs Lotter" backHref={`/auctions/${id}`} />
 
       <div className="p-4 space-y-4">
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-3">
           <p className="text-sm text-gray-500">
             Fetches the linked AF auction and compares its lots against this
-            auction&apos;s lots in the lotter. Read-only — nothing is changed.
+            auction&apos;s lots in the lotter. Read-only unless you tap the
+            reset button.
           </p>
-          <div className="mt-3">
-            <GradientButton onClick={runAudit} loading={loading}>
-              {loading ? 'Auditing…' : 'Re-run audit'}
-            </GradientButton>
-          </div>
+          <GradientButton onClick={runAudit} loading={loading}>
+            {loading ? 'Auditing…' : 'Re-run audit'}
+          </GradientButton>
+          {result && result.only_in_lotter.length > 0 && (
+            <button
+              onClick={resetMissing}
+              disabled={resetting}
+              className="w-full py-2.5 rounded-full border-2 border-yellow-500 text-yellow-700 font-black text-xs uppercase tracking-wide disabled:opacity-50"
+            >
+              {resetting
+                ? 'Resetting…'
+                : `Reset ${result.only_in_lotter.length} only-in-lotter lots for re-upload`}
+            </button>
+          )}
+          {resetResult && (
+            <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-2">
+              Reset {resetResult.reset_count} lots. Run HQ Push to AF (Browser
+              Upload) to send them.
+            </p>
+          )}
         </div>
 
         {error && (
