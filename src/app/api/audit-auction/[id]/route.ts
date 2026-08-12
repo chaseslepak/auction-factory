@@ -176,3 +176,105 @@ export async function GET(
     possible_name_mismatches: numberCollisions,
   });
 }
+
+// POST /api/audit-auction/[id]
+// Re-runs the audit, then for every "only in lotter" lot number, resets its
+// af_upload_status to null so the next Browser Upload picks it up.
+// Body: { confirm: true } — must include to actually mutate.
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const userClient = createClient();
+  const {
+    data: { user },
+  } = await userClient.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  if (body?.confirm !== true) {
+    return NextResponse.json(
+      { error: 'Missing confirm: true in body' },
+      { status: 400 }
+    );
+  }
+
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) {
+    return NextResponse.json(
+      { error: 'Service role key not configured' },
+      { status: 500 }
+    );
+  }
+  const supabase = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serviceKey
+  );
+
+  const auctionId = params.id;
+
+  const [{ data: mapRow }, { data: lots }] = await Promise.all([
+    supabase
+      .from('af_auction_map')
+      .select('af_auction_id')
+      .eq('auction_id', auctionId)
+      .single(),
+    supabase
+      .from('lots')
+      .select('lot_number')
+      .eq('auction_id', auctionId)
+      .is('deleted_at', null),
+  ]);
+
+  if (!mapRow) {
+    return NextResponse.json(
+      { error: 'This auction is not linked to an AF auction.' },
+      { status: 400 }
+    );
+  }
+
+  const afUrl = `https://www.auctionfactory.com/auction_details.php?auction=${mapRow.af_auction_id}`;
+  let scraped;
+  try {
+    scraped = await scrapeAuction(afUrl, false);
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: `Failed to scrape AF: ${err?.message || String(err)}` },
+      { status: 502 }
+    );
+  }
+
+  const afNumbers = new Set<number>();
+  scraped.items.forEach((it) => {
+    if (it.lot_number != null) afNumbers.add(it.lot_number);
+  });
+
+  const toReset = (lots || [])
+    .map((l) => l.lot_number)
+    .filter((n) => !afNumbers.has(n));
+
+  if (toReset.length === 0) {
+    return NextResponse.json({ reset_count: 0, lot_numbers: [] });
+  }
+
+  const { error: updateError } = await supabase
+    .from('lots')
+    .update({ af_upload_status: null, af_upload_error: null })
+    .eq('auction_id', auctionId)
+    .in('lot_number', toReset)
+    .is('deleted_at', null);
+
+  if (updateError) {
+    return NextResponse.json(
+      { error: `Update failed: ${updateError.message}` },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({
+    reset_count: toReset.length,
+    lot_numbers: toReset.sort((a, b) => a - b),
+  });
+}
