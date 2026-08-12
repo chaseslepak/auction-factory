@@ -7,7 +7,7 @@ import { updateSession } from '@/lib/supabase/middleware';
 // /api/admin-create-user requires an authenticated ALLOWED_EMAILS user; we
 // keep it out of the middleware allowlist so middleware redirects unauth'd
 // browser-form calls to /login as usual.
-const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/jobs/process', '/api/af-keepalive', '/api/browser-upload'];
+const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/jobs/process', '/api/af-keepalive', '/api/browser-upload', '/manual', '/api/sop'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
