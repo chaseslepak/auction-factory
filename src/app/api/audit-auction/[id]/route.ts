@@ -74,7 +74,8 @@ export async function GET(
     );
   }
 
-  const lotterByNumber = new Map<number, (typeof lots)[number]>();
+  type LotterRow = NonNullable<typeof lots>[number];
+  const lotterByNumber = new Map<number, LotterRow>();
   (lots || []).forEach((l) => lotterByNumber.set(l.lot_number, l));
 
   // Group AF items by lot number to detect duplicates within AF itself
@@ -135,10 +136,14 @@ export async function GET(
       // Rough mismatch heuristic: neither side is empty AND no significant
       // overlap in words
       if (lotterItem && afTitle) {
-        const lotterWords = new Set(lotterItem.split(/\s+/).filter((w) => w.length > 3));
-        const afWords = new Set(afTitle.split(/\s+/).filter((w) => w.length > 3));
+        const lotterWords = new Set<string>(
+          lotterItem.split(/\s+/).filter((w: string) => w.length > 3)
+        );
+        const afWords = new Set<string>(
+          afTitle.split(/\s+/).filter((w: string) => w.length > 3)
+        );
         let overlap = 0;
-        lotterWords.forEach((w) => {
+        lotterWords.forEach((w: string) => {
           if (afWords.has(w)) overlap++;
         });
         if (overlap === 0 && lotterWords.size > 0 && afWords.size > 0) {
