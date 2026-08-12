@@ -800,6 +800,12 @@ export default function AuctionDetailPage() {
               >
                 🌐 HQ Push to AF (Browser Upload)
               </Link>
+              <Link
+                href={`/auctions/${id}/audit`}
+                className="w-full block text-center py-2 rounded-xl border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide"
+              >
+                Audit AF vs Lotter
+              </Link>
               <button
                 onClick={handleUploadToAf}
                 disabled={uploading}
