@@ -3,6 +3,13 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { corsHeaders } from '@/lib/browser-upload-cors';
 
 export const maxDuration = 60;
+// Never allow this route to be statically prerendered — query string is
+// meaningful and must always be re-evaluated.
+export const dynamic = 'force-dynamic';
+
+// Bump this whenever the export contract changes so external callers can
+// verify a deploy actually shipped by inspecting the response.
+const BUILD_TAG = 'range-v1';
 
 // AF condition labels matching their dropdown
 const CONDITION_MAP: Record<number, string> = {
@@ -172,9 +179,10 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
       af_auction_id: mapping.af_auction_id,
+      build: BUILD_TAG,
       total: shaped.length,
+      missing: missing ?? [],
       lots: shaped,
-      ...(missing ? { missing } : {}),
     },
     { headers: CORS_HEADERS }
   );
