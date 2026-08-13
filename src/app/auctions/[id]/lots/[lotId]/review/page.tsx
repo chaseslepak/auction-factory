@@ -102,10 +102,13 @@ export default function LotReviewPage() {
       checkDuplicates();
     } else {
       const fetchLot = async () => {
+        // Skip soft-deleted rows so a bookmark to a trashed lot can't
+        // be used to hit "Re-upload" and push it back to AF.
         const { data } = await supabase
           .from('lots')
           .select('*, lot_photos(*)')
           .eq('id', lotId)
+          .is('deleted_at', null)
           .single();
         if (data) {
           setExistingLot(data as LotWithPhotos);
@@ -267,8 +270,16 @@ export default function LotReviewPage() {
         return;
       }
 
-      // Poll until this lot's job is no longer pending/processing
-      const pollJob = async (): Promise<void> => {
+      // Poll until this lot's job is no longer pending/processing. Cap
+      // at 60 polls (~3 min) so a stuck job (Anthropic outage, orphaned
+      // pending row) can't spin the poller forever.
+      const MAX_JOB_POLLS = 60;
+      const pollJob = async (attempts = 0): Promise<void> => {
+        if (attempts >= MAX_JOB_POLLS) {
+          setStockImageMsg('Still running after 3 min — closed the poll. Check Admin → Jobs and reopen this lot.');
+          setFindingStockImage(false);
+          return;
+        }
         try {
           const { data: jobs } = await supabase
             .from('jobs')
@@ -282,7 +293,7 @@ export default function LotReviewPage() {
           // Kick the processor if the job is still pending and nothing's picked it up
           if (job?.status === 'pending' || job?.status === 'processing') {
             fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
-            setTimeout(pollJob, 3000);
+            setTimeout(() => pollJob(attempts + 1), 3000);
             return;
           }
 
@@ -318,11 +329,19 @@ export default function LotReviewPage() {
     setReuploading(true);
     setError(null);
     try {
-      // Reset upload status
-      await supabase
+      // Reset upload status. If this silently fails (RLS / network), the
+      // subsequent /api/af-upload hits the SAFETY GUARD and returns
+      // "Already uploaded to AF — refusing to re-send", which is
+      // confusing. Abort here with a clearer message instead.
+      const { error: resetErr } = await supabase
         .from('lots')
         .update({ af_upload_status: null, af_upload_error: null })
         .eq('id', existingLot.id);
+      if (resetErr) {
+        setError(`Couldn't clear the upload status before re-uploading: ${resetErr.message}`);
+        setReuploading(false);
+        return;
+      }
 
       // Upload
       const res = await fetch('/api/af-upload', {
@@ -447,37 +466,49 @@ export default function LotReviewPage() {
           }
         }
 
-        // Upload user photos
+        // Upload user photos. A single failed photo upload should NOT
+        // abort the whole range — the lot row is already saved, so
+        // aborting here would leave partial state without advancing the
+        // localStorage counter, forcing the user into a duplicate-lot-#
+        // error on their next attempt. Log and continue instead.
         for (let j = 0; j < photos.length; j++) {
-          const base64 = photos[j].replace(/^data:image\/\w+;base64,/, '');
-          const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-          const blob = new Blob([buffer], { type: 'image/jpeg' });
+          try {
+            const base64 = photos[j].replace(/^data:image\/\w+;base64,/, '');
+            const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+            const blob = new Blob([buffer], { type: 'image/jpeg' });
 
-          const storagePath = `${auctionId}/${lotData.id}/${photoIndex + j}.jpg`;
+            const storagePath = `${auctionId}/${lotData.id}/${photoIndex + j}.jpg`;
 
-          const { error: uploadError } = await supabase.storage
-            .from('lot-photos')
-            .upload(storagePath, blob, { contentType: 'image/jpeg' });
+            const { error: uploadError } = await supabase.storage
+              .from('lot-photos')
+              .upload(storagePath, blob, { contentType: 'image/jpeg' });
 
-          if (uploadError) throw uploadError;
+            if (uploadError) {
+              console.warn(`Photo ${j} upload failed for lot #${lotNumber}:`, uploadError);
+              continue;
+            }
 
-          await supabase.from('lot_photos').insert({
-            lot_id: lotData.id,
-            storage_path: storagePath,
-            display_order: photoIndex + j,
-          });
+            await supabase.from('lot_photos').insert({
+              lot_id: lotData.id,
+              storage_path: storagePath,
+              display_order: photoIndex + j,
+            });
+          } catch (photoErr) {
+            console.warn(`Photo ${j} exception for lot #${lotNumber}:`, photoErr);
+          }
         }
+
+        // Persist "next lot" pointer INSIDE the loop after every successful
+        // insert, not just after the whole range completes. If a later
+        // iteration throws (duplicate-key collision, network blip, etc.)
+        // the user's next visit still defaults past what's already saved
+        // instead of colliding with it.
+        try {
+          localStorage.setItem(`lotter-next-${auctionId}`, String(lotNumber + 1));
+        } catch {}
 
         setSaveProgress({ current: i + 1, total: lotsToCreate });
       }
-
-      // Advance this lotter's persisted next-lot-number so the next visit to
-      // new-lot defaults to the right value. Keeps two-lotter coordination
-      // working without anyone having to retype their starting number.
-      const lastSavedNumber = nextLotNumber + lotsToCreate - 1;
-      try {
-        localStorage.setItem(`lotter-next-${auctionId}`, String(lastSavedNumber + 1));
-      } catch {}
 
       // Clear pending data
       sessionStorage.removeItem('pending-lot');

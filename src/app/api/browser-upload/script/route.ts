@@ -251,6 +251,23 @@ export async function GET(request: NextRequest) {
         fail++;
         failedLots.push(lot.lot_number);
         console.error('[AU] Lot #' + lot.lot_number + ' error:', e);
+        // Mark the lot as failed so a re-run knows to retry only these
+        // and doesn't re-push a lot that AF might have quietly accepted
+        // before the exception (which would create a duplicate).
+        try {
+          await fetch(API + '/api/browser-upload/mark', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token: TOKEN,
+              lot_id: lot.id,
+              status: 'failed',
+              error: 'Browser upload threw: ' + (e && e.message ? e.message : String(e)),
+            }),
+          });
+        } catch (markErr) {
+          console.error('[AU] Also failed to mark lot #' + lot.lot_number + ' as failed:', markErr);
+        }
       }
 
       // Short delay between uploads (be gentle to AF)
