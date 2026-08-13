@@ -10,6 +10,7 @@ const sections = [
   { href: '/admin/sop', title: 'SOP / Manual', desc: 'How to use the Auction Factory Official Lotter — step by step guide' },
   { href: '/admin/jobs', title: 'Jobs', desc: 'View background job status, errors, retry failed' },
   { href: '/admin/trash', title: 'Trash', desc: 'Restore or permanently delete removed lots' },
+  { href: '/admin/storage', title: 'Storage Cleanup', desc: 'Purge photos from archived auctions to reclaim Supabase storage' },
   { href: '/admin/users', title: 'Users', desc: 'Manage authorized emails' },
   { href: '/admin/activity', title: 'Activity Log', desc: 'See what happened and when' },
   { href: '/admin/costs', title: 'API Costs', desc: 'Anthropic API spending breakdown' },
