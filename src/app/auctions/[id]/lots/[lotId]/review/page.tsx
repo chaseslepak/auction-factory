@@ -121,7 +121,7 @@ export default function LotReviewPage() {
             width: data.width || '',
             depth: data.depth || '',
             height: data.height || '',
-            key_features: data.key_features || [],
+            key_features: Array.isArray(data.key_features) ? data.key_features : [],
             stock_image_url: '',
             auction_description: data.auction_description || '',
           });
@@ -502,7 +502,7 @@ export default function LotReviewPage() {
           confidence: existingLot.confidence || 'medium',
           estimated_retail_new: existingLot.estimated_retail_new || 0,
           listed_price: existingLot.listed_price || 0,
-          key_features: existingLot.key_features || [],
+          key_features: Array.isArray(existingLot.key_features) ? existingLot.key_features : [],
           auction_description: existingLot.auction_description || '',
         }
       : null;
@@ -864,7 +864,7 @@ export default function LotReviewPage() {
         </div>
 
         {/* Key features */}
-        {displayListing.key_features && displayListing.key_features.length > 0 && (
+        {Array.isArray(displayListing.key_features) && displayListing.key_features.length > 0 && (
           <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
             <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-2">
               Key Features
@@ -1023,7 +1023,7 @@ export default function LotReviewPage() {
                       width: (existingLot as any).width || '',
                       depth: (existingLot as any).depth || '',
                       height: (existingLot as any).height || '',
-                      key_features: existingLot.key_features || [],
+                      key_features: Array.isArray(existingLot.key_features) ? existingLot.key_features : [],
                       stock_image_url: '',
                       auction_description: existingLot.auction_description || '',
                     });
