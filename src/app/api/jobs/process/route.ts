@@ -4,7 +4,6 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { processStockImageJob } from '@/lib/stock-image-processor';
 import { processDeepRescanJob } from '@/lib/deep-rescan-processor';
-import { processPlatformContentJob, processFbPagePostJob } from '@/lib/platform-job-processors';
 
 export const maxDuration = 60;
 
@@ -68,7 +67,7 @@ export async function POST(request: NextRequest) {
         .from('jobs')
         .select('*')
         .eq('status', 'pending')
-        .in('type', ['refresh_stock_images', 'deep_rescan', 'generate_platform_content', 'post_fb_page'])
+        .in('type', ['refresh_stock_images', 'deep_rescan'])
         .order('created_at', { ascending: true })
         .limit(1);
 
@@ -96,10 +95,6 @@ export async function POST(request: NextRequest) {
         const processor =
           job.type === 'deep_rescan'
             ? processDeepRescanJob(supabase, anthropic, job.lot_id)
-            : job.type === 'generate_platform_content'
-            ? processPlatformContentJob(supabase, anthropic, job)
-            : job.type === 'post_fb_page'
-            ? processFbPagePostJob(supabase, job)
             : processStockImageJob(supabase, anthropic, job.lot_id);
 
         // Deep rescan gets a longer timeout (uses Opus)
