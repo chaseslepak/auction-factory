@@ -129,30 +129,48 @@ export default function AuctionDetailPage() {
           text: `Re-uploading batch ${i + 1}/${batches.length} (${totalSucceeded}/${uploaded.length} done)...`,
         });
 
-        const res = await fetch('/api/af-upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            auction_id: id,
-            lot_ids: batches[i],
-          }),
-        });
+        // Wrap each batch in its own try so one malformed response (AF
+        // returning HTML for a 502, or a missing `results` key) doesn't
+        // abort the whole run.
+        try {
+          const res = await fetch('/api/af-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              auction_id: id,
+              lot_ids: batches[i],
+            }),
+          });
 
-        const data = await res.json();
-        if (data.error) {
-          lastError = data.error;
-          totalFailed += batches[i].length;
-          if (data.error.includes('session expired') || data.error.includes('Please re-login')) {
-            break;
+          const responseText = await res.text();
+          let data: any;
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            lastError = `Batch ${i + 1}: non-JSON response (status ${res.status})`;
+            totalFailed += batches[i].length;
+            continue;
           }
-          continue;
-        }
 
-        const succeeded = data.results.filter((r: any) => r.success).length;
-        const failed = data.results.filter((r: any) => !r.success).length;
-        totalSucceeded += succeeded;
-        totalFailed += failed;
-        fetchData();
+          if (data.error) {
+            lastError = data.error;
+            totalFailed += batches[i].length;
+            if (data.error.includes('session expired') || data.error.includes('Please re-login')) {
+              break;
+            }
+            continue;
+          }
+
+          const resultsArr = Array.isArray(data.results) ? data.results : [];
+          const succeeded = resultsArr.filter((r: any) => r.success).length;
+          const failed = resultsArr.filter((r: any) => !r.success).length;
+          totalSucceeded += succeeded;
+          totalFailed += failed;
+          fetchData();
+        } catch (batchErr: any) {
+          lastError = `Batch ${i + 1}: ${batchErr?.message || String(batchErr)}`;
+          totalFailed += batches[i].length;
+        }
       }
 
       setUploadMsg({
@@ -214,7 +232,20 @@ export default function AuctionDetailPage() {
     }
   };
 
-  const pollJobStatus = async (lastDone = -1, stallCount = 0) => {
+  // Cap the poll loop so a stuck job (Anthropic outage, orphaned pending
+  // row, etc.) can't burn tablet battery and rack up processor kicks
+  // forever. 60 polls * 3s = 3 minutes before we back off.
+  const MAX_POLLS = 60;
+
+  const pollJobStatus = async (lastDone = -1, stallCount = 0, attempts = 0) => {
+    if (attempts >= MAX_POLLS) {
+      setRefreshing(false);
+      setUploadMsg({
+        type: 'error',
+        text: 'Still running after 3 min — closed the poll. Check Admin → Jobs for status; reopen this auction to resume.',
+      });
+      return;
+    }
     try {
       const res = await fetch(`/api/jobs/status?auction_id=${id}`);
       if (!res.ok) {
@@ -243,7 +274,7 @@ export default function AuctionDetailPage() {
         }
 
         // Still processing, poll again in 3 seconds
-        setTimeout(() => pollJobStatus(done, newStallCount), 3000);
+        setTimeout(() => pollJobStatus(done, newStallCount, attempts + 1), 3000);
       } else {
         // All done
         setRefreshing(false);
@@ -1009,7 +1040,7 @@ export default function AuctionDetailPage() {
                   <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center flex-shrink-0">
                     <span className="text-white font-black text-sm">#{lot.lot_number}</span>
                   </div>
-                  {lot.lot_photos[0] && (
+                  {lot.lot_photos?.[0] && (
                     <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
                       <img
                         src={getPhotoUrl(lot.lot_photos[0].storage_path)}
@@ -1035,7 +1066,7 @@ export default function AuctionDetailPage() {
                 </div>
 
                 {/* Thumbnail */}
-                {lot.lot_photos[0] && (
+                {lot.lot_photos?.[0] && (
                   <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
                     <img
                       src={getPhotoUrl(lot.lot_photos[0].storage_path)}

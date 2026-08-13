@@ -345,11 +345,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Get lots with photos
+  // Get lots with photos, skipping soft-deleted rows entirely so a lot
+  // trashed mid-batch by another user is never sent to AF.
   const { data: allRequestedLots } = await supabase
     .from('lots')
     .select('*, lot_photos(*)')
     .in('id', lot_ids)
+    .is('deleted_at', null)
     .order('lot_number', { ascending: true });
 
   if (!allRequestedLots?.length) {
@@ -361,8 +363,8 @@ export async function POST(request: NextRequest) {
   // buggy client (or someone hitting this endpoint directly) asks us to.
   // To intentionally re-upload a single lot, clear its af_upload_status first
   // (the review page's "Re-upload" button does this after a manual confirm).
-  const lots = allRequestedLots.filter((l: any) => l.af_upload_status !== 'uploaded');
   const skipped = allRequestedLots.filter((l: any) => l.af_upload_status === 'uploaded');
+  const candidates = allRequestedLots.filter((l: any) => l.af_upload_status !== 'uploaded');
 
   const results: { lot_id: string; lot_number: number; success: boolean; error?: string; skipped?: boolean }[] = [];
   for (const s of skipped) {
@@ -375,15 +377,43 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  if (lots.length === 0) {
+  if (candidates.length === 0) {
     return NextResponse.json({ results });
   }
 
-  // Mark lots as uploading (only the ones we will actually upload)
-  await supabase
+  // Atomic claim: mark as uploading only where status is still null/failed
+  // (not 'uploaded' and not already 'uploading'). This prevents two
+  // concurrent Server Upload runs from both grabbing the same lots and
+  // POSTing them to AF twice. Only rows returned from the update actually
+  // got claimed by us — other rows were already being handled elsewhere.
+  const { data: claimed } = await supabase
     .from('lots')
     .update({ af_upload_status: 'uploading', af_upload_error: null })
-    .in('id', lots.map((l: any) => l.id));
+    .in('id', candidates.map((l: any) => l.id))
+    .is('deleted_at', null)
+    .or('af_upload_status.is.null,af_upload_status.eq.queued,af_upload_status.eq.failed')
+    .select('id');
+
+  const claimedIds = new Set((claimed || []).map((r: any) => r.id));
+  const lots = candidates.filter((l: any) => claimedIds.has(l.id));
+
+  // Report any lots we couldn't claim so the caller knows another run is
+  // handling them — no error, just informational.
+  for (const c of candidates) {
+    if (!claimedIds.has(c.id)) {
+      results.push({
+        lot_id: c.id,
+        lot_number: c.lot_number,
+        success: false,
+        skipped: true,
+        error: 'Already being uploaded by another run — refusing to double-send.',
+      });
+    }
+  }
+
+  if (lots.length === 0) {
+    return NextResponse.json({ results });
+  }
 
   for (let i = 0; i < lots.length; i++) {
     const lot = lots[i];
