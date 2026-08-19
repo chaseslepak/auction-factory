@@ -34,6 +34,25 @@ export default function AuditPage() {
     marked_uploaded: number;
     cleared: number;
   } | null>(null);
+  const [relotCopied, setRelotCopied] = useState(false);
+  const [relotError, setRelotError] = useState<string | null>(null);
+
+  const copyRelotScript = async () => {
+    setRelotError(null);
+    try {
+      const res = await fetch(`/api/relot-script/${id}`);
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t.startsWith('//') ? t : `HTTP ${res.status}`);
+      }
+      const script = await res.text();
+      await navigator.clipboard.writeText(script);
+      setRelotCopied(true);
+      setTimeout(() => setRelotCopied(false), 2500);
+    } catch (err: any) {
+      setRelotError(err?.message || String(err));
+    }
+  };
 
   const syncStatuses = async () => {
     if (!result) return;
@@ -127,6 +146,28 @@ export default function AuditPage() {
               {syncResult.cleared} back to not-sent. Cleared lots will be
               picked up by the next Browser Upload.
             </p>
+          )}
+          {result && (
+            <>
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs text-gray-500 mb-2">
+                  <strong className="text-brand-navy">Renumber AF to match lotter:</strong>{' '}
+                  paste this script into AF admin&apos;s{' '}
+                  <code>relot_auction.php</code> page console to auto-fill
+                  every &ldquo;New Item #&rdquo; input, then click Save on
+                  the AF page.
+                </p>
+                <button
+                  onClick={copyRelotScript}
+                  className="w-full py-2.5 rounded-full border-2 border-brand-blue text-brand-blue font-black text-xs uppercase tracking-wide"
+                >
+                  {relotCopied ? '✓ Copied — paste into AF console' : 'Copy AF Re-Lot Fix Script'}
+                </button>
+                {relotError && (
+                  <p className="text-xs text-red-600 mt-2">{relotError}</p>
+                )}
+              </div>
+            </>
           )}
         </div>
 
