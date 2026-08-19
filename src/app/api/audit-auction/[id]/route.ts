@@ -178,9 +178,13 @@ export async function GET(
 }
 
 // POST /api/audit-auction/[id]
-// Re-runs the audit, then for every "only in lotter" lot number, resets its
-// af_upload_status to null so the next Browser Upload picks it up.
+// Re-scrapes AF and syncs the lotter's af_upload_status to match reality:
+//   * Lot numbers present on AF -> af_upload_status = 'uploaded'
+//   * Lot numbers not on AF     -> af_upload_status = null
 // Body: { confirm: true } — must include to actually mutate.
+// This makes the audit the source of truth and eliminates the class of
+// false-positive-success bugs where the browser script thinks it uploaded
+// but AF quietly rejected the item.
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -223,7 +227,7 @@ export async function POST(
       .single(),
     supabase
       .from('lots')
-      .select('lot_number')
+      .select('lot_number, af_upload_status')
       .eq('auction_id', auctionId)
       .is('deleted_at', null),
   ]);
@@ -251,30 +255,63 @@ export async function POST(
     if (it.lot_number != null) afNumbers.add(it.lot_number);
   });
 
-  const toReset = (lots || [])
-    .map((l) => l.lot_number)
-    .filter((n) => !afNumbers.has(n));
+  // Split lotter lots into two groups by their current AF presence.
+  // Only update rows whose status is actually wrong — no-op updates
+  // waste writes and thrash cache invalidation.
+  const toMarkUploaded: number[] = [];
+  const toClear: number[] = [];
+  (lots || []).forEach((l: any) => {
+    const isOnAf = afNumbers.has(l.lot_number);
+    const currentlyUploaded = l.af_upload_status === 'uploaded';
+    if (isOnAf && !currentlyUploaded) {
+      toMarkUploaded.push(l.lot_number);
+    } else if (!isOnAf && l.af_upload_status !== null) {
+      toClear.push(l.lot_number);
+    }
+  });
 
-  if (toReset.length === 0) {
-    return NextResponse.json({ reset_count: 0, lot_numbers: [] });
+  const errors: string[] = [];
+
+  if (toMarkUploaded.length > 0) {
+    const { error } = await supabase
+      .from('lots')
+      .update({ af_upload_status: 'uploaded', af_upload_error: null })
+      .eq('auction_id', auctionId)
+      .in('lot_number', toMarkUploaded)
+      .is('deleted_at', null);
+    if (error) errors.push(`mark-uploaded failed: ${error.message}`);
   }
 
-  const { error: updateError } = await supabase
-    .from('lots')
-    .update({ af_upload_status: null, af_upload_error: null })
-    .eq('auction_id', auctionId)
-    .in('lot_number', toReset)
-    .is('deleted_at', null);
+  if (toClear.length > 0) {
+    const { error } = await supabase
+      .from('lots')
+      .update({ af_upload_status: null, af_upload_error: null })
+      .eq('auction_id', auctionId)
+      .in('lot_number', toClear)
+      .is('deleted_at', null);
+    if (error) errors.push(`clear failed: ${error.message}`);
+  }
 
-  if (updateError) {
+  if (errors.length > 0) {
     return NextResponse.json(
-      { error: `Update failed: ${updateError.message}` },
+      {
+        error: errors.join('; '),
+        marked_uploaded: toMarkUploaded.length - (errors.some((e) => e.startsWith('mark')) ? toMarkUploaded.length : 0),
+        cleared: toClear.length - (errors.some((e) => e.startsWith('clear')) ? toClear.length : 0),
+      },
       { status: 500 }
     );
   }
 
   return NextResponse.json({
-    reset_count: toReset.length,
-    lot_numbers: toReset.sort((a, b) => a - b),
+    // Keep the legacy field name for backward compat with the existing UI —
+    // this now represents the total number of statuses corrected, not just
+    // "only in lotter". A newer UI field cleared_count / marked_uploaded_count
+    // gives the breakdown.
+    reset_count: toMarkUploaded.length + toClear.length,
+    marked_uploaded: toMarkUploaded.length,
+    cleared: toClear.length,
+    marked_uploaded_lot_numbers: toMarkUploaded.sort((a, b) => a - b),
+    cleared_lot_numbers: toClear.sort((a, b) => a - b),
   });
 }
