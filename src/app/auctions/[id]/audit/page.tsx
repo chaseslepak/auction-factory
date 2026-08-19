@@ -29,19 +29,29 @@ export default function AuditPage() {
   const [result, setResult] = useState<AuditResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [resetting, setResetting] = useState(false);
-  const [resetResult, setResetResult] = useState<{ reset_count: number } | null>(
-    null
-  );
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{
+    marked_uploaded: number;
+    cleared: number;
+  } | null>(null);
 
-  const resetMissing = async () => {
+  const syncStatuses = async () => {
     if (!result) return;
-    const count = result.only_in_lotter.length;
-    if (!confirm(`Reset ${count} lots to pending so they'll be picked up by the next Browser Upload?`)) {
+    // Only prompt if this will actually change anything.
+    const stale = result.only_in_lotter.length; // marked uploaded but AF doesn't have them → will be cleared
+    const onAf = result.counts.lotter_lots - stale; // rough estimate for confirmation copy
+    if (
+      !confirm(
+        `Sync lotter statuses to AF?\n\n` +
+          `• Lots on AF will be marked "uploaded".\n` +
+          `• Lots not on AF will be marked "not sent" so they push next time.\n\n` +
+          `About ${onAf} on AF, ${stale} not on AF.`
+      )
+    ) {
       return;
     }
-    setResetting(true);
-    setResetResult(null);
+    setSyncing(true);
+    setSyncResult(null);
     try {
       const res = await fetch(`/api/audit-auction/${id}`, {
         method: 'POST',
@@ -52,13 +62,16 @@ export default function AuditPage() {
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
       } else {
-        setResetResult({ reset_count: data.reset_count });
+        setSyncResult({
+          marked_uploaded: data.marked_uploaded ?? 0,
+          cleared: data.cleared ?? 0,
+        });
         await runAudit();
       }
     } catch (err: any) {
       setError(err?.message || String(err));
     } finally {
-      setResetting(false);
+      setSyncing(false);
     }
   };
 
@@ -94,26 +107,25 @@ export default function AuditPage() {
           <p className="text-sm text-gray-500">
             Fetches the linked AF auction and compares its lots against this
             auction&apos;s lots in the lotter. Read-only unless you tap the
-            reset button.
+            sync button.
           </p>
           <GradientButton onClick={runAudit} loading={loading}>
             {loading ? 'Auditing…' : 'Re-run audit'}
           </GradientButton>
-          {result && result.only_in_lotter.length > 0 && (
+          {result && (
             <button
-              onClick={resetMissing}
-              disabled={resetting}
+              onClick={syncStatuses}
+              disabled={syncing}
               className="w-full py-2.5 rounded-full border-2 border-yellow-500 text-yellow-700 font-black text-xs uppercase tracking-wide disabled:opacity-50"
             >
-              {resetting
-                ? 'Resetting…'
-                : `Reset ${result.only_in_lotter.length} only-in-lotter lots for re-upload`}
+              {syncing ? 'Syncing…' : 'Sync lotter statuses to AF'}
             </button>
           )}
-          {resetResult && (
+          {syncResult && (
             <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-2">
-              Reset {resetResult.reset_count} lots. Run HQ Push to AF (Browser
-              Upload) to send them.
+              Marked {syncResult.marked_uploaded} as uploaded, cleared{' '}
+              {syncResult.cleared} back to not-sent. Cleared lots will be
+              picked up by the next Browser Upload.
             </p>
           )}
         </div>
