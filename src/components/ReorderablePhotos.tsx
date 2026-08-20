@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 interface Photo {
   id: string;
@@ -25,6 +25,8 @@ export default function ReorderablePhotos({
 }) {
   const [dragging, setDragging] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const libraryInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragStart = (i: number) => {
     setDragging(i);
@@ -50,9 +52,6 @@ export default function ReorderablePhotos({
     setDragOver(null);
   };
 
-  // Touch handlers for mobile
-  const [touchStart, setTouchStart] = useState<number | null>(null);
-
   const moveUp = (i: number) => {
     if (i === 0) return;
     const newPhotos = [...photos];
@@ -65,6 +64,17 @@ export default function ReorderablePhotos({
     const newPhotos = [...photos];
     [newPhotos[i + 1], newPhotos[i]] = [newPhotos[i], newPhotos[i + 1]];
     onReorder(newPhotos.map((p) => p.id));
+  };
+
+  // Capture the FileList reference BEFORE clearing the input value,
+  // then reset the input so the same file can be picked again next time.
+  // Doing it in the reverse order can invalidate the FileList on some
+  // browsers (notably iOS Safari) before onAdd finishes reading it.
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!onAdd) return;
+    const files = e.target.files;
+    onAdd(files);
+    e.target.value = '';
   };
 
   return (
@@ -132,50 +142,50 @@ export default function ReorderablePhotos({
       ))}
       {canEdit && onAdd && (
         <>
-          {/* Camera-first — capture="environment" so Android opens the
-              rear camera directly instead of Google Photos. */}
-          <label
-            className="w-20 h-20 flex-shrink-0 rounded-lg border-2 border-dashed border-brand-blue/40 bg-brand-blue/5 flex flex-col items-center justify-center text-brand-blue cursor-pointer hover:border-brand-blue"
+          {/* Camera + Library use useRef + button.click() rather than
+              <label>-wrapped inputs. iOS Safari sometimes fails to fire
+              onChange when a display:none input is nested in a label,
+              which was silently losing photos taken in edit mode. */}
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="w-20 h-20 flex-shrink-0 rounded-lg border-2 border-dashed border-brand-blue/40 bg-brand-blue/5 flex flex-col items-center justify-center text-brand-blue hover:border-brand-blue"
             title="Take a new photo"
           >
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                onAdd(e.target.files);
-                e.currentTarget.value = '';
-              }}
-            />
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             <span className="text-[9px] font-medium mt-0.5">Camera</span>
-          </label>
-          {/* Library — no capture attribute, so users can still add
-              existing photos (needed for occasional non-fresh shots). */}
-          <label
-            className="w-20 h-20 flex-shrink-0 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:border-brand-blue hover:text-brand-blue"
+          </button>
+          <button
+            type="button"
+            onClick={() => libraryInputRef.current?.click()}
+            className="w-20 h-20 flex-shrink-0 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 hover:border-brand-blue hover:text-brand-blue"
             title="Choose photos from library"
           >
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                onAdd(e.target.files);
-                e.currentTarget.value = '';
-              }}
-            />
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <span className="text-[9px] font-medium mt-0.5">Library</span>
-          </label>
+          </button>
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            className="hidden"
+            onChange={handleFilePick}
+          />
+          <input
+            ref={libraryInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleFilePick}
+          />
         </>
       )}
     </div>
