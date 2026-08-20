@@ -159,6 +159,7 @@ export default function LotReviewPage() {
 
   const [reuploading, setReuploading] = useState(false);
   const [findingStockImage, setFindingStockImage] = useState(false);
+  const [addingPhotos, setAddingPhotos] = useState(false);
   const [stockImageMsg, setStockImageMsg] = useState<string | null>(null);
 
   const handleUpdateExisting = async () => {
@@ -592,36 +593,67 @@ export default function LotReviewPage() {
   };
 
   const handleAddPhotos = async (files: FileList | null) => {
-    if (!files || !existingLot) return;
+    if (!files || files.length === 0 || !existingLot) return;
+    setError(null);
+    setAddingPhotos(true);
     const { processImage } = await import('@/lib/image-utils');
-    const maxOrder = Math.max(0, ...(existingLot.lot_photos || []).map((p) => p.display_order));
+    // display_order can be null in old rows — coerce so Math.max stays
+    // numeric and we don't collide on 0.
+    const existingOrders = (existingLot.lot_photos || []).map(
+      (p) => (p as any).display_order ?? 0
+    );
+    const maxOrder = existingOrders.length ? Math.max(...existingOrders) : -1;
+
+    const failures: string[] = [];
+    let succeeded = 0;
     for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       try {
-        const dataUrl = await processImage(files[i]);
+        const dataUrl = await processImage(file);
         const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
         const blob = new Blob([buffer], { type: 'image/jpeg' });
         const storagePath = `${auctionId}/${existingLot.id}/extra_${Date.now()}_${i}.jpg`;
-        await supabase.storage.from('lot-photos').upload(storagePath, blob, {
-          contentType: 'image/jpeg',
-          upsert: true,
-        });
-        await supabase.from('lot_photos').insert({
+
+        const { error: upErr } = await supabase.storage
+          .from('lot-photos')
+          .upload(storagePath, blob, {
+            contentType: 'image/jpeg',
+            upsert: true,
+          });
+        if (upErr) throw new Error(`storage upload: ${upErr.message}`);
+
+        const { error: insErr } = await supabase.from('lot_photos').insert({
           lot_id: existingLot.id,
           storage_path: storagePath,
           display_order: maxOrder + 1 + i,
         });
-      } catch (err) {
-        console.error('Failed to add photo:', err);
+        if (insErr) throw new Error(`db insert: ${insErr.message}`);
+        succeeded++;
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        console.error(`Failed to add photo ${i} (${file.name}):`, err);
+        failures.push(`Photo ${i + 1} (${file.name || 'unknown'}): ${msg}`);
       }
     }
-    // Refresh
+
+    // Refresh the lot's photos so the new ones actually show up
     const { data } = await supabase
       .from('lots')
       .select('*, lot_photos(*)')
       .eq('id', lotId)
+      .is('deleted_at', null)
       .single();
     if (data) setExistingLot(data as LotWithPhotos);
+
+    setAddingPhotos(false);
+
+    if (failures.length > 0) {
+      setError(
+        `${succeeded} of ${files.length} photo${files.length === 1 ? '' : 's'} added. ` +
+          `${failures.length} failed: ${failures.join(' | ')}`
+      );
+    }
   };
 
   if (!displayListing) {
@@ -648,18 +680,25 @@ export default function LotReviewPage() {
         {!isNew ? (
           // Existing lot — use reorderable component
           (existingPhotoData.length > 0 || editMode) && (
-            <ReorderablePhotos
-              photos={existingPhotoData.map((p) => ({
-                id: p.id,
-                url: getPhotoUrl(p.storage_path),
-                storage_path: p.storage_path,
-              }))}
-              onReorder={handleReorderPhotos}
-              onDelete={handleDeletePhoto}
-              onAdd={handleAddPhotos}
-              onZoom={setZoomImage}
-              canEdit={editMode}
-            />
+            <>
+              <ReorderablePhotos
+                photos={existingPhotoData.map((p) => ({
+                  id: p.id,
+                  url: getPhotoUrl(p.storage_path),
+                  storage_path: p.storage_path,
+                }))}
+                onReorder={handleReorderPhotos}
+                onDelete={handleDeletePhoto}
+                onAdd={handleAddPhotos}
+                onZoom={setZoomImage}
+                canEdit={editMode}
+              />
+              {addingPhotos && (
+                <p className="text-xs text-brand-blue mt-2">
+                  Uploading photo…
+                </p>
+              )}
+            </>
           )
         ) : (
           // New lot — simple display (no reorder since they're just base64 strings)
