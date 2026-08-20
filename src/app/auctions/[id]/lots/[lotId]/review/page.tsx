@@ -858,13 +858,74 @@ export default function LotReviewPage() {
                 ${Number(displayListing.listed_price).toLocaleString()}
               </p>
             </div>
-            {displayQuantity > 1 && (
+            {editMode ? (
               <div>
                 <p className="text-xs text-gray-400">Quantity</p>
-                <p className="font-bold text-brand-blue">{displayQuantity}</p>
+                <input
+                  type="number"
+                  min={1}
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-20 font-bold text-brand-blue px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                />
               </div>
+            ) : (
+              displayQuantity > 1 && (
+                <div>
+                  <p className="text-xs text-gray-400">Quantity</p>
+                  <p className="font-bold text-brand-blue">{displayQuantity}</p>
+                </div>
+              )
             )}
           </div>
+
+          {editMode && listing && (
+            <div className="mt-3 border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-400 mb-2">Dimensions (optional)</p>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-1">Width</p>
+                  <input
+                    type="text"
+                    value={listing.width || ''}
+                    onChange={(e) => updateListingField('width', e.target.value)}
+                    placeholder="e.g. 24&quot;"
+                    className="w-full text-sm px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-1">Depth</p>
+                  <input
+                    type="text"
+                    value={listing.depth || ''}
+                    onChange={(e) => updateListingField('depth', e.target.value)}
+                    placeholder="e.g. 30&quot;"
+                    className="w-full text-sm px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-1">Height</p>
+                  <input
+                    type="text"
+                    value={listing.height || ''}
+                    onChange={(e) => updateListingField('height', e.target.value)}
+                    placeholder="e.g. 36&quot;"
+                    className="w-full text-sm px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          {!editMode && (existingLot?.width || existingLot?.depth || existingLot?.height) && (
+            <div className="mt-3 border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-400">Dimensions</p>
+              <p className="text-sm text-brand-navy">
+                {[existingLot.width, existingLot.depth, existingLot.height]
+                  .filter(Boolean)
+                  .join(' × ') || '—'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Auction description card */}

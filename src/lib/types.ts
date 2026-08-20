@@ -38,6 +38,9 @@ export interface Lot {
   listed_price: number | null;
   key_features: string[];
   auction_description: string | null;
+  width: string | null;
+  depth: string | null;
+  height: string | null;
   notes: string | null;
   created_by: string;
   created_at: string;
