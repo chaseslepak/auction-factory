@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
 
         const result = await Promise.race([
           processor,
-          new Promise<{ success: boolean; found: boolean; error?: string }>((resolve) =>
+          new Promise<{ success: boolean; found: boolean; error?: string; diag?: any }>((resolve) =>
             setTimeout(
               () => resolve({ success: false, found: false, error: 'Per-job timeout' }),
               jobTimeout
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
           .update({
             status: result.success ? 'completed' : 'failed',
             error: result.error || null,
-            result: { found: result.found },
+            result: { found: result.found, diag: (result as any).diag || null },
             completed_at: new Date().toISOString(),
           })
           .eq('id', job.id);

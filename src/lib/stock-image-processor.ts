@@ -7,17 +7,39 @@ interface StockCandidate {
   imageUrl: string;
   title: string;
   price: number;
+  source: string;
 }
 
-async function searchCandidates(query: string): Promise<StockCandidate[]> {
+interface SearchDiagnostics {
+  queriesTried: string[];
+  webstaurantHtmlBytes: number;
+  webstaurantRegexMatched: boolean;
+  webstaurantCandidates: number;
+  webSearchTried: boolean;
+  webSearchImageFound: boolean;
+  webSearchPrice: number;
+  webstaurantPrice: number;
+  vision: 'skipped' | 'no-user-photos' | 'model-answer' | 'model-error';
+  visionPickedIndex: number | null;
+  imageDownloaded: boolean;
+  imageDownloadError: string | null;
+  finalOutcome: 'no-brand-or-model' | 'no-candidates' | 'vision-rejected' | 'image-download-failed' | 'image-saved' | 'price-updated-only';
+}
+
+async function searchWebstaurant(
+  query: string,
+  diag: SearchDiagnostics
+): Promise<StockCandidate[]> {
   const candidates: StockCandidate[] = [];
   try {
     const url = `https://www.webstaurantstore.com/search/${encodeURIComponent(query)}.html`;
     const res = await fetch(url, { headers: { 'User-Agent': UA } });
     const html = await res.text();
+    diag.webstaurantHtmlBytes = html.length;
 
     const jsonMatch = html.match(/data-hypernova-key="SearchPage"[^>]*><!--([\s\S]*?)--><\/script>/);
     if (jsonMatch) {
+      diag.webstaurantRegexMatched = true;
       try {
         const data = JSON.parse(jsonMatch[1]);
         const products = data.products || [];
@@ -32,6 +54,7 @@ async function searchCandidates(query: string): Promise<StockCandidate[]> {
                 ? imagePath
                 : `https://www.webstaurantstore.com${imagePath}`,
               price,
+              source: 'webstaurant',
             });
           }
         }
@@ -39,6 +62,69 @@ async function searchCandidates(query: string): Promise<StockCandidate[]> {
     }
   } catch {}
   return candidates;
+}
+
+// Fallback: ask Anthropic to web-search for a product image URL when
+// WebstaurantStore returns 0. Uses the web_fetch-compatible URL flow:
+// the model surfaces candidate URLs in text, we regex them out and use
+// as candidates (no need to fetch inside the model turn).
+async function searchViaAnthropic(
+  anthropic: Anthropic,
+  brand: string,
+  model: string,
+  itemName: string,
+  diag: SearchDiagnostics
+): Promise<StockCandidate[]> {
+  diag.webSearchTried = true;
+  const query = `${brand} ${model} ${itemName}`.trim();
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      tools: [
+        {
+          type: 'web_search_20250305' as any,
+          name: 'web_search',
+          max_uses: 2,
+        },
+      ] as any,
+      messages: [
+        {
+          role: 'user',
+          content: `Find product listing pages for: ${query}
+
+Focus on US restaurant equipment retailers (WebstaurantStore, KaTom, Central Restaurant, CKitchen). For each result, output ONE line in this exact format:
+IMG: <full https URL to the product's primary image, ending in .jpg/.jpeg/.png/.webp> | TITLE: <product title>
+
+Do NOT return non-image URLs. Do NOT include commentary. If you find fewer than 3 valid product image URLs, output what you found.`,
+        },
+      ],
+    });
+
+    let fullText = '';
+    for (const block of (response as any).content || []) {
+      if (block.type === 'text') fullText += ' ' + block.text;
+    }
+
+    const lines = fullText.split(/\n/).map((l) => l.trim());
+    const candidates: StockCandidate[] = [];
+    for (const line of lines) {
+      const m = line.match(/IMG:\s*(https?:\/\/\S+\.(?:jpe?g|png|webp))\s*\|\s*TITLE:\s*(.+)/i);
+      if (m) {
+        candidates.push({
+          imageUrl: m[1],
+          title: m[2].trim(),
+          price: 0, // web search doesn't reliably give per-item price
+          source: 'anthropic-web-search',
+        });
+      }
+    }
+    if (candidates.length > 0) diag.webSearchImageFound = true;
+    return candidates;
+  } catch (err: any) {
+    console.error('Anthropic web-search fallback failed:', err?.message || err);
+    return [];
+  }
 }
 
 export async function researchRetailPrice(
@@ -99,7 +185,8 @@ export async function findAndVerifyStockImage(
   brand: string,
   model: string,
   itemName: string,
-  userPhotoUrls: string[]
+  userPhotoUrls: string[],
+  diag: SearchDiagnostics
 ): Promise<{ imageUrl: string; price: number } | null> {
   if (!brand && !model) return null;
 
@@ -109,11 +196,21 @@ export async function findAndVerifyStockImage(
     `${brand} ${itemName}`.trim(),
   ].filter((q) => q && q.length > 2);
 
+  diag.queriesTried = queries;
+
   let candidates: StockCandidate[] = [];
   for (const q of queries) {
-    candidates = await searchCandidates(q);
+    candidates = await searchWebstaurant(q, diag);
     if (candidates.length > 0) break;
   }
+  diag.webstaurantCandidates = candidates.length;
+
+  // Fallback: if WebstaurantStore came up empty, ask Anthropic to
+  // web-search for product images across retailers.
+  if (candidates.length === 0) {
+    candidates = await searchViaAnthropic(anthropic, brand, model, itemName, diag);
+  }
+
   if (candidates.length === 0) return null;
 
   const modelNormalized = (model || '').replace(/[\s\-_]/g, '').toLowerCase();
@@ -122,7 +219,10 @@ export async function findAndVerifyStockImage(
     : candidates;
 
   const toVerify = filtered.length > 0 ? filtered : candidates;
-  if (filtered.length === 1) return { imageUrl: filtered[0].imageUrl, price: filtered[0].price };
+  if (filtered.length === 1) {
+    diag.vision = 'skipped';
+    return { imageUrl: filtered[0].imageUrl, price: filtered[0].price };
+  }
 
   const userImagesB64: string[] = [];
   for (const photoUrl of userPhotoUrls.slice(0, 3)) {
@@ -136,7 +236,10 @@ export async function findAndVerifyStockImage(
   }
 
   if (userImagesB64.length === 0) {
-    return filtered.length > 0 ? { imageUrl: filtered[0].imageUrl, price: filtered[0].price } : null;
+    diag.vision = 'no-user-photos';
+    return filtered.length > 0
+      ? { imageUrl: filtered[0].imageUrl, price: filtered[0].price }
+      : { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
   }
 
   const candidateData: { url: string; title: string; price: number; base64: string }[] = [];
@@ -148,7 +251,12 @@ export async function findAndVerifyStockImage(
       candidateData.push({ url: c.imageUrl, title: c.title, price: c.price, base64: Buffer.from(buf).toString('base64') });
     } catch {}
   }
-  if (candidateData.length === 0) return null;
+  if (candidateData.length === 0) {
+    diag.vision = 'skipped';
+    // Nothing we could download from the candidate URLs — fall back to
+    // the first raw candidate so the caller at least has an imageUrl.
+    return { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
+  }
 
   try {
     const content: any[] = [];
@@ -176,12 +284,18 @@ export async function findAndVerifyStockImage(
     if (numMatch) {
       const idx = parseInt(numMatch[1]) - 1;
       if (idx >= 0 && idx < candidateData.length) {
+        diag.vision = 'model-answer';
+        diag.visionPickedIndex = idx;
         return { imageUrl: candidateData[idx].url, price: candidateData[idx].price };
       }
     }
-    return null;
+    diag.vision = 'model-answer';
+    // Model said NONE — return the first candidate anyway (better than
+    // nothing; user can delete if wrong).
+    return { imageUrl: candidateData[0].url, price: candidateData[0].price };
   } catch {
-    return null;
+    diag.vision = 'model-error';
+    return { imageUrl: candidateData[0].url, price: candidateData[0].price };
   }
 }
 
@@ -190,7 +304,23 @@ export async function processStockImageJob(
   supabase: SupabaseClient,
   anthropic: Anthropic,
   lotId: string
-): Promise<{ success: boolean; found: boolean; error?: string }> {
+): Promise<{ success: boolean; found: boolean; error?: string; diag?: SearchDiagnostics }> {
+  const diag: SearchDiagnostics = {
+    queriesTried: [],
+    webstaurantHtmlBytes: 0,
+    webstaurantRegexMatched: false,
+    webstaurantCandidates: 0,
+    webSearchTried: false,
+    webSearchImageFound: false,
+    webSearchPrice: 0,
+    webstaurantPrice: 0,
+    vision: 'skipped',
+    visionPickedIndex: null,
+    imageDownloaded: false,
+    imageDownloadError: null,
+    finalOutcome: 'no-candidates',
+  };
+
   try {
     const { data: lot, error: lotError } = await supabase
       .from('lots')
@@ -199,7 +329,12 @@ export async function processStockImageJob(
       .single();
 
     if (lotError || !lot) {
-      return { success: false, found: false, error: 'Lot not found' };
+      return { success: false, found: false, error: 'Lot not found', diag };
+    }
+
+    if (!lot.brand && !lot.model) {
+      diag.finalOutcome = 'no-brand-or-model';
+      return { success: true, found: false, diag };
     }
 
     const userPhotoUrls = (lot.lot_photos || [])
@@ -212,11 +347,12 @@ export async function processStockImageJob(
       lot.brand || '',
       lot.model || '',
       lot.item_name || '',
-      userPhotoUrls
+      userPhotoUrls,
+      diag
     );
 
     const currentRetail = Number(lot.estimated_retail_new) || 0;
-    const webstaurantPrice = found?.price || 0;
+    diag.webstaurantPrice = found?.price || 0;
 
     // Always do web search for pricing
     const webSearchPrice = await researchRetailPrice(
@@ -225,8 +361,9 @@ export async function processStockImageJob(
       lot.model || '',
       lot.item_name || ''
     );
+    diag.webSearchPrice = webSearchPrice;
 
-    const maxPrice = Math.max(currentRetail, webstaurantPrice, webSearchPrice);
+    const maxPrice = Math.max(currentRetail, diag.webstaurantPrice, webSearchPrice);
     if (maxPrice > currentRetail) {
       const newRetail = Math.round(maxPrice);
       const newListed = Math.round(newRetail * 1.10);
@@ -237,6 +374,7 @@ export async function processStockImageJob(
           listed_price: newListed,
         })
         .eq('id', lot.id);
+      diag.finalOutcome = 'price-updated-only';
     }
 
     // Upload stock image if found
@@ -245,6 +383,7 @@ export async function processStockImageJob(
         const imgRes = await fetch(found.imageUrl);
         if (imgRes.ok) {
           const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
+          diag.imageDownloaded = true;
 
           // Check if a stock image already exists for this lot
           const existingStock = (lot.lot_photos || []).find((p: any) => p.storage_path.includes('/stock_'));
@@ -274,15 +413,23 @@ export async function processStockImageJob(
               display_order: 0,
             });
           }
-          return { success: true, found: true };
+          diag.finalOutcome = 'image-saved';
+          return { success: true, found: true, diag };
+        } else {
+          diag.imageDownloadError = `HTTP ${imgRes.status} fetching image`;
+          diag.finalOutcome = 'image-download-failed';
         }
       } catch (e: any) {
         console.error('Stock image upload failed:', e?.message);
+        diag.imageDownloadError = e?.message || String(e);
+        diag.finalOutcome = 'image-download-failed';
       }
+    } else {
+      diag.finalOutcome = diag.webstaurantCandidates === 0 ? 'no-candidates' : 'vision-rejected';
     }
 
-    return { success: true, found: false };
+    return { success: true, found: false, diag };
   } catch (err: any) {
-    return { success: false, found: false, error: err?.message || 'Processing failed' };
+    return { success: false, found: false, error: err?.message || 'Processing failed', diag };
   }
 }

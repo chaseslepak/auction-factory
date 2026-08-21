@@ -292,7 +292,7 @@ export default function LotReviewPage() {
         try {
           const { data: jobs, error: jobsErr } = await supabase
             .from('jobs')
-            .select('status, error')
+            .select('status, error, result')
             .eq('type', 'refresh_stock_images')
             .eq('lot_id', existingLot.id)
             .order('created_at', { ascending: false })
@@ -325,7 +325,27 @@ export default function LotReviewPage() {
           if (job.status === 'failed') {
             setStockImageMsg(`Search failed: ${job.error || 'unknown error'}`);
           } else {
-            setStockImageMsg('Stock image search complete.');
+            const diag = (job as any).result?.diag;
+            const found = (job as any).result?.found;
+            if (found) {
+              setStockImageMsg('Stock image saved to this lot.');
+            } else if (diag) {
+              const summary =
+                diag.finalOutcome === 'no-brand-or-model'
+                  ? 'No brand or model on this lot — can\'t search.'
+                  : diag.finalOutcome === 'no-candidates'
+                  ? `No matches. WebstaurantStore: ${diag.webstaurantCandidates} hits (regex ${diag.webstaurantRegexMatched ? 'ok' : 'MISSED — page format changed'}, ${Math.round(diag.webstaurantHtmlBytes / 1024)}KB HTML). Web-search fallback ${diag.webSearchTried ? (diag.webSearchImageFound ? 'found images' : 'ran but found no images') : 'not run'}.`
+                  : diag.finalOutcome === 'image-download-failed'
+                  ? `Found a candidate but couldn't download it: ${diag.imageDownloadError}`
+                  : diag.finalOutcome === 'vision-rejected'
+                  ? 'Vision-verify rejected all candidates.'
+                  : diag.finalOutcome === 'price-updated-only'
+                  ? `No image, but retail price updated (Web search: $${diag.webSearchPrice}, Webstaurant: $${diag.webstaurantPrice}).`
+                  : 'Search finished with no image.';
+              setStockImageMsg(summary);
+            } else {
+              setStockImageMsg('Search finished — no image found and no diagnostics returned.');
+            }
           }
           setFindingStockImage(false);
         } catch (err: any) {
