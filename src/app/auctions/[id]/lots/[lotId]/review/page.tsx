@@ -161,6 +161,12 @@ export default function LotReviewPage() {
   const [findingStockImage, setFindingStockImage] = useState(false);
   const [addingPhotos, setAddingPhotos] = useState(false);
   const [stockImageMsg, setStockImageMsg] = useState<string | null>(null);
+  // Step-by-step upload status shown on-device so we can see WHERE
+  // the photo-add flow dies in edit mode on iOS.
+  const [uploadStatus, setUploadStatus] = useState<{
+    kind: 'info' | 'error' | 'success';
+    msg: string;
+  } | null>(null);
 
   const handleUpdateExisting = async () => {
     if (!listing || !existingLot) return;
@@ -593,12 +599,26 @@ export default function LotReviewPage() {
   };
 
   const handleAddPhotos = async (files: FileList | null) => {
-    if (!files || files.length === 0 || !existingLot) return;
+    if (!files || files.length === 0 || !existingLot) {
+      setUploadStatus({
+        kind: 'error',
+        msg: `Aborted: files=${files?.length ?? 'null'} existingLot=${!!existingLot}`,
+      });
+      return;
+    }
     setError(null);
     setAddingPhotos(true);
-    const { processImage } = await import('@/lib/image-utils');
-    // display_order can be null in old rows — coerce so Math.max stays
-    // numeric and we don't collide on 0.
+    setUploadStatus({ kind: 'info', msg: `Received ${files.length} photo(s) — starting…` });
+
+    let processImage: (file: File) => Promise<string>;
+    try {
+      processImage = (await import('@/lib/image-utils')).processImage;
+    } catch (err: any) {
+      setUploadStatus({ kind: 'error', msg: `Failed to load image utils: ${err?.message || err}` });
+      setAddingPhotos(false);
+      return;
+    }
+
     const existingOrders = (existingLot.lot_photos || []).map(
       (p) => (p as any).display_order ?? 0
     );
@@ -608,51 +628,82 @@ export default function LotReviewPage() {
     let succeeded = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      const label = `Photo ${i + 1}/${files.length}`;
       try {
+        setUploadStatus({
+          kind: 'info',
+          msg: `${label}: processing (${Math.round(file.size / 1024)}KB, ${file.type || '?'})…`,
+        });
         const dataUrl = await processImage(file);
         const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
         const blob = new Blob([buffer], { type: 'image/jpeg' });
         const storagePath = `${auctionId}/${existingLot.id}/extra_${Date.now()}_${i}.jpg`;
 
+        setUploadStatus({
+          kind: 'info',
+          msg: `${label}: uploading (${Math.round(blob.size / 1024)}KB)…`,
+        });
         const { error: upErr } = await supabase.storage
           .from('lot-photos')
           .upload(storagePath, blob, {
             contentType: 'image/jpeg',
             upsert: true,
           });
-        if (upErr) throw new Error(`storage upload: ${upErr.message}`);
+        if (upErr) throw new Error(`storage: ${upErr.message}`);
 
+        setUploadStatus({ kind: 'info', msg: `${label}: saving row…` });
         const { error: insErr } = await supabase.from('lot_photos').insert({
           lot_id: existingLot.id,
           storage_path: storagePath,
           display_order: maxOrder + 1 + i,
         });
-        if (insErr) throw new Error(`db insert: ${insErr.message}`);
+        if (insErr) throw new Error(`db: ${insErr.message}`);
         succeeded++;
       } catch (err: any) {
         const msg = err?.message || String(err);
         console.error(`Failed to add photo ${i} (${file.name}):`, err);
-        failures.push(`Photo ${i + 1} (${file.name || 'unknown'}): ${msg}`);
+        failures.push(`${label}: ${msg}`);
       }
     }
 
-    // Refresh the lot's photos so the new ones actually show up
-    const { data } = await supabase
+    setUploadStatus({
+      kind: 'info',
+      msg: `${succeeded}/${files.length} uploaded — refreshing…`,
+    });
+
+    const { data, error: refetchErr } = await supabase
       .from('lots')
       .select('*, lot_photos(*)')
       .eq('id', lotId)
       .is('deleted_at', null)
       .single();
-    if (data) setExistingLot(data as LotWithPhotos);
+    if (refetchErr) {
+      setUploadStatus({
+        kind: 'error',
+        msg: `Refetch failed: ${refetchErr.message}`,
+      });
+      setAddingPhotos(false);
+      return;
+    }
+    if (data) {
+      setExistingLot(data as LotWithPhotos);
+    }
 
     setAddingPhotos(false);
 
     if (failures.length > 0) {
-      setError(
-        `${succeeded} of ${files.length} photo${files.length === 1 ? '' : 's'} added. ` +
-          `${failures.length} failed: ${failures.join(' | ')}`
-      );
+      setUploadStatus({
+        kind: 'error',
+        msg: `${succeeded}/${files.length} added. Failures: ${failures.join(' | ')}`,
+      });
+    } else {
+      const newCount = (data as any)?.lot_photos?.length ?? '?';
+      setUploadStatus({
+        kind: 'success',
+        msg: `Added ${succeeded} — lot now has ${newCount} photo(s).`,
+      });
+      setTimeout(() => setUploadStatus(null), 4000);
     }
   };
 
@@ -681,6 +732,19 @@ export default function LotReviewPage() {
           // Existing lot — use reorderable component
           (existingPhotoData.length > 0 || editMode) && (
             <>
+              {uploadStatus && (
+                <div
+                  className={`mb-2 rounded-md border px-3 py-2 text-xs font-medium ${
+                    uploadStatus.kind === 'error'
+                      ? 'border-red-300 bg-red-50 text-red-800'
+                      : uploadStatus.kind === 'success'
+                      ? 'border-green-300 bg-green-50 text-green-800'
+                      : 'border-brand-blue/40 bg-brand-blue/10 text-brand-blue'
+                  }`}
+                >
+                  {uploadStatus.msg}
+                </div>
+              )}
               <ReorderablePhotos
                 photos={existingPhotoData.map((p) => ({
                   id: p.id,
