@@ -535,6 +535,19 @@ export default function AuctionDetailPage() {
     return data.publicUrl;
   };
 
+  // Supabase doesn't guarantee joined-table row order — sort by
+  // display_order and return the primary. The stock-image processor
+  // inserts new stock photos with display_order=0 and shifts existing
+  // photos up by 1, so this makes the stock image appear first on the
+  // lots list once it's been found.
+  const getPrimaryPhoto = (lot: LotWithPhotos) => {
+    const photos = lot.lot_photos || [];
+    if (photos.length === 0) return null;
+    return [...photos].sort(
+      (a, b) => ((a as any).display_order ?? 0) - ((b as any).display_order ?? 0)
+    )[0];
+  };
+
   // Compute filtered + sorted lots
   const filteredLots = (() => {
     let result = [...lots];
@@ -1040,15 +1053,18 @@ export default function AuctionDetailPage() {
                   <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center flex-shrink-0">
                     <span className="text-white font-black text-sm">#{lot.lot_number}</span>
                   </div>
-                  {lot.lot_photos?.[0] && (
-                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
-                      <img
-                        src={getPhotoUrl(lot.lot_photos[0].storage_path)}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
+                  {(() => {
+                    const primary = getPrimaryPhoto(lot);
+                    return primary ? (
+                      <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
+                        <img
+                          src={getPhotoUrl(primary.storage_path)}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ) : null;
+                  })()}
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-brand-navy text-sm truncate">{lot.item_name || 'Untitled'}</p>
                   </div>
@@ -1066,15 +1082,18 @@ export default function AuctionDetailPage() {
                 </div>
 
                 {/* Thumbnail */}
-                {lot.lot_photos?.[0] && (
-                  <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
-                    <img
-                      src={getPhotoUrl(lot.lot_photos[0].storage_path)}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                )}
+                {(() => {
+                  const primary = getPrimaryPhoto(lot);
+                  return primary ? (
+                    <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100">
+                      <img
+                        src={getPhotoUrl(primary.storage_path)}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : null;
+                })()}
 
                 {/* Info */}
                 <div className="flex-1 min-w-0">
