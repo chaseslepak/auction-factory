@@ -70,15 +70,38 @@ export default function ReorderablePhotos({
   };
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    const count = files?.length ?? 0;
+    const inputEl = e.target;
+    // FileList is a LIVE reference to the input's files — clearing
+    // e.target.value later would empty it out. Materialize into a
+    // plain File[] first, then hand it to onAdd (via a wrapping
+    // DataTransfer FileList) so the consumer sees stable files even
+    // after we reset the input.
+    const filesArray: File[] = inputEl.files ? Array.from(inputEl.files) : [];
+    const count = filesArray.length;
     setPickerMsg(`Received ${count} photo${count === 1 ? '' : 's'} — uploading…`);
-    // Clear the visible crumb after a bit so it doesn't linger.
     setTimeout(() => setPickerMsg(null), 5000);
-    if (onAdd) onAdd(files);
-    // Clear input value AFTER passing files, so the same file can be
-    // picked again next time.
-    e.target.value = '';
+
+    // Build a fresh FileList-shaped object that survives the reset.
+    let stableFiles: FileList | null = null;
+    if (count > 0) {
+      try {
+        const dt = new DataTransfer();
+        filesArray.forEach((f) => dt.items.add(f));
+        stableFiles = dt.files;
+      } catch {
+        // DataTransfer not available on very old Safari — fall back
+        // to the raw FileList and skip the input reset below.
+        stableFiles = inputEl.files;
+      }
+    }
+
+    if (onAdd) onAdd(stableFiles);
+
+    // Only reset the input if we successfully built a detached copy
+    // — otherwise resetting would strand the consumer with 0 files.
+    if (stableFiles && stableFiles !== inputEl.files) {
+      inputEl.value = '';
+    }
   };
 
   return (

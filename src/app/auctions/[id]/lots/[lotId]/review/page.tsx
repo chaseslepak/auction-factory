@@ -599,16 +599,22 @@ export default function LotReviewPage() {
   };
 
   const handleAddPhotos = async (files: FileList | null) => {
-    if (!files || files.length === 0 || !existingLot) {
+    // CRITICAL: FileList is a LIVE reference to the input's files.
+    // When ReorderablePhotos clears the input value after calling us,
+    // the FileList empties out — so any code after an `await` would
+    // see files.length === 0 and skip the upload silently. Copy into
+    // a plain Array here, before any await, so we hold a stable list.
+    const fileList: File[] = files ? Array.from(files) : [];
+    if (fileList.length === 0 || !existingLot) {
       setUploadStatus({
         kind: 'error',
-        msg: `Aborted: files=${files?.length ?? 'null'} existingLot=${!!existingLot}`,
+        msg: `Aborted: files=${fileList.length} existingLot=${!!existingLot}`,
       });
       return;
     }
     setError(null);
     setAddingPhotos(true);
-    setUploadStatus({ kind: 'info', msg: `Received ${files.length} photo(s) — starting…` });
+    setUploadStatus({ kind: 'info', msg: `Received ${fileList.length} photo(s) — starting…` });
 
     let processImage: (file: File) => Promise<string>;
     try {
@@ -626,9 +632,9 @@ export default function LotReviewPage() {
 
     const failures: string[] = [];
     let succeeded = 0;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const label = `Photo ${i + 1}/${files.length}`;
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      const label = `Photo ${i + 1}/${fileList.length}`;
       try {
         setUploadStatus({
           kind: 'info',
@@ -669,7 +675,7 @@ export default function LotReviewPage() {
 
     setUploadStatus({
       kind: 'info',
-      msg: `${succeeded}/${files.length} uploaded — refreshing…`,
+      msg: `${succeeded}/${fileList.length} uploaded — refreshing…`,
     });
 
     const { data, error: refetchErr } = await supabase
@@ -695,7 +701,7 @@ export default function LotReviewPage() {
     if (failures.length > 0) {
       setUploadStatus({
         kind: 'error',
-        msg: `${succeeded}/${files.length} added. Failures: ${failures.join(' | ')}`,
+        msg: `${succeeded}/${fileList.length} added. Failures: ${failures.join(' | ')}`,
       });
     } else {
       const newCount = (data as any)?.lot_photos?.length ?? '?';
