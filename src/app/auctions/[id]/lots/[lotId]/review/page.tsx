@@ -257,7 +257,7 @@ export default function LotReviewPage() {
   const handleFindStockImage = async () => {
     if (!existingLot) return;
     setFindingStockImage(true);
-    setStockImageMsg(null);
+    setStockImageMsg('Queuing job…');
     try {
       const enqueueRes = await fetch('/api/jobs/enqueue', {
         method: 'POST',
@@ -277,6 +277,8 @@ export default function LotReviewPage() {
         return;
       }
 
+      setStockImageMsg('Queued — waiting for processor…');
+
       // Poll until this lot's job is no longer pending/processing. Cap
       // at 60 polls (~3 min) so a stuck job (Anthropic outage, orphaned
       // pending row) can't spin the poller forever.
@@ -288,23 +290,31 @@ export default function LotReviewPage() {
           return;
         }
         try {
-          const { data: jobs } = await supabase
+          const { data: jobs, error: jobsErr } = await supabase
             .from('jobs')
             .select('status, error')
             .eq('type', 'refresh_stock_images')
             .eq('lot_id', existingLot.id)
             .order('created_at', { ascending: false })
             .limit(1);
+          if (jobsErr) throw jobsErr;
           const job = jobs?.[0];
 
-          // Kick the processor if the job is still pending and nothing's picked it up
-          if (job?.status === 'pending' || job?.status === 'processing') {
+          // Still running — surface progress, kick the processor if needed,
+          // then schedule the next poll. IMPORTANT: do NOT flip
+          // findingStockImage off here (previous bug: a finally block did,
+          // which killed the spinner after the first tick and hid every
+          // subsequent status message).
+          if (!job || job.status === 'pending' || job.status === 'processing') {
+            setStockImageMsg(
+              `Searching… (attempt ${attempts + 1}/${MAX_JOB_POLLS}, status: ${job?.status || 'not yet claimed'})`
+            );
             fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
             setTimeout(() => pollJob(attempts + 1), 3000);
             return;
           }
 
-          // Done — refetch the lot to pick up any new stock image/pricing
+          // Terminal — refetch the lot to pick up any new stock image/pricing
           const { data: fresh } = await supabase
             .from('lots')
             .select('*, lot_photos(*)')
@@ -312,14 +322,14 @@ export default function LotReviewPage() {
             .single();
           if (fresh) setExistingLot(fresh as LotWithPhotos);
 
-          if (job?.status === 'failed') {
+          if (job.status === 'failed') {
             setStockImageMsg(`Search failed: ${job.error || 'unknown error'}`);
           } else {
             setStockImageMsg('Stock image search complete.');
           }
-        } catch {
-          setStockImageMsg('Search finished (status unknown).');
-        } finally {
+          setFindingStockImage(false);
+        } catch (err: any) {
+          setStockImageMsg(`Poll failed: ${err?.message || String(err)}`);
           setFindingStockImage(false);
         }
       };
@@ -1099,7 +1109,7 @@ export default function LotReviewPage() {
             </button>
             {findingStockImage && (
               <div className="mt-3">
-                <IndeterminateBar label="Searching..." />
+                <IndeterminateBar label={stockImageMsg || 'Searching...'} />
               </div>
             )}
             {stockImageMsg && !findingStockImage && (
