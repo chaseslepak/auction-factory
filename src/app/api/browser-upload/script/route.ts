@@ -199,8 +199,8 @@ export async function GET(request: NextRequest) {
             'Lot #' + lot.lot_number + ' -> status=' + ur.status +
             ', redirected=' + redirected +
             ', len=' + responseLen +
-            ', success=' + success + '\n' +
-            'finalUrl=' + finalUrl + '\n\n' +
+            ', success=' + success + '\\n' +
+            'finalUrl=' + finalUrl + '\\n\\n' +
             ut.substring(0, 400);
           ui.appendChild(dbg);
         }
