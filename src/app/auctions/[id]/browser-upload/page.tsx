@@ -89,8 +89,13 @@ export default function BrowserUploadPage() {
     ? `${origin}/api/browser-upload/script?token=${encodeURIComponent(token)}` +
       (lotsRange.trim() ? `&lots=${encodeURIComponent(lotsRange.trim())}` : '')
     : '';
+  // Use a <script> tag rather than fetch + eval. Cross-origin fetch +
+  // eval hits Safari's ITP / cross-origin-body-read protections
+  // intermittently and returns empty text — eval("") throws
+  // "SyntaxError: Unexpected EOF" and the upload never starts.
+  // Script tag loads bypass CORS entirely.
   const loaderScript = loaderUrl
-    ? `fetch('${loaderUrl}').then(r=>r.text()).then(eval);`
+    ? `var s=document.createElement('script');s.src='${loaderUrl}';document.head.appendChild(s);`
     : '';
 
   const copyScript = async () => {
