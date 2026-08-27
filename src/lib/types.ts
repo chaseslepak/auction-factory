@@ -36,6 +36,7 @@ export interface Lot {
   quantity: number;
   estimated_retail_new: number | null;
   listed_price: number | null;
+  starting_bid: number | null;
   key_features: string[];
   auction_description: string | null;
   width: string | null;

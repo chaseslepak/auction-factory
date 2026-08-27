@@ -151,7 +151,11 @@ export async function GET(request: NextRequest) {
       model: sanitizeForAF(lot.model || '', 255),
       qty: String(lot.quantity || 1),
       original_price: String(lot.estimated_retail_new || ''),
-      start: '1.00',
+      // Per-lot starting_bid override, else AF's historical $1.00 default.
+      start:
+        lot.starting_bid !== null && lot.starting_bid !== undefined
+          ? Number(lot.starting_bid).toFixed(2)
+          : '1.00',
       reserve: '0.00',
       buyitnow: '0.00',
       taxable: 'yes',
