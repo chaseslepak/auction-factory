@@ -16,7 +16,11 @@ interface AuditResult {
     af_upload_status: string | null;
   }>;
   only_in_af: Array<{ lot_number: number; title: string; af_item_url: string }>;
-  duplicates_in_af: Array<{ lot_number: number; count: number; titles: string[] }>;
+  duplicates_in_af: Array<{
+    lot_number: number;
+    count: number;
+    copies: Array<{ af_item_id: string; title: string; af_item_url: string }>;
+  }>;
   possible_name_mismatches: Array<{
     lot_number: number;
     lotter_item: string;
@@ -231,18 +235,42 @@ export default function AuditPage() {
 
             <Section
               title={`Duplicates on AF (${result.duplicates_in_af.length})`}
-              subtitle="Same lot number posted more than once on AF."
+              subtitle="Same lot number posted more than once on AF. Keep the first copy, tap the others to open on AF and delete manually."
               empty="None"
               variant="warning"
             >
               {result.duplicates_in_af.map((dup) => (
-                <Row key={`dup-${dup.lot_number}`}>
-                  <span className="font-mono text-xs w-14">#{dup.lot_number}</span>
-                  <div className="flex-1">
-                    <p className="text-xs text-gray-500">{dup.count} copies</p>
-                    <p className="truncate text-sm">{dup.titles.join(' | ')}</p>
+                <div
+                  key={`dup-${dup.lot_number}`}
+                  className="p-3 text-sm text-brand-navy"
+                >
+                  <div className="flex items-baseline gap-3 mb-1">
+                    <span className="font-mono text-xs w-14">#{dup.lot_number}</span>
+                    <span className="text-xs text-gray-500">{dup.count} copies</span>
                   </div>
-                </Row>
+                  <ul className="ml-14 space-y-1">
+                    {dup.copies.map((c, i) => (
+                      <li key={c.af_item_id} className="flex items-center gap-2">
+                        <span
+                          className={`text-[10px] font-bold uppercase w-14 flex-shrink-0 ${
+                            i === 0 ? 'text-brand-green' : 'text-red-600'
+                          }`}
+                        >
+                          {i === 0 ? 'Keep' : 'Delete'}
+                        </span>
+                        <span className="flex-1 truncate text-xs">{c.title}</span>
+                        <a
+                          href={c.af_item_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-brand-blue text-xs"
+                        >
+                          open ↗
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
             </Section>
 

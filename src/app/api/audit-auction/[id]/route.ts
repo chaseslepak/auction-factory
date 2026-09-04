@@ -95,8 +95,11 @@ export async function GET(
   }> = [];
   const onlyInAf: Array<{ lot_number: number; title: string; af_item_url: string }> =
     [];
-  const duplicatesInAf: Array<{ lot_number: number; count: number; titles: string[] }> =
-    [];
+  const duplicatesInAf: Array<{
+    lot_number: number;
+    count: number;
+    copies: Array<{ af_item_id: string; title: string; af_item_url: string }>;
+  }> = [];
   const numberCollisions: Array<{
     lot_number: number;
     lotter_item: string;
@@ -120,7 +123,11 @@ export async function GET(
       duplicatesInAf.push({
         lot_number: num,
         count: items.length,
-        titles: items.map((i) => i.title).slice(0, 5),
+        copies: items.map((i) => ({
+          af_item_id: i.af_item_id,
+          title: i.title,
+          af_item_url: i.af_item_url,
+        })),
       });
     }
     if (!lotterByNumber.has(num)) {
