@@ -244,29 +244,29 @@ export default function AuditPage() {
                   key={`dup-${dup.lot_number}`}
                   className="p-3 text-sm text-brand-navy"
                 >
-                  <div className="flex items-baseline gap-3 mb-1">
+                  <div className="flex items-baseline gap-3 mb-2">
                     <span className="font-mono text-xs w-14">#{dup.lot_number}</span>
                     <span className="text-xs text-gray-500">{dup.count} copies</span>
                   </div>
-                  <ul className="ml-14 space-y-1">
+                  <ul className="ml-14 space-y-2">
                     {dup.copies.map((c, i) => (
                       <li key={c.af_item_id} className="flex items-center gap-2">
-                        <span
-                          className={`text-[10px] font-bold uppercase w-14 flex-shrink-0 ${
-                            i === 0 ? 'text-brand-green' : 'text-red-600'
-                          }`}
-                        >
-                          {i === 0 ? 'Keep' : 'Delete'}
-                        </span>
                         <span className="flex-1 truncate text-xs">{c.title}</span>
-                        <a
-                          href={c.af_item_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-brand-blue text-xs"
-                        >
-                          open ↗
-                        </a>
+                        {i === 0 ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-green-100 text-green-800 text-[10px] font-bold uppercase tracking-wide flex-shrink-0">
+                            Keep
+                          </span>
+                        ) : (
+                          <a
+                            href={c.af_item_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold uppercase tracking-wide flex-shrink-0"
+                            title="Opens on AF — click Delete on the item page"
+                          >
+                            Open on AF to Delete ↗
+                          </a>
+                        )}
                       </li>
                     ))}
                   </ul>
