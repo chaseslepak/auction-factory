@@ -25,6 +25,9 @@ export default function LotReviewPage() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [condition, setCondition] = useState(5);
   const [quantity, setQuantity] = useState(1);
+  // Optional per-lot starting bid override. null = fall back to AF's
+  // $1.00 default in the Browser Upload export.
+  const [startingBid, setStartingBid] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [nextLotNumber, setNextLotNumber] = useState(1);
   const [editMode, setEditMode] = useState(false);
@@ -130,6 +133,11 @@ export default function LotReviewPage() {
           });
           setCondition(data.condition_rating || 5);
           setQuantity(data.quantity || 1);
+          setStartingBid(
+            data.starting_bid !== null && data.starting_bid !== undefined
+              ? String(data.starting_bid)
+              : ''
+          );
           setNotes(data.notes || '');
 
           // Load edit history
@@ -194,6 +202,12 @@ export default function LotReviewPage() {
         }
       }
 
+      const parsedStartingBid = startingBid.trim() === '' ? null : Number(startingBid);
+      const startingBidValue =
+        parsedStartingBid !== null && Number.isFinite(parsedStartingBid) && parsedStartingBid >= 0
+          ? parsedStartingBid
+          : null;
+
       const { error: updateError } = await supabase
         .from('lots')
         .update({
@@ -206,6 +220,7 @@ export default function LotReviewPage() {
           quantity,
           estimated_retail_new: listing.estimated_retail_new,
           listed_price: listing.listed_price,
+          starting_bid: startingBidValue,
           width: listing.width || null,
           depth: listing.depth || null,
           height: listing.height || null,
@@ -998,23 +1013,51 @@ export default function LotReviewPage() {
               </p>
             </div>
             {editMode ? (
-              <div>
-                <p className="text-xs text-gray-400">Quantity</p>
-                <input
-                  type="number"
-                  min={1}
-                  value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))}
-                  className="w-20 font-bold text-brand-blue px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
-                />
-              </div>
-            ) : (
-              displayQuantity > 1 && (
+              <>
                 <div>
                   <p className="text-xs text-gray-400">Quantity</p>
-                  <p className="font-bold text-brand-blue">{displayQuantity}</p>
+                  <input
+                    type="number"
+                    min={1}
+                    value={quantity}
+                    onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-20 font-bold text-brand-blue px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                  />
                 </div>
-              )
+                <div>
+                  <p className="text-xs text-gray-400">Starting Bid</p>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-400">$</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="1.00"
+                      value={startingBid}
+                      onChange={(e) => setStartingBid(e.target.value)}
+                      className="w-24 font-bold text-brand-blue px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Blank = $1.00 default</p>
+                </div>
+              </>
+            ) : (
+              <>
+                {displayQuantity > 1 && (
+                  <div>
+                    <p className="text-xs text-gray-400">Quantity</p>
+                    <p className="font-bold text-brand-blue">{displayQuantity}</p>
+                  </div>
+                )}
+                {existingLot?.starting_bid != null && (
+                  <div>
+                    <p className="text-xs text-gray-400">Starting Bid</p>
+                    <p className="font-bold text-brand-blue">
+                      ${Number(existingLot.starting_bid).toFixed(2)}
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
