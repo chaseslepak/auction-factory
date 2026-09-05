@@ -33,6 +33,10 @@ export default function AuctionDetailPage() {
   const [selectedLots, setSelectedLots] = useState<Set<string>>(new Set());
   const [bulkMode, setBulkMode] = useState(false);
   const [afAuctions, setAfAuctions] = useState<{ id: string; name: string }[]>([]);
+  // True from the moment we kick the server-run POST until every lot has
+  // settled (no 'uploading' rows left). The Server-Run banner reads it,
+  // and a useEffect below polls fetchData every 5s while it's true.
+  const [serverRunActive, setServerRunActive] = useState(false);
   const supabase = createClient();
 
   const fetchData = async () => {
@@ -380,6 +384,80 @@ export default function AuctionDetailPage() {
       text: `Reset ${failed.length} failed lot${failed.length > 1 ? 's' : ''}. Click "HQ Push to AF" above to retry.`,
     });
   };
+
+  // Fire-and-forget server-side upload: one POST kicks the background
+  // chain (waitUntil + self-invoke). Tab can be closed; progress
+  // continues on Vercel. This page's polling effect (below) reflects
+  // status when the user is here to watch.
+  const handleServerRun = async () => {
+    const unuploaded = lots.filter((l) => l.af_upload_status !== 'uploaded');
+    if (unuploaded.length === 0) {
+      setUploadMsg({ type: 'error', text: 'All lots already uploaded.' });
+      return;
+    }
+    if (
+      !confirm(
+        `Start background sync for ${unuploaded.length} lot(s)?\n\n` +
+          `This runs on the server — you can close this tab and come back later. ` +
+          `Progress will keep going.`
+      )
+    )
+      return;
+
+    setUploadMsg(null);
+    setServerRunActive(true);
+
+    try {
+      const res = await fetch('/api/af-upload/server-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auction_id: id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setServerRunActive(false);
+        setUploadMsg({
+          type: 'error',
+          text: data.error || `Failed to start (HTTP ${res.status})`,
+        });
+        return;
+      }
+      // First slice done. The endpoint has already self-invoked to keep
+      // going. Refresh lots and let the polling effect take over.
+      await fetchData();
+    } catch (err: any) {
+      setServerRunActive(false);
+      setUploadMsg({
+        type: 'error',
+        text: err?.message || 'Failed to start server run',
+      });
+    }
+  };
+
+  // While a server-run is active OR any lot is mid-flight ('uploading'),
+  // poll fetchData every 5s so the on-page counts stay live. Stops on
+  // its own once no lot is 'uploading' and there's nothing pending.
+  useEffect(() => {
+    const anyUploading = lots.some((l) => l.af_upload_status === 'uploading');
+    const anyPending = lots.some(
+      (l) =>
+        l.af_upload_status === null ||
+        l.af_upload_status === 'queued' ||
+        l.af_upload_status === 'failed'
+    );
+    if (!serverRunActive && !anyUploading) return;
+    // If nothing is uploading AND nothing is pending, we're done — clear
+    // the banner and stop polling.
+    if (serverRunActive && !anyUploading && !anyPending) {
+      setServerRunActive(false);
+      return;
+    }
+    const timer = setInterval(() => {
+      fetchData();
+    }, 5000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverRunActive, lots]);
 
   const handleUploadToAf = async () => {
     // Sort by lot_number to guarantee upload order (this is critical!)
@@ -851,11 +929,42 @@ export default function AuctionDetailPage() {
                 Audit AF vs Lotter
               </Link>
               <button
-                onClick={handleUploadToAf}
-                disabled={uploading}
+                onClick={handleServerRun}
+                disabled={serverRunActive}
                 className="w-full py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
               >
-                {uploading ? 'Uploading...' : 'Server Upload (fallback)'}
+                {serverRunActive
+                  ? 'Server sync running — safe to close tab'
+                  : 'Server Upload (background)'}
+              </button>
+              {serverRunActive && (
+                <div className="mt-2 text-xs text-brand-navy bg-brand-blue/10 border border-brand-blue/40 rounded-lg p-3 space-y-1">
+                  <p className="font-bold">
+                    Server sync in progress on {' '}
+                    {lots.filter((l) => l.af_upload_status === 'uploaded').length}
+                    /{lots.length} lots uploaded
+                  </p>
+                  <p>
+                    In-flight: {lots.filter((l) => l.af_upload_status === 'uploading').length},
+                    {' '}remaining: {lots.filter(
+                      (l) =>
+                        l.af_upload_status === null ||
+                        l.af_upload_status === 'queued' ||
+                        l.af_upload_status === 'failed'
+                    ).length}
+                  </p>
+                  <p className="text-gray-500">
+                    Runs on the server — safe to navigate away or close this tab.
+                    Come back to check progress; it&apos;ll be waiting for you.
+                  </p>
+                </div>
+              )}
+              <button
+                onClick={handleUploadToAf}
+                disabled={uploading}
+                className="w-full py-2 rounded-xl border-2 border-brand-navy text-brand-navy font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+              >
+                {uploading ? 'Uploading...' : 'Server Upload (in-browser fallback)'}
               </button>
               <button
                 onClick={async () => {
