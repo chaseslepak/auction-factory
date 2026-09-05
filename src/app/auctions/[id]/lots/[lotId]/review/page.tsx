@@ -208,27 +208,57 @@ export default function LotReviewPage() {
           ? parsedStartingBid
           : null;
 
-      const { error: updateError } = await supabase
+      // Base UPDATE payload — everything the user might have edited.
+      const basePayload: Record<string, any> = {
+        item_name: listing.item_name,
+        brand: listing.brand,
+        model: listing.model,
+        category: listing.category,
+        confidence: listing.confidence,
+        condition_rating: condition,
+        quantity,
+        estimated_retail_new: listing.estimated_retail_new,
+        listed_price: listing.listed_price,
+        width: listing.width || null,
+        depth: listing.depth || null,
+        height: listing.height || null,
+        key_features: listing.key_features,
+        auction_description: listing.auction_description,
+        notes,
+      };
+
+      // Only include starting_bid when the user actually specified a
+      // value (or is clearing an existing one). Skipping it otherwise
+      // lets edit-saves succeed on databases where phase11_starting_bid.sql
+      // hasn't been run yet, so descriptions/copy/etc still stick.
+      const userTouchedStartingBid =
+        startingBid.trim() !== '' || existingLot.starting_bid != null;
+      const payload = userTouchedStartingBid
+        ? { ...basePayload, starting_bid: startingBidValue }
+        : basePayload;
+
+      let { error: updateError } = await supabase
         .from('lots')
-        .update({
-          item_name: listing.item_name,
-          brand: listing.brand,
-          model: listing.model,
-          category: listing.category,
-          confidence: listing.confidence,
-          condition_rating: condition,
-          quantity,
-          estimated_retail_new: listing.estimated_retail_new,
-          listed_price: listing.listed_price,
-          starting_bid: startingBidValue,
-          width: listing.width || null,
-          depth: listing.depth || null,
-          height: listing.height || null,
-          key_features: listing.key_features,
-          auction_description: listing.auction_description,
-          notes,
-        })
+        .update(payload)
         .eq('id', existingLot.id);
+
+      // Self-heal: if the DB doesn't know starting_bid yet and the user
+      // didn't intend to touch it, retry without it so the rest of the
+      // edit still persists. Postgres error code for undefined_column
+      // is 42703, but Supabase sometimes returns it as a plain string —
+      // match either.
+      if (
+        updateError &&
+        !userTouchedStartingBid &&
+        (updateError.code === '42703' ||
+          /starting_bid/.test(updateError.message || ''))
+      ) {
+        const retry = await supabase
+          .from('lots')
+          .update(basePayload)
+          .eq('id', existingLot.id);
+        updateError = retry.error;
+      }
 
       if (updateError) throw updateError;
 
