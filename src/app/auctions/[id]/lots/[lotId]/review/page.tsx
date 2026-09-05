@@ -242,22 +242,37 @@ export default function LotReviewPage() {
         .update(payload)
         .eq('id', existingLot.id);
 
-      // Self-heal: if the DB doesn't know starting_bid yet and the user
-      // didn't intend to touch it, retry without it so the rest of the
-      // edit still persists. Postgres error code for undefined_column
-      // is 42703, but Supabase sometimes returns it as a plain string —
-      // match either.
-      if (
-        updateError &&
-        !userTouchedStartingBid &&
-        (updateError.code === '42703' ||
-          /starting_bid/.test(updateError.message || ''))
-      ) {
+      // Self-heal: if the DB doesn't know starting_bid yet, retry without
+      // it so the rest of the edit still persists. Match Postgres 42703
+      // (undefined_column), Supabase's PGRST204 schema-cache miss, and a
+      // plain "starting_bid" / "starting bid" mention anywhere in the
+      // error payload — Supabase surfaces the schema-cache error as a
+      // human-readable message rather than a stable code.
+      const isStartingBidSchemaError = (err: any): boolean => {
+        if (!err) return false;
+        if (err.code === '42703' || err.code === 'PGRST204') return true;
+        const haystack = `${err.message || ''} ${err.details || ''} ${err.hint || ''}`;
+        return /starting.?bid/i.test(haystack);
+      };
+
+      let startingBidDropped = false;
+      if (updateError && isStartingBidSchemaError(updateError)) {
         const retry = await supabase
           .from('lots')
           .update(basePayload)
           .eq('id', existingLot.id);
         updateError = retry.error;
+        // If the retry-without-starting_bid succeeded and the user
+        // HAD set a value, tell them — so they know why the number
+        // they typed didn't stick, and can ping admin to run the
+        // migration.
+        if (
+          !updateError &&
+          userTouchedStartingBid &&
+          startingBidValue !== null
+        ) {
+          startingBidDropped = true;
+        }
       }
 
       if (updateError) throw updateError;
@@ -292,6 +307,15 @@ export default function LotReviewPage() {
         .eq('id', lotId)
         .single();
       if (data) setExistingLot(data as LotWithPhotos);
+
+      // If we dropped starting_bid to save the rest, warn the user
+      // in the same banner that shows errors so they know why the
+      // number they typed didn't stick. Everything else DID save.
+      if (startingBidDropped) {
+        setError(
+          `Your changes saved, but the Starting Bid value ($${startingBidValue?.toFixed(2)}) was NOT stored — this database needs the starting_bid column added. Ask an admin to run phase11_starting_bid.sql.`
+        );
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
