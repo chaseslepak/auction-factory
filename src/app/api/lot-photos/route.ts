@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createServiceClient } from '@supabase/supabase-js';
 
 // DELETE a specific photo from a lot
 export async function DELETE(request: NextRequest) {
@@ -39,10 +40,11 @@ export async function DELETE(request: NextRequest) {
 
 // POST to reorder photos for a lot
 export async function POST(request: NextRequest) {
-  const supabase = createClient();
+  // Auth via the user-scoped client so only logged-in users can hit this.
+  const userClient = createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await userClient.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -53,19 +55,55 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'lot_id and photo_ids array required' }, { status: 400 });
   }
 
-  // Update display_order for each photo in parallel, then check for errors
-  const results = await Promise.all(
-    photo_ids.map((id: string, i: number) =>
-      supabase
-        .from('lot_photos')
-        .update({ display_order: i })
-        .eq('id', id)
-        .eq('lot_id', lot_id)
-    )
+  // Actual writes go through the service-role client. The lot_photos
+  // table has no UPDATE RLS policy (see supabase/phase12_lot_photos_update.sql),
+  // so user-scoped .update() gets silently dropped (0 rows affected,
+  // no error) and reordering never persists. Using service role bypasses
+  // RLS so the reorder works today regardless of whether the migration
+  // has been run.
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) {
+    return NextResponse.json(
+      { error: 'Service role key not configured' },
+      { status: 500 }
+    );
+  }
+  const supabase = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serviceKey
   );
-  const firstError = results.find((r) => r.error);
-  if (firstError?.error) {
-    return NextResponse.json({ error: firstError.error.message }, { status: 500 });
+
+  // Update display_order for each photo. Sequential (not Promise.all)
+  // so we can surface a per-row error if a specific update fails and
+  // to keep query concurrency low for this small operation. Include
+  // .select() so we can verify the row actually matched — if a
+  // provided photo_id doesn't belong to lot_id, `data` comes back
+  // empty and we know the client sent stale IDs.
+  const failures: { id: string; reason: string }[] = [];
+  for (let i = 0; i < photo_ids.length; i++) {
+    const id = photo_ids[i];
+    const { data, error } = await supabase
+      .from('lot_photos')
+      .update({ display_order: i })
+      .eq('id', id)
+      .eq('lot_id', lot_id)
+      .select('id');
+    if (error) {
+      failures.push({ id, reason: error.message });
+    } else if (!data || data.length === 0) {
+      failures.push({ id, reason: 'no matching row (wrong lot_id?)' });
+    }
+  }
+
+  if (failures.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Reorder partial fail: ${failures
+          .map((f) => `${f.id.slice(0, 8)} (${f.reason})`)
+          .join('; ')}`,
+      },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ success: true });
