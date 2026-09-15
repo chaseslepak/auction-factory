@@ -155,18 +155,34 @@ export default function AuditPage() {
             <>
               <div className="border-t border-gray-100 pt-3">
                 <p className="text-xs text-gray-500 mb-2">
-                  <strong className="text-brand-navy">Renumber AF to match lotter:</strong>{' '}
-                  paste this script into AF admin&apos;s{' '}
-                  <code>relot_auction.php</code> page console to auto-fill
-                  every &ldquo;New Item #&rdquo; input, then click Save on
-                  the AF page.
+                  <strong className="text-brand-navy">Renumber AF to match lotter:</strong>
                 </p>
+                <ol className="text-xs text-gray-600 mb-3 space-y-1 list-decimal list-inside">
+                  <li>Tap <b>Copy AF Re-Lot Fix Script</b>.</li>
+                  <li>
+                    Tap <b>Open AF Re-Lot Page ↗</b> to open the AF
+                    fixer form (URL must have <code>&amp;relot=Re-Lot</code>).
+                  </li>
+                  <li>
+                    On desktop open DevTools console
+                    (Cmd+Option+J), paste, press Enter.
+                  </li>
+                  <li>Review status panel, click <b>Save New Lot Numbers</b> on AF.</li>
+                </ol>
                 <button
                   onClick={copyRelotScript}
-                  className="w-full py-2.5 rounded-full border-2 border-brand-blue text-brand-blue font-black text-xs uppercase tracking-wide"
+                  className="w-full py-2.5 rounded-full border-2 border-brand-blue text-brand-blue font-black text-xs uppercase tracking-wide mb-2"
                 >
-                  {relotCopied ? '✓ Copied — paste into AF console' : 'Copy AF Re-Lot Fix Script'}
+                  {relotCopied ? '✓ Copied — paste into AF console' : '1. Copy AF Re-Lot Fix Script'}
                 </button>
+                <a
+                  href={`https://www.auctionfactory.com/admin/relot_auction.php?auction=${result.af_auction_id}&relot=Re-Lot`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-full text-center py-2.5 rounded-full bg-brand-navy text-white font-black text-xs uppercase tracking-wide"
+                >
+                  2. Open AF Re-Lot Page ↗
+                </a>
                 {relotError && (
                   <p className="text-xs text-red-600 mt-2">{relotError}</p>
                 )}
