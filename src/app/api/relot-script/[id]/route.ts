@@ -78,12 +78,32 @@ export async function GET(
     byName.get(key).push(l.n);
   });
 
-  const form = document.getElementById('relotForm');
+  // Locate the relot form. Prefer the historical #relotForm id, but
+  // fall back to any <form> whose inputs match the newlot[...] pattern
+  // — that's the structural signature of the relot page regardless of
+  // whatever AF names the form.
+  let form = document.getElementById('relotForm');
   if (!form) {
-    setMsg('ERROR: could not find #relotForm on this page. Are you on relot_auction.php?');
-    return;
+    const forms = Array.from(document.querySelectorAll('form'));
+    form = forms.find((f) => f.querySelector('input[name^="newlot"]')) || null;
   }
-  const rows = form.querySelectorAll('tbody tr');
+  // Last resort: even if AF has stopped wrapping the inputs in a <form>,
+  // walk the whole document for newlot inputs and use their common
+  // ancestor as the row container.
+  let rows;
+  if (form) {
+    rows = form.querySelectorAll('tbody tr');
+    if (!rows.length) rows = form.querySelectorAll('tr');
+  } else {
+    const anyInputs = document.querySelectorAll('input[name^="newlot"]');
+    if (anyInputs.length === 0) {
+      setMsg('ERROR: no newlot[...] inputs found. Are you on <b>relot_auction.php?auction=&lt;id&gt;&relot=Re-Lot</b> (make sure the URL includes <b>&relot=Re-Lot</b> — the plain relot_auction.php page shows a list, not the fixer form)?');
+      return;
+    }
+    // Use each input's row directly as the "row" (the loop below reads
+    // sibling cells, so this works even outside a table).
+    rows = Array.from(anyInputs).map((inp) => inp.closest('tr') || inp.parentElement || inp);
+  }
 
   let updated = 0;
   let alreadyCorrect = 0;
