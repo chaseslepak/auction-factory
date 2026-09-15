@@ -40,6 +40,28 @@ export default function AuditPage() {
   } | null>(null);
   const [relotCopied, setRelotCopied] = useState(false);
   const [relotError, setRelotError] = useState<string | null>(null);
+  const [relotSyncing, setRelotSyncing] = useState(false);
+  const [relotSyncResult, setRelotSyncResult] = useState<any | null>(null);
+
+  const runRelotSync = async (dryRun: boolean) => {
+    setRelotError(null);
+    setRelotSyncing(true);
+    setRelotSyncResult(null);
+    try {
+      const url = `/api/relot-sync/${id}${dryRun ? '?dry_run=1' : ''}`;
+      const res = await fetch(url, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setRelotSyncResult(data);
+      if (!dryRun && data.ok !== false) {
+        await runAudit();
+      }
+    } catch (err: any) {
+      setRelotError(err?.message || String(err));
+    } finally {
+      setRelotSyncing(false);
+    }
+  };
 
   const copyRelotScript = async () => {
     setRelotError(null);
@@ -153,9 +175,54 @@ export default function AuditPage() {
           )}
           {result && (
             <>
-              <div className="border-t border-gray-100 pt-3">
-                <p className="text-xs text-gray-500 mb-2">
-                  <strong className="text-brand-navy">Renumber AF to match lotter:</strong>
+              <div className="border-t border-gray-100 pt-3 space-y-3">
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">
+                    <strong className="text-brand-navy">Renumber AF to match lotter — one-tap (server-side):</strong>{' '}
+                    lotter talks to AF using the stored session cookie.
+                    No paste, no console. Preview first, then apply.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => runRelotSync(true)}
+                      disabled={relotSyncing}
+                      className="flex-1 py-2 rounded-full border-2 border-brand-blue text-brand-blue font-black text-xs uppercase tracking-wide disabled:opacity-50"
+                    >
+                      {relotSyncing ? '…' : 'Preview'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!confirm('Push AF numbering changes now? This POSTs to AF using your session cookie.')) return;
+                        runRelotSync(false);
+                      }}
+                      disabled={relotSyncing || !relotSyncResult?.dryRun}
+                      className="flex-1 py-2 rounded-full bg-brand-navy text-white font-black text-xs uppercase tracking-wide disabled:opacity-50"
+                    >
+                      {relotSyncing ? '…' : 'Apply on AF'}
+                    </button>
+                  </div>
+                  {relotSyncResult && (
+                    <div className="mt-2 text-xs bg-gray-50 border border-gray-200 rounded p-2 space-y-0.5 font-mono">
+                      <p>
+                        <b>{relotSyncResult.will_change ?? 0}</b> will change,
+                        {' '}<b>{relotSyncResult.already_correct ?? 0}</b> already correct,
+                        {' '}<b>{relotSyncResult.unmatched ?? 0}</b> unmatched
+                        {' '}(AF rows: {relotSyncResult.total_af_rows}, lotter lots: {relotSyncResult.total_lotter_lots})
+                      </p>
+                      {relotSyncResult.posted && relotSyncResult.ok && (
+                        <p className="text-green-700 font-bold">
+                          ✓ Pushed. Re-run audit to verify.
+                        </p>
+                      )}
+                      {relotSyncResult.dryRun && relotSyncResult.will_change > 0 && (
+                        <p className="text-brand-blue">Preview only. Tap Apply on AF to push.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <p className="text-xs text-gray-500 mb-2 pt-3 border-t border-gray-100">
+                  <strong className="text-brand-navy">Fallback: paste-in script:</strong>
                 </p>
                 <ol className="text-xs text-gray-600 mb-3 space-y-1 list-decimal list-inside">
                   <li>Tap <b>Copy AF Re-Lot Fix Script</b>.</li>
