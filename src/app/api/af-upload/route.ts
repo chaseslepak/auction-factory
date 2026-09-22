@@ -74,12 +74,25 @@ export async function POST(request: NextRequest) {
     headers: { Cookie: cookieUsed },
   });
   const checkHtml = await checkRes.text();
-  const hasLogin = checkHtml.includes('psEmail') || checkHtml.includes('psPassword');
-  const hasForm = checkHtml.includes('Item Name');
+  // Session is dead if AF returns the login form.
+  const hasLogin =
+    /name=["']psEmail["']|name=["']psPassword["']/i.test(checkHtml);
+  // Form is present if we can find the hidden auction field OR any of
+  // the input names we're about to fill. Previously we grepped for the
+  // visible text "Item Name", which AF's UI has now dropped — the
+  // structural markers are stable across their UI changes.
+  const FORM_MARKERS = [
+    /name=["']auction["']/i,
+    /name=["']title["']/i,
+    /name=["']original_price["']/i,
+    /name=["']condition["']/i,
+    /add_item_2new/i,
+  ];
+  const hasForm = FORM_MARKERS.some((rx) => rx.test(checkHtml));
   if (hasLogin || !hasForm) {
     return NextResponse.json(
       {
-        error: `AF session check failed. Cookie: ${cookieUsed.substring(0, 30)}..., URL: ${checkUrl}, Status: ${checkRes.status}, HasLogin: ${hasLogin}, HasForm: ${hasForm}, First200: ${checkHtml.substring(0, 200)}`
+        error: `AF session check failed. Cookie: ${cookieUsed.substring(0, 30)}..., URL: ${checkUrl}, Status: ${checkRes.status}, HasLogin: ${hasLogin}, HasForm: ${hasForm}, First500: ${checkHtml.substring(0, 500)}`
       },
       { status: 401 }
     );
