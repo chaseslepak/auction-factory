@@ -13,6 +13,7 @@ import ReorderablePhotos from '@/components/ReorderablePhotos';
 import ImageZoom from '@/components/ImageZoom';
 import ConditionSlider from '@/components/ConditionSlider';
 import { getPendingLot, clearPendingLot } from '@/lib/pending-lot-store';
+import { computeListedPrice, syncRetailLine } from '@/lib/listing-price';
 
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
@@ -36,10 +37,18 @@ export default function LotReviewPage() {
   const updateListingField = (field: keyof GenerateListingResponse, value: any) => {
     if (!listing) return;
     const updated = { ...listing, [field]: value };
-    // If retail price changed, recalculate listed price
+    // If retail price changed, recompute listed price AND rewrite the
+    // "Retail Price: $X" line inside auction_description so the narrative
+    // text matches the number field. Without this, the description can
+    // keep its old price string while the number updates.
     if (field === 'estimated_retail_new') {
-      const retail = Number(value) || 0;
-      updated.listed_price = Math.round(retail * 1.10);
+      updated.listed_price = computeListedPrice(Number(value) || 0);
+      if (updated.auction_description) {
+        updated.auction_description = syncRetailLine(
+          updated.auction_description,
+          updated.listed_price
+        );
+      }
     }
     setListing(updated);
   };

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { computeListedPrice, syncRetailLine } from '@/lib/listing-price';
 
 export const maxDuration = 60;
 
@@ -404,14 +405,15 @@ async function processRefresh(request: NextRequest) {
           const maxPrice = Math.max(currentRetail, webstaurantPrice, webSearchPrice);
           if (maxPrice > currentRetail) {
             const newRetail = Math.round(maxPrice);
-            const newListed = Math.round(newRetail * 1.10);
-            await supabase
-              .from('lots')
-              .update({
-                estimated_retail_new: newRetail,
-                listed_price: newListed,
-              })
-              .eq('id', lot.id);
+            const newListed = computeListedPrice(newRetail);
+            const updates: any = {
+              estimated_retail_new: newRetail,
+              listed_price: newListed,
+            };
+            if (lot.auction_description) {
+              updates.auction_description = syncRetailLine(lot.auction_description, newListed);
+            }
+            await supabase.from('lots').update(updates).eq('id', lot.id);
           }
 
           updated++;
@@ -430,14 +432,15 @@ async function processRefresh(request: NextRequest) {
         );
         if (webSearchPrice > currentRetail) {
           const newRetail = Math.round(webSearchPrice);
-          const newListed = Math.round(newRetail * 1.10);
-          await supabase
-            .from('lots')
-            .update({
-              estimated_retail_new: newRetail,
-              listed_price: newListed,
-            })
-            .eq('id', lot.id);
+          const newListed = computeListedPrice(newRetail);
+          const updates: any = {
+            estimated_retail_new: newRetail,
+            listed_price: newListed,
+          };
+          if (lot.auction_description) {
+            updates.auction_description = syncRetailLine(lot.auction_description, newListed);
+          }
+          await supabase.from('lots').update(updates).eq('id', lot.id);
         }
         results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
       }

@@ -362,8 +362,15 @@ Respond with ONLY a JSON object, no other text:
     const deepPrice = priceResult.price || 0;
     const maxPrice = Math.max(currentRetail, webstaurantPrice, deepPrice);
     if (maxPrice > currentRetail) {
-      updates.estimated_retail_new = Math.round(maxPrice);
-      updates.listed_price = Math.round(Math.round(maxPrice) * 1.10);
+      const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
+      const newRetail = Math.round(maxPrice);
+      updates.estimated_retail_new = newRetail;
+      updates.listed_price = computeListedPrice(newRetail);
+      // Keep the "Retail Price: $X" line in the description in sync.
+      const currentDesc = updates.auction_description ?? lot.auction_description;
+      if (currentDesc) {
+        updates.auction_description = syncRetailLine(currentDesc, updates.listed_price);
+      }
     }
 
     if (Object.keys(updates).length > 0) {
