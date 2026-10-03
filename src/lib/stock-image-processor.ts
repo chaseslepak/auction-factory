@@ -365,15 +365,19 @@ export async function processStockImageJob(
 
     const maxPrice = Math.max(currentRetail, diag.webstaurantPrice, webSearchPrice);
     if (maxPrice > currentRetail) {
+      const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
       const newRetail = Math.round(maxPrice);
-      const newListed = Math.round(newRetail * 1.10);
-      await supabase
-        .from('lots')
-        .update({
-          estimated_retail_new: newRetail,
-          listed_price: newListed,
-        })
-        .eq('id', lot.id);
+      const newListed = computeListedPrice(newRetail);
+      const updates: any = {
+        estimated_retail_new: newRetail,
+        listed_price: newListed,
+      };
+      // Keep the "Retail Price: $X" line inside the description in sync
+      // with the new listed_price so the two don't drift apart.
+      if (lot.auction_description) {
+        updates.auction_description = syncRetailLine(lot.auction_description, newListed);
+      }
+      await supabase.from('lots').update(updates).eq('id', lot.id);
       diag.finalOutcome = 'price-updated-only';
     }
 

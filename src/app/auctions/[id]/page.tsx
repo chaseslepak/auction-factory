@@ -657,19 +657,26 @@ export default function AuctionDetailPage() {
       const multi = Number(bulkPriceMultiplier);
       if (!isNaN(multi) && multi > 0) {
         // Apply multiplier per-lot (can't do in one query)
+        const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
         const lotsToUpdate = lots.filter((l) => selectedLots.has(l.id));
         for (const lot of lotsToUpdate) {
           const currentRetail = Number(lot.estimated_retail_new) || 0;
           const newRetail = Math.round(currentRetail * multi);
-          const newListed = Math.round(newRetail * 1.10);
-          await supabase
-            .from('lots')
-            .update({
-              estimated_retail_new: newRetail,
-              listed_price: newListed,
-              ...updates,
-            })
-            .eq('id', lot.id);
+          const newListed = computeListedPrice(newRetail);
+          const perLotUpdate: any = {
+            estimated_retail_new: newRetail,
+            listed_price: newListed,
+            ...updates,
+          };
+          // Keep "Retail Price: $X" line inside the description in sync
+          // with the new listed_price so the two don't drift apart.
+          if ((lot as any).auction_description) {
+            perLotUpdate.auction_description = syncRetailLine(
+              (lot as any).auction_description,
+              newListed
+            );
+          }
+          await supabase.from('lots').update(perLotUpdate).eq('id', lot.id);
         }
         setBulkEditOpen(false);
         setSelectedLots(new Set());

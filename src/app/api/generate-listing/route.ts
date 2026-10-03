@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { logApiUsage } from '@/lib/api-usage';
+import { computeListedPrice, syncRetailLine } from '@/lib/listing-price';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -447,9 +448,22 @@ export async function POST(request: NextRequest) {
     const aiEstimate = Number(listing.estimated_retail_new) || 0;
     listing.estimated_retail_new = Math.max(aiEstimate, webstaurantPrice, webSearchMaxPrice);
 
-    // Compute listed price (retail + 10%)
-    const retailNew = Number(listing.estimated_retail_new) || 0;
-    listing.listed_price = Math.round(retailNew * 1.10);
+    // Compute listed price (retail + markup). Lives in @/lib/listing-price.
+    listing.listed_price = computeListedPrice(listing.estimated_retail_new);
+
+    // Enforce price consistency in the description text. The AI puts a
+    // "Retail Price: $X" line in auction_description, but its arithmetic
+    // can drift AND the server may have just overridden estimated_retail_new
+    // via web search — either way, listed_price is the ground truth and
+    // the narrative must match. Replace any Retail Price line (with or
+    // without the "Retail " prefix, and handling comma/decimal values)
+    // with the computed listed_price.
+    if (listing.auction_description && listing.listed_price > 0) {
+      listing.auction_description = syncRetailLine(
+        listing.auction_description,
+        listing.listed_price
+      );
+    }
 
     // Ensure stock_image_url exists in response
     if (!listing.stock_image_url) {
