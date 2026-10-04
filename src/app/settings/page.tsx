@@ -106,7 +106,7 @@ export default function SettingsPage() {
               <li>
                 Log into{' '}
                 <a
-                  href="https://www.auctionfactory.com/admin/"
+                  href="https://auctionfactory.com/admin/"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-brand-blue underline"

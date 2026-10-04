@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { encrypt, decrypt } from '@/lib/crypto';
 
-const AF_BASE = 'https://www.auctionfactory.com/admin';
+const AF_BASE = 'https://auctionfactory.com/admin';
 
 export async function POST(request: NextRequest) {
   const supabase = createClient();

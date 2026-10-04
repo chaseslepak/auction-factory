@@ -243,7 +243,7 @@ export default function AuditPage() {
                   {relotCopied ? '✓ Copied — paste into AF console' : '1. Copy AF Re-Lot Fix Script'}
                 </button>
                 <a
-                  href={`https://www.auctionfactory.com/admin/relot_auction.php?auction=${result.af_auction_id}&relot=Re-Lot`}
+                  href={`https://auctionfactory.com/admin/relot_auction.php?auction=${result.af_auction_id}&relot=Re-Lot`}
                   target="_blank"
                   rel="noreferrer"
                   className="block w-full text-center py-2.5 rounded-full bg-brand-navy text-white font-black text-xs uppercase tracking-wide"

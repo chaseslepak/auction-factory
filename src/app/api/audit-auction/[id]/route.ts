@@ -62,7 +62,7 @@ export async function GET(
     );
   }
 
-  const afUrl = `https://www.auctionfactory.com/auction_details.php?auction=${mapRow.af_auction_id}`;
+  const afUrl = `https://auctionfactory.com/auction_details.php?auction=${mapRow.af_auction_id}`;
 
   let scraped;
   try {
@@ -246,7 +246,7 @@ export async function POST(
     );
   }
 
-  const afUrl = `https://www.auctionfactory.com/auction_details.php?auction=${mapRow.af_auction_id}`;
+  const afUrl = `https://auctionfactory.com/auction_details.php?auction=${mapRow.af_auction_id}`;
   let scraped;
   try {
     scraped = await scrapeAuction(afUrl, false);

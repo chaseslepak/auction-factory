@@ -5,7 +5,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-const AF_BASE = 'https://www.auctionfactory.com/admin';
+const AF_BASE = 'https://auctionfactory.com/admin';
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -331,7 +331,7 @@ export async function POST(
       'User-Agent': BROWSER_UA,
       Accept: 'text/html',
       Referer: relotUrl,
-      Origin: 'https://www.auctionfactory.com',
+      Origin: 'https://auctionfactory.com',
     },
     body: body.toString(),
     redirect: 'manual',
