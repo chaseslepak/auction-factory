@@ -5,7 +5,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-const AF_BASE = 'https://www.auctionfactory.com';
+const AF_BASE = 'https://auctionfactory.com';
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -246,7 +246,7 @@ export async function GET(request: NextRequest) {
       newlot_pattern: 'input[name^="newlot["]',
       submit: 'Save New Lot Numbers',
     },
-    scraper_item_detail_url: 'https://www.auctionfactory.com/item_detail.php?item=<id>',
+    scraper_item_detail_url: 'https://auctionfactory.com/item_detail.php?item=<id>',
   };
 
   return NextResponse.json({

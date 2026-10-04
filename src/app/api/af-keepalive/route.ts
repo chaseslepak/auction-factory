@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 
-const AF_BASE = 'https://www.auctionfactory.com/admin';
+const AF_BASE = 'https://auctionfactory.com/admin';
 
 export async function GET(request: NextRequest) {
   // Allow both authenticated users and Vercel cron (uses service role)

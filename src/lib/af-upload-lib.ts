@@ -19,7 +19,7 @@ const CONDITION_MAP: Record<number, string> = {
   1: '1 - Broken',
 };
 
-const AF_BASE = 'https://www.auctionfactory.com/admin';
+const AF_BASE = 'https://auctionfactory.com/admin';
 
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -204,7 +204,7 @@ export async function uploadLotToAF(
           'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
         Referer: getUrl,
-        Origin: 'https://www.auctionfactory.com',
+        Origin: 'https://auctionfactory.com',
       },
       body: fullBody,
       redirect: 'follow',

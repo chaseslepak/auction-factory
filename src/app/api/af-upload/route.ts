@@ -5,7 +5,7 @@ import { uploadLotToAF } from '@/lib/af-upload-lib';
 // Increase Vercel function timeout (max 60s on Hobby plan)
 export const maxDuration = 60;
 
-const AF_BASE = 'https://www.auctionfactory.com/admin';
+const AF_BASE = 'https://auctionfactory.com/admin';
 
 // Client-driven per-batch upload endpoint (in-browser loop, dies on
 // navigate-away). The background version that survives navigation lives
