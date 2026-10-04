@@ -115,12 +115,24 @@ export default function SettingsPage() {
                 </a>{' '}
                 in a new tab
               </li>
-              <li>Once logged in, open the browser console (F12 &gt; Console)</li>
               <li>
-                Type: <code className="bg-gray-200 px-1 rounded">document.cookie</code> and press Enter
+                Open DevTools (<b>F12</b> or <b>Cmd+Option+I</b>) and go to the{' '}
+                <b>Application</b> tab (in Firefox: <b>Storage</b>)
               </li>
-              <li>Copy the entire result and paste it below</li>
+              <li>
+                Left sidebar → <b>Cookies</b> → <b>https://auctionfactory.com</b>
+              </li>
+              <li>
+                Find the row named <code className="bg-gray-200 px-1 rounded">PHPSESSID</code> and
+                copy its <b>Value</b> column
+              </li>
+              <li>Paste it below</li>
             </ol>
+            <p className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+              Note: typing <code>document.cookie</code> in the console no longer works — AF marked
+              the session cookie as <b>HttpOnly</b>, which blocks that path. Use the Application tab
+              instead.
+            </p>
           </div>
 
           <textarea
