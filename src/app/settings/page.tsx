@@ -49,17 +49,18 @@ export default function SettingsPage() {
         setCookie('');
         checkSession();
       } else {
-        // Include the diagnostic (http_status, redirect_url, body_sample)
-        // in the error so Chase can paste it back and I can see what AF
-        // actually returned to us.
+        // Build the error text as a SINGLE LINE. Any component or
+        // middleware that funnels error messages into HTTP headers
+        // (Sentry, Vercel analytics, etc.) can't accept newlines —
+        // "Headers.append: ... is an invalid header value" is the
+        // DOMException you get for that. Keep it one line.
         const parts: string[] = [data.error || `HTTP ${res.status}`];
         if (data.diagnostic) {
           try {
-            parts.push('--- diagnostic ---');
-            parts.push(JSON.stringify(data.diagnostic, null, 2));
+            parts.push('[' + JSON.stringify(data.diagnostic) + ']');
           } catch {}
         }
-        setMessage({ type: 'error', text: parts.join('\n') });
+        setMessage({ type: 'error', text: parts.join(' ') });
       }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
