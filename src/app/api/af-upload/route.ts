@@ -186,6 +186,11 @@ export async function POST(request: NextRequest) {
         cookieUsed,
         isLast ? 'exit' : 'next'
       );
+      // Roll the cookie forward — AF rotates PHPSESSID on each form
+      // POST, so the next lot MUST use the latest value or AF bounces
+      // us to the login page mid-batch.
+      if (result.updated_cookie) cookieUsed = result.updated_cookie;
+
       let retryCount = 0;
       while (!result.success && retryCount < 2 && result.error?.startsWith('NETWORK_ERROR:')) {
         await new Promise((r) => setTimeout(r, 1000 * (retryCount + 1)));
@@ -196,6 +201,7 @@ export async function POST(request: NextRequest) {
           cookieUsed,
           isLast ? 'exit' : 'next'
         );
+        if (result.updated_cookie) cookieUsed = result.updated_cookie;
         retryCount++;
       }
 
@@ -220,6 +226,7 @@ export async function POST(request: NextRequest) {
           cookieUsed,
           isLast ? 'exit' : 'next'
         );
+        if (placeholderResult.updated_cookie) cookieUsed = placeholderResult.updated_cookie;
         if (placeholderResult.success) {
           result = {
             success: false,
@@ -271,6 +278,28 @@ export async function POST(request: NextRequest) {
         error: lotErr?.message || 'Unknown error',
       });
     }
+  }
+
+  // Persist the rotated cookie back to Supabase so the NEXT HTTP
+  // invocation (next batch, next page refresh, next audit) starts with
+  // the current PHPSESSID instead of a stale one. Encrypt before storing.
+  try {
+    const originalCookie = session.session_cookie;
+    const freshValue =
+      cookieUsed && cookieUsed !== originalCookie ? cookieUsed : null;
+    if (freshValue) {
+      let toStore = freshValue;
+      try {
+        const { encrypt } = await import('@/lib/crypto');
+        toStore = encrypt(freshValue);
+      } catch {}
+      await supabase
+        .from('af_session')
+        .update({ session_cookie: toStore, updated_at: new Date().toISOString() })
+        .eq('id', 1);
+    }
+  } catch (e) {
+    console.error('Failed to persist rotated AF cookie:', e);
   }
 
   try {
