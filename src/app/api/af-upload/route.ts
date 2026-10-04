@@ -69,9 +69,13 @@ export async function POST(request: NextRequest) {
     const { decrypt } = await import('@/lib/crypto');
     cookieUsed = decrypt(cookieUsed);
   } catch {}
+  // AF now 302-redirects add_item_2new.php → add_item.php for everyone.
+  // Follow redirects so our check sees the real form, and look for the
+  // CSRF token / form markers on the final body.
   const checkUrl = `${AF_BASE}/add_item_2new.php?auction=${mapping.af_auction_id}`;
   const checkRes = await fetch(checkUrl, {
     headers: { Cookie: cookieUsed },
+    redirect: 'follow',
   });
   const checkHtml = await checkRes.text();
   // Session is dead if AF returns the login form.

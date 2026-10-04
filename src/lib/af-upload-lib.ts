@@ -68,16 +68,36 @@ export async function uploadLotToAF(
   saveAction: 'next' | 'exit'
 ): Promise<{ success: boolean; error?: string; debug?: string }> {
   try {
-    const getUrl = `${AF_BASE}/add_item_2new.php?auction=${afAuctionId}`;
-    const pageRes = await fetchWithCookie(getUrl, sessionCookie);
+    // AF's rebuilt backend 302-redirects /admin/add_item_2new.php to
+    // /admin/add_item.php for everyone (not just logged-out users), so
+    // we FOLLOW redirects here. Session expiry is detected by sniffing
+    // the final body for the login form instead of trusting a 302.
+    const initialUrl = `${AF_BASE}/add_item_2new.php?auction=${afAuctionId}`;
+    const pageRes = await fetch(initialUrl, {
+      headers: {
+        'User-Agent': BROWSER_UA,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Cookie: sessionCookie,
+      },
+      redirect: 'follow',
+    });
 
-    if (pageRes.status === 302) {
+    const pageHtml = await pageRes.text();
+    // Session-expiry check now runs on the final body — if AF bounced us
+    // all the way to the login page, we'll see the login inputs here.
+    if (/name=["']psEmail["']|name=["']psPassword["']/i.test(pageHtml)) {
       return { success: false, error: 'AF session expired. Please re-login.' };
     }
 
-    const pageHtml = await pageRes.text();
+    // After a 302 add_item_2new.php → add_item.php, the form POSTs back to
+    // the current URL (its action is empty). Use the response's final URL
+    // as our POST target so we don't ping-pong through the redirect each
+    // time.
+    const postUrl = pageRes.url || initialUrl;
+
     const getHidden = (name: string) => {
-      const match = pageHtml.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`));
+      const match = pageHtml.match(new RegExp(`name=["']${name}["'][^>]*value=["']([^"']*)["']`));
       return match ? match[1] : '';
     };
 
@@ -86,6 +106,10 @@ export async function uploadLotToAF(
     const endTime = getHidden('end_time');
     const autoExtend = getHidden('auto_extend');
     const staggered = getHidden('staggered');
+    // AF added CSRF protection on the rebuild. Every form POST needs the
+    // token or AF returns HTTP 403 (FORBIDDEN_BY_AF). Pull it from the
+    // same form page we're reading hidden fields from.
+    const csrfToken = getHidden('af_csrf_token');
 
     if (!auctionInternal) {
       return {
@@ -102,6 +126,12 @@ export async function uploadLotToAF(
       body += `${value}\r\n`;
     };
 
+    // Send af_csrf_token FIRST — before any other field — so if AF's WAF
+    // scans fields in order and bails on a missing token early, we never
+    // hit that path.
+    if (csrfToken) {
+      addField('af_csrf_token', csrfToken);
+    }
     addField('auction', auctionInternal);
     addField('auction_id', afAuctionId);
     addField('end_date', endDate);
@@ -191,10 +221,13 @@ export async function uploadLotToAF(
       offset += part.length;
     }
 
-    const url = `${AF_BASE}/add_item_2new.php?auction=${afAuctionId}`;
+    // Post to the final URL from the GET (after any redirect). AF's new
+    // backend redirects add_item_2new.php → add_item.php, and the form's
+    // action is empty (= submit to current URL), so this matches browser
+    // behavior.
     const postController = new AbortController();
     const postTimeoutId = setTimeout(() => postController.abort(), 40000);
-    const res = await fetch(url, {
+    const res = await fetch(postUrl, {
       method: 'POST',
       headers: {
         Cookie: sessionCookie,
@@ -203,7 +236,7 @@ export async function uploadLotToAF(
         Accept:
           'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        Referer: getUrl,
+        Referer: postUrl,
         Origin: 'https://auctionfactory.com',
       },
       body: fullBody,
