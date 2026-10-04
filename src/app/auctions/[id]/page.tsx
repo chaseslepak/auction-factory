@@ -73,7 +73,25 @@ export default function AuctionDetailPage() {
       if (data.auctions && data.auctions.length > 0) {
         setAfAuctions(data.auctions);
       } else if (data.error) {
-        setUploadMsg({ type: 'error', text: `AF auctions: ${data.error}` });
+        // Surface the diagnostics array if the server included one so
+        // Chase can see which candidate URL AF served and how many
+        // <option> tags were on each page — tells us at a glance if
+        // the dropdown lives at a new URL or the <option> markup
+        // changed.
+        const diag = Array.isArray(data.diagnostics)
+          ? data.diagnostics
+              .map(
+                (d: any) =>
+                  `${d.url} → HTTP ${d.http_status}, ${d.option_count} options, ${d.auction_count} auctions`
+              )
+              .join('\n')
+          : '';
+        setUploadMsg({
+          type: 'error',
+          text: diag
+            ? `AF auctions: ${data.error}\n\n${diag}`
+            : `AF auctions: ${data.error}`,
+        });
       } else {
         setUploadMsg({ type: 'error', text: 'No AF auctions found. Check AF session in Settings.' });
       }
