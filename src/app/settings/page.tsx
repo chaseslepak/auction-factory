@@ -49,7 +49,17 @@ export default function SettingsPage() {
         setCookie('');
         checkSession();
       } else {
-        setMessage({ type: 'error', text: data.error });
+        // Include the diagnostic (http_status, redirect_url, body_sample)
+        // in the error so Chase can paste it back and I can see what AF
+        // actually returned to us.
+        const parts: string[] = [data.error || `HTTP ${res.status}`];
+        if (data.diagnostic) {
+          try {
+            parts.push('--- diagnostic ---');
+            parts.push(JSON.stringify(data.diagnostic, null, 2));
+          } catch {}
+        }
+        setMessage({ type: 'error', text: parts.join('\n') });
       }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -144,7 +154,7 @@ export default function SettingsPage() {
           />
 
           {message && (
-            <p className={`text-sm mt-2 ${message.type === 'success' ? 'text-brand-green' : 'text-red-500'}`}>
+            <p className={`text-sm mt-2 whitespace-pre-wrap break-all font-mono ${message.type === 'success' ? 'text-brand-green' : 'text-red-500'}`}>
               {message.text}
             </p>
           )}
