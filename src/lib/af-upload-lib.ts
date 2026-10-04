@@ -60,13 +60,66 @@ async function fetchWithCookie(url: string, cookie: string, options: RequestInit
   });
 }
 
+// Merge a `Set-Cookie` response header value into the current cookie
+// string. AF now rotates PHPSESSID on each form POST (CSRF rotation
+// pattern), so if we don't carry forward the new value, every lot after
+// the first succeeds — until AF's expiry grace runs out and the
+// stale cookie starts bouncing to the login page mid-batch.
+//
+// Returns the updated cookie string. If no Set-Cookie was sent, returns
+// the original unchanged.
+export function mergeSetCookie(current: string, res: Response): string {
+  // fetch's Headers.get('set-cookie') collapses multiple cookies into
+  // one comma-joined string — can't safely split on ','. Use raw()
+  // when available (undici) or getSetCookie() (new standard).
+  const anyHeaders = res.headers as any;
+  let setCookies: string[] = [];
+  if (typeof anyHeaders.getSetCookie === 'function') {
+    setCookies = anyHeaders.getSetCookie() || [];
+  } else if (anyHeaders.raw && typeof anyHeaders.raw === 'function') {
+    const raw = anyHeaders.raw();
+    if (raw && raw['set-cookie']) setCookies = raw['set-cookie'];
+  } else {
+    const sc = res.headers.get('set-cookie');
+    if (sc) setCookies = [sc];
+  }
+
+  if (setCookies.length === 0) return current;
+
+  // Parse the current cookie string into a map of name → value.
+  const jar = new Map<string, string>();
+  for (const kv of (current || '').split(/;\s*/)) {
+    const eq = kv.indexOf('=');
+    if (eq <= 0) continue;
+    jar.set(kv.slice(0, eq).trim(), kv.slice(eq + 1).trim());
+  }
+
+  // Fold in each Set-Cookie's name=value (ignore attributes).
+  for (const sc of setCookies) {
+    const first = sc.split(';', 1)[0];
+    const eq = first.indexOf('=');
+    if (eq <= 0) continue;
+    const name = first.slice(0, eq).trim();
+    const value = first.slice(eq + 1).trim();
+    // An empty value with a past expiry means "delete this cookie" —
+    // honour that by removing the entry.
+    if (!value && /\bexpires=/i.test(sc)) {
+      jar.delete(name);
+    } else {
+      jar.set(name, value);
+    }
+  }
+
+  return Array.from(jar, ([k, v]) => `${k}=${v}`).join('; ');
+}
+
 export async function uploadLotToAF(
   lot: any,
   photos: { url: string; storage_path: string }[],
   afAuctionId: string,
   sessionCookie: string,
   saveAction: 'next' | 'exit'
-): Promise<{ success: boolean; error?: string; debug?: string }> {
+): Promise<{ success: boolean; error?: string; debug?: string; updated_cookie?: string }> {
   try {
     // AF's rebuilt backend 302-redirects /admin/add_item_2new.php to
     // /admin/add_item.php for everyone (not just logged-out users), so
@@ -82,12 +135,14 @@ export async function uploadLotToAF(
       },
       redirect: 'follow',
     });
+    // Pick up any rotated PHPSESSID / new cookies AF set on the GET.
+    let currentCookie = mergeSetCookie(sessionCookie, pageRes);
 
     const pageHtml = await pageRes.text();
     // Session-expiry check now runs on the final body — if AF bounced us
     // all the way to the login page, we'll see the login inputs here.
     if (/name=["']psEmail["']|name=["']psPassword["']/i.test(pageHtml)) {
-      return { success: false, error: 'AF session expired. Please re-login.' };
+      return { success: false, error: 'AF session expired. Please re-login.', updated_cookie: currentCookie };
     }
 
     // After a 302 add_item_2new.php → add_item.php, the form POSTs back to
@@ -230,7 +285,7 @@ export async function uploadLotToAF(
     const res = await fetch(postUrl, {
       method: 'POST',
       headers: {
-        Cookie: sessionCookie,
+        Cookie: currentCookie,
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'User-Agent': BROWSER_UA,
         Accept:
@@ -244,6 +299,9 @@ export async function uploadLotToAF(
       signal: postController.signal,
     });
     clearTimeout(postTimeoutId);
+    // Capture any new PHPSESSID AF handed back after the POST so the
+    // caller can roll it forward to the next lot.
+    currentCookie = mergeSetCookie(currentCookie, res);
 
     const html = await res.text();
     const status = res.status;
@@ -256,9 +314,9 @@ export async function uploadLotToAF(
         location.includes('login') ||
         location.includes('index.php')
       ) {
-        return { success: false, error: 'AF session expired. Please re-login.' };
+        return { success: false, error: 'AF session expired. Please re-login.', updated_cookie: currentCookie };
       }
-      return { success: true, debug: `302 -> ${location}` };
+      return { success: true, debug: `302 -> ${location}`, updated_cookie: currentCookie };
     }
 
     if (
@@ -270,17 +328,18 @@ export async function uploadLotToAF(
       return {
         success: false,
         error: `FORBIDDEN_BY_AF: ${status} - item: ${itemName}`,
+        updated_cookie: currentCookie,
       };
     }
 
     if (status === 200) {
       if (html.includes('psEmail') || html.includes('psPassword')) {
-        return { success: false, error: 'AF session expired. Please re-login.' };
+        return { success: false, error: 'AF session expired. Please re-login.', updated_cookie: currentCookie };
       }
-      return { success: true };
+      return { success: true, updated_cookie: currentCookie };
     }
 
-    return { success: false, error: `HTTP ${status}. Debug: ${debug}` };
+    return { success: false, error: `HTTP ${status}. Debug: ${debug}`, updated_cookie: currentCookie };
   } catch (err: any) {
     if (err.name === 'AbortError' || err.message?.includes('aborted')) {
       return { success: false, error: 'TIMEOUT_UNCERTAIN: upload may have succeeded on AF' };
