@@ -13,7 +13,7 @@ import ReorderablePhotos from '@/components/ReorderablePhotos';
 import ImageZoom from '@/components/ImageZoom';
 import ConditionSlider from '@/components/ConditionSlider';
 import { getPendingLot, clearPendingLot } from '@/lib/pending-lot-store';
-import { computeListedPrice, syncRetailLine } from '@/lib/listing-price';
+import { computeListedPrice, syncRetailLine, formatLotTitle } from '@/lib/listing-price';
 
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
@@ -46,6 +46,16 @@ export default function LotReviewPage() {
       if (updated.auction_description) {
         updated.auction_description = syncRetailLine(
           updated.auction_description,
+          updated.listed_price
+        );
+      }
+      // Title ends with "(Retail $X)". If retail changed, reformat the
+      // title so the suffix matches. formatLotTitle is idempotent so
+      // calling it repeatedly is safe.
+      if (updated.item_name) {
+        updated.item_name = formatLotTitle(
+          updated.item_name,
+          condition,
           updated.listed_price
         );
       }
@@ -217,9 +227,19 @@ export default function LotReviewPage() {
           ? parsedStartingBid
           : null;
 
+      // Final-pass title formatting — enforces "NEW" prefix (if cond 10)
+      // and "($price)" suffix regardless of what the user typed. Keeps
+      // the DB record consistent even if someone hand-edited and
+      // stripped the auto-formatting.
+      const normalizedTitle = formatLotTitle(
+        listing.item_name,
+        condition,
+        listing.listed_price
+      );
+
       // Base UPDATE payload — everything the user might have edited.
       const basePayload: Record<string, any> = {
-        item_name: listing.item_name,
+        item_name: normalizedTitle,
         brand: listing.brand,
         model: listing.model,
         category: listing.category,
@@ -1020,7 +1040,25 @@ export default function LotReviewPage() {
                     className="w-full mt-0.5 px-2 py-1 rounded border border-gray-200 focus:outline-none focus:border-brand-blue"
                   />
                 </div>
-                <ConditionSlider value={condition} onChange={setCondition} />
+                <ConditionSlider
+                  value={condition}
+                  onChange={(c) => {
+                    setCondition(c);
+                    // Reformat the title so the "NEW" prefix tracks
+                    // the condition rating: present when c=10, gone
+                    // otherwise. formatLotTitle is idempotent.
+                    if (listing?.item_name) {
+                      setListing({
+                        ...listing,
+                        item_name: formatLotTitle(
+                          listing.item_name,
+                          c,
+                          listing.listed_price
+                        ),
+                      });
+                    }
+                  }}
+                />
               </>
             ) : (
               <>

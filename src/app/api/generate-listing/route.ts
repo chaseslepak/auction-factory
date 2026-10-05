@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { logApiUsage } from '@/lib/api-usage';
-import { computeListedPrice, syncRetailLine } from '@/lib/listing-price';
+import { computeListedPrice, syncRetailLine, formatLotTitle } from '@/lib/listing-price';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -236,7 +236,7 @@ CAREFULLY EXAMINE every photo provided. Look for:
 From the photos, identify the equipment and return ONLY a JSON object (no markdown, no preamble, no explanation):
 
 {
-  "item_name": "Brief product name with brand and model if visible — if condition is 10, PREPEND 'NEW' to the name (e.g. 'NEW Hoshizaki Ice Machine KM-340MAJ')",
+  "item_name": "Brief product name with brand and model if visible. The server WILL append ' ($PRICE)' automatically and prepend 'NEW ' for condition-10 lots — DO NOT include either yourself. Just the clean product name (e.g. 'Hoshizaki Ice Machine KM-340MAJ').",
   "brand": "Manufacturer or 'Unknown'",
   "model": "Model number or 'Unknown'",
   "category": "e.g. Refrigeration, Cooking, Prep, Smallwares, Bar, Shelving",
@@ -268,7 +268,7 @@ CONDITION: [Describe what you actually observe in the photos: scratches, dents, 
 Bid X [quantity]
 
 CONDITION 10 (NEW) ITEMS — SPECIAL HANDLING:
-- PREPEND "NEW" to the item_name (e.g. "NEW Hoshizaki Ice Machine KM-340MAJ")
+- DO NOT prepend "NEW" to item_name yourself — the server does that. Return the clean product name (e.g. "Hoshizaki Ice Machine KM-340MAJ") and the server will output "NEW Hoshizaki Ice Machine KM-340MAJ ($1,999)".
 - Opening description MUST emphasize this is BRAND NEW, never used, still in original packaging if visible
 - Describe the new-in-box condition factually: "Brand new.", "Factory sealed.", "Never used.", "Still in original packaging."
 - DO NOT add any phrasing about value, savings, "fraction of the price," or what a bidder might pay — this is an auction, the market sets the price.
@@ -461,6 +461,18 @@ export async function POST(request: NextRequest) {
     if (listing.auction_description && listing.listed_price > 0) {
       listing.auction_description = syncRetailLine(
         listing.auction_description,
+        listing.listed_price
+      );
+    }
+
+    // Enforce title format: "NEW" prefix on condition-10 lots, "($price)"
+    // suffix on all lots. formatLotTitle is idempotent — strips any
+    // existing NEW prefix / (retail) suffix the AI already added before
+    // reapplying with authoritative values.
+    if (listing.item_name) {
+      listing.item_name = formatLotTitle(
+        listing.item_name,
+        condition,
         listing.listed_price
       );
     }

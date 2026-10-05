@@ -52,3 +52,42 @@ export function syncRetailLine(
   }
   return `${description.trimEnd()}\n\n${replacement}\n`;
 }
+
+const MAX_TITLE_LEN = 255;
+
+// Format the lot title with:
+//   - "NEW" prefix when the lot is new-in-box (condition 10)
+//   - "($price)" suffix with the listed price (so bidders see the
+//     anchoring reference up-front in the lot name on AF)
+//
+// Idempotent — stripping any existing NEW prefix and (retail) suffix
+// before adding fresh ones. Enforces AF's 255-char title cap by
+// trimming the base name, never the prefix/suffix.
+export function formatLotTitle(
+  baseName: string,
+  conditionRating: number | null | undefined,
+  listedPrice: number | null | undefined
+): string {
+  let name = (baseName || '').trim();
+
+  // Strip "NEW " / "NEW - " / "NEW: " prefix.
+  name = name.replace(/^new[\s\-:]+/i, '').trim();
+
+  // Strip "(Retail $N)" / "($N)" / "(Retail: $N.NN)" suffix.
+  name = name
+    .replace(/\s*\(\s*(?:retail\s*[:\-]?\s*)?\$[\d,]+(?:\.\d{2})?\s*\)\s*$/i, '')
+    .trim();
+
+  const isNewInBox = Number(conditionRating) === 10;
+  const price = Number(listedPrice) || 0;
+
+  const prefix = isNewInBox ? 'NEW ' : '';
+  const suffix = price > 0 ? ` (${formatMoney(price)})` : '';
+
+  // Fit inside AF's 255-char cap. Trim the base name, keep prefix/suffix.
+  const roomForBase = MAX_TITLE_LEN - prefix.length - suffix.length;
+  const trimmedBase =
+    name.length > roomForBase ? name.substring(0, Math.max(0, roomForBase)).trim() : name;
+
+  return `${prefix}${trimmedBase}${suffix}`;
+}
