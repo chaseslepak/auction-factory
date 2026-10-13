@@ -337,6 +337,83 @@ export async function processStockImageJob(
       return { success: true, found: false, diag };
     }
 
+    // Dedupe shortcut: if another lot in the same auction already has
+    // a stock image + known retail for this exact brand+model, reuse
+    // it instead of hitting WebstaurantStore + Anthropic web search.
+    // Points a new lot_photos row at the same storage object so no new
+    // storage space is used. The retail/listed_price bump still runs
+    // through the normal path below (so the user's description retail
+    // line also syncs).
+    if (lot.brand && lot.model) {
+      try {
+        const { data: siblings } = await supabase
+          .from('lots')
+          .select('id, estimated_retail_new, lot_photos(storage_path, display_order)')
+          .eq('auction_id', lot.auction_id)
+          .ilike('brand', lot.brand)
+          .ilike('model', lot.model)
+          .neq('id', lot.id)
+          .is('deleted_at', null)
+          .limit(5);
+        for (const sib of siblings || []) {
+          const sibStock = ((sib as any).lot_photos || []).find((p: any) =>
+            (p.storage_path || '').includes('/stock_')
+          );
+          const sibRetail = Number((sib as any).estimated_retail_new) || 0;
+          if (sibStock && sibRetail > 0) {
+            // Check if THIS lot already has a stock photo; if so, skip
+            // the insert to avoid double rows (the shortcut is for
+            // first-time fetch, not re-fetch).
+            const existingStock = ((lot as any).lot_photos || []).find((p: any) =>
+              (p.storage_path || '').includes('/stock_')
+            );
+            if (!existingStock) {
+              // Shift existing photos up by 1 to make room at
+              // display_order=0, same as the normal path.
+              const existingPhotos = ((lot as any).lot_photos || []).sort(
+                (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0)
+              );
+              for (const photo of existingPhotos) {
+                await supabase
+                  .from('lot_photos')
+                  .update({ display_order: (photo.display_order ?? 0) + 1 })
+                  .eq('id', photo.id);
+              }
+              await supabase.from('lot_photos').insert({
+                lot_id: lot.id,
+                storage_path: sibStock.storage_path,
+                display_order: 0,
+              });
+            }
+            // Price bump + description sync, same shape as the normal
+            // path below.
+            const currentRetail = Number(lot.estimated_retail_new) || 0;
+            if (sibRetail > currentRetail) {
+              const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
+              const newRetail = Math.round(sibRetail);
+              const newListed = computeListedPrice(newRetail);
+              const updates: any = {
+                estimated_retail_new: newRetail,
+                listed_price: newListed,
+              };
+              if (lot.auction_description) {
+                updates.auction_description = syncRetailLine(
+                  lot.auction_description,
+                  newListed
+                );
+              }
+              await supabase.from('lots').update(updates).eq('id', lot.id);
+            }
+            diag.finalOutcome = 'image-saved';
+            diag.imageDownloaded = true;
+            return { success: true, found: true, diag };
+          }
+        }
+      } catch (e) {
+        console.error('Sibling-lot stock image reuse lookup failed:', e);
+      }
+    }
+
     const userPhotoUrls = (lot.lot_photos || [])
       .filter((p: any) => !p.storage_path.includes('/stock_'))
       .slice(0, 3)
