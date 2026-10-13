@@ -320,7 +320,7 @@ export async function POST(request: NextRequest) {
     }
     const anthropic = new Anthropic({ apiKey });
 
-    const { images, condition, quantity, notes, auction_name } =
+    const { images, condition, quantity, notes, auction_name, auction_id } =
       await request.json();
 
     if (!images || images.length === 0) {
@@ -418,8 +418,54 @@ export async function POST(request: NextRequest) {
     const hasModel = listing.model && listing.model !== 'Unknown' && listing.model.trim() !== '';
     const isNewInBox = Number(condition) === 10;
 
+    // Dedupe shortcut: if THIS auction already has another lot with the
+    // same brand+model that already has a stock image + a known retail,
+    // reuse that instead of hitting WebstaurantStore + Anthropic web
+    // search again. Saves API cost + wall-clock on big batches where the
+    // lister is cloning identical items. Guarded on brand+model so we
+    // never cross-pollute dissimilar items.
     let webstaurantPrice = 0;
-    if (hasBrand && hasModel && isNewInBox) {
+    let reusedSibling = false;
+    if (hasBrand && hasModel && auction_id) {
+      try {
+        const { data: siblings } = await supabase
+          .from('lots')
+          .select('id, brand, model, estimated_retail_new, lot_photos(storage_path, display_order)')
+          .eq('auction_id', auction_id)
+          .ilike('brand', listing.brand)
+          .ilike('model', listing.model)
+          .is('deleted_at', null)
+          .limit(5);
+        for (const sib of siblings || []) {
+          const stockPhoto = ((sib as any).lot_photos || []).find((p: any) =>
+            (p.storage_path || '').includes('/stock_')
+          );
+          const sibRetail = Number((sib as any).estimated_retail_new) || 0;
+          if (stockPhoto && sibRetail > 0) {
+            // Hand back a Supabase public URL for the sibling's stock
+            // image. The caller (new-lot page) will persist a new
+            // lot_photos row pointing at the same storage path when the
+            // lot is saved, so storage usage stays flat.
+            const publicUrl = supabase.storage
+              .from('lot-photos')
+              .getPublicUrl(stockPhoto.storage_path).data.publicUrl;
+            listing.stock_image_url = publicUrl;
+            // Also hand back the raw storage_path so the review-page save
+            // path can skip the download+reupload and just point a new
+            // lot_photos row at the existing object.
+            (listing as any).stock_image_storage_path = stockPhoto.storage_path;
+            listing.estimated_retail_new = sibRetail;
+            webstaurantPrice = sibRetail; // flag so we skip the web calls below
+            reusedSibling = true;
+            break;
+          }
+        }
+      } catch (e) {
+        console.error('Sibling-lot stock image reuse lookup failed:', e);
+      }
+    }
+
+    if (!reusedSibling && hasBrand && hasModel && isNewInBox) {
       const found = await findAndVerifyStockImage(
         anthropic,
         listing.brand,
@@ -433,9 +479,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Use Claude web search to find prices across the internet (5+ sites)
+    // Use Claude web search to find prices across the internet (5+ sites).
+    // Skip when we reused a sibling's known-good retail — the whole point
+    // of the shortcut is to avoid this call for duplicate items.
     let webSearchMaxPrice = 0;
-    if (hasBrand && hasModel) {
+    if (!reusedSibling && hasBrand && hasModel) {
       try {
         const maxFound = await researchRetailPrice(anthropic, listing.brand, listing.model, listing.item_name);
         if (maxFound > 0) webSearchMaxPrice = maxFound;

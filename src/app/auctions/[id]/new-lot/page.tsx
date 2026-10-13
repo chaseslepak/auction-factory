@@ -116,6 +116,7 @@ export default function NewLotPage() {
           quantity,
           notes,
           auction_name: auctionName,
+          auction_id: id,
         }),
       });
 

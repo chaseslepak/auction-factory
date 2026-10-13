@@ -577,8 +577,23 @@ export default function LotReviewPage() {
         // Upload photos to storage and create lot_photos records
         let photoIndex = 0;
 
-        // If stock image URL is available, download and make it the first photo
-        if (listing.stock_image_url) {
+        // Dedupe shortcut: if generate-listing handed us a
+        // stock_image_storage_path (meaning it reused another lot in
+        // this auction's existing stock image), point a new lot_photos
+        // row at the SAME storage object instead of downloading and
+        // re-uploading. Zero storage cost, instant.
+        const stockStoragePath = (listing as any).stock_image_storage_path as
+          | string
+          | undefined;
+        if (stockStoragePath) {
+          await supabase.from('lot_photos').insert({
+            lot_id: lotData.id,
+            storage_path: stockStoragePath,
+            display_order: 0,
+          });
+          photoIndex = 1;
+        } else if (listing.stock_image_url) {
+          // If stock image URL is available, download and make it the first photo
           try {
             const stockRes = await fetch(listing.stock_image_url);
             if (stockRes.ok) {
