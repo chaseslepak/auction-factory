@@ -10,8 +10,9 @@ interface StockCandidate {
   source: string;
 }
 
-interface SearchDiagnostics {
+export interface SearchDiagnostics {
   queriesTried: string[];
+  queryResults: Record<string, number>;
   webstaurantHtmlBytes: number;
   webstaurantRegexMatched: boolean;
   webstaurantCandidates: number;
@@ -19,27 +20,49 @@ interface SearchDiagnostics {
   webSearchImageFound: boolean;
   webSearchPrice: number;
   webstaurantPrice: number;
-  vision: 'skipped' | 'no-user-photos' | 'model-answer' | 'model-error';
+  vision: 'skipped' | 'no-user-photos' | 'model-answer' | 'model-error' | 'model-none';
   visionPickedIndex: number | null;
   imageDownloaded: boolean;
   imageDownloadError: string | null;
-  finalOutcome: 'no-brand-or-model' | 'no-candidates' | 'vision-rejected' | 'image-download-failed' | 'image-saved' | 'price-updated-only';
+  finalOutcome:
+    | 'no-brand-or-model'
+    | 'no-candidates'
+    | 'vision-rejected'
+    | 'image-download-failed'
+    | 'image-saved'
+    | 'price-updated-only';
 }
 
-async function searchWebstaurant(
-  query: string,
-  diag: SearchDiagnostics
-): Promise<StockCandidate[]> {
+export function emptyDiag(): SearchDiagnostics {
+  return {
+    queriesTried: [],
+    queryResults: {},
+    webstaurantHtmlBytes: 0,
+    webstaurantRegexMatched: false,
+    webstaurantCandidates: 0,
+    webSearchTried: false,
+    webSearchImageFound: false,
+    webSearchPrice: 0,
+    webstaurantPrice: 0,
+    vision: 'skipped',
+    visionPickedIndex: null,
+    imageDownloaded: false,
+    imageDownloadError: null,
+    finalOutcome: 'no-candidates',
+  };
+}
+
+// WebstaurantStore embeds search results in a hypernova <script> blob.
+// We also fall back to a plain <img> regex if their markup changes.
+async function searchWebstaurant(query: string): Promise<StockCandidate[]> {
   const candidates: StockCandidate[] = [];
   try {
     const url = `https://www.webstaurantstore.com/search/${encodeURIComponent(query)}.html`;
     const res = await fetch(url, { headers: { 'User-Agent': UA } });
     const html = await res.text();
-    diag.webstaurantHtmlBytes = html.length;
 
     const jsonMatch = html.match(/data-hypernova-key="SearchPage"[^>]*><!--([\s\S]*?)--><\/script>/);
     if (jsonMatch) {
-      diag.webstaurantRegexMatched = true;
       try {
         const data = JSON.parse(jsonMatch[1]);
         const products = data.products || [];
@@ -47,7 +70,10 @@ async function searchWebstaurant(
           const price = Number(product.price?.price) || 0;
           const title = product.description || product.alt || '';
           const imagePath = product.primaryImagePath || '';
-          if (title && imagePath && price > 0) {
+          // Previously required price > 0 — that dropped a lot of real
+          // candidates (out-of-stock SKUs, "call for price", etc). Pricing
+          // comes from researchRetailPrice separately now.
+          if (title && imagePath) {
             candidates.push({
               title,
               imageUrl: imagePath.startsWith('http')
@@ -60,22 +86,32 @@ async function searchWebstaurant(
         }
       } catch {}
     }
+
+    if (candidates.length === 0) {
+      const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(\/images\/products\/[^"]+\.(jpg|png|webp))"/gi;
+      let match;
+      while ((match = cardRegex.exec(html)) !== null && candidates.length < 6) {
+        candidates.push({
+          title: match[1],
+          imageUrl: `https://www.webstaurantstore.com${match[2]}`,
+          price: 0,
+          source: 'webstaurant-regex',
+        });
+      }
+    }
   } catch {}
   return candidates;
 }
 
-// Fallback: ask Anthropic to web-search for a product image URL when
-// WebstaurantStore returns 0. Uses the web_fetch-compatible URL flow:
-// the model surfaces candidate URLs in text, we regex them out and use
-// as candidates (no need to fetch inside the model turn).
+// Broaden coverage: ask Claude's web_search to surface product-image URLs
+// across major US retailers (restaurant equipment AND general — a lot of
+// what Chase lots is not restaurant-only). Returns up to ~6 candidates.
 async function searchViaAnthropic(
   anthropic: Anthropic,
   brand: string,
   model: string,
-  itemName: string,
-  diag: SearchDiagnostics
+  itemName: string
 ): Promise<StockCandidate[]> {
-  diag.webSearchTried = true;
   const query = `${brand} ${model} ${itemName}`.trim();
   try {
     const response = await anthropic.messages.create({
@@ -93,10 +129,15 @@ async function searchViaAnthropic(
           role: 'user',
           content: `Find product listing pages for: ${query}
 
-Focus on US restaurant equipment retailers (WebstaurantStore, KaTom, Central Restaurant, CKitchen). For each result, output ONE line in this exact format:
+Search major US retailers — WebstaurantStore, KaTom, Central Restaurant, CKitchen, Amazon, Home Depot, Lowe's, Wayfair, Grainger, Target, Walmart, and the manufacturer's own site. The exact brand+model match matters more than the retailer.
+
+For each result, output ONE line in this exact format (nothing else):
 IMG: <full https URL to the product's primary image, ending in .jpg/.jpeg/.png/.webp> | TITLE: <product title>
 
-Do NOT return non-image URLs. Do NOT include commentary. If you find fewer than 3 valid product image URLs, output what you found.`,
+Rules:
+- Image URL MUST end in .jpg/.jpeg/.png/.webp (not a page URL, not a thumbnail route).
+- Do NOT include commentary, bullet points, or non-image URLs.
+- Return up to 6 lines. If you only find 1–2, return those.`,
         },
       ],
     });
@@ -114,12 +155,11 @@ Do NOT return non-image URLs. Do NOT include commentary. If you find fewer than 
         candidates.push({
           imageUrl: m[1],
           title: m[2].trim(),
-          price: 0, // web search doesn't reliably give per-item price
+          price: 0,
           source: 'anthropic-web-search',
         });
       }
     }
-    if (candidates.length > 0) diag.webSearchImageFound = true;
     return candidates;
   } catch (err: any) {
     console.error('Anthropic web-search fallback failed:', err?.message || err);
@@ -150,7 +190,7 @@ export async function researchRetailPrice(
           role: 'user',
           content: `Search the web for the current retail price of: ${brand} ${model} ${itemName}
 
-Focus on US restaurant equipment retailers (WebstaurantStore, KaTom, Central Restaurant, CKitchen, etc).
+Focus on US retailers including WebstaurantStore, KaTom, Central Restaurant, CKitchen, Amazon, Home Depot, Lowe's, Wayfair, Grainger.
 
 After searching, give me JUST the highest retail price you found as a single number with a dollar sign. For example: "$3,885" or "$1,234.50" — nothing else, no explanation.
 
@@ -180,52 +220,23 @@ If you can't find any real price, respond with just "$0".`,
   }
 }
 
+// Normalize a model/title string for loose comparison: strip spaces,
+// dashes, underscores, slashes, dots, and lowercase.
+function normalizeForMatch(s: string): string {
+  return (s || '').replace(/[\s\-_./]/g, '').toLowerCase();
+}
+
 export async function findAndVerifyStockImage(
   anthropic: Anthropic,
   brand: string,
   model: string,
   itemName: string,
   userPhotoUrls: string[],
-  diag: SearchDiagnostics
+  diag: SearchDiagnostics = emptyDiag()
 ): Promise<{ imageUrl: string; price: number } | null> {
-  if (!brand && !model) return null;
-
-  const queries = [
-    `${brand} ${model}`.trim(),
-    model?.trim(),
-    `${brand} ${itemName}`.trim(),
-  ].filter((q) => q && q.length > 2);
-
-  diag.queriesTried = queries;
-
-  let candidates: StockCandidate[] = [];
-  for (const q of queries) {
-    candidates = await searchWebstaurant(q, diag);
-    if (candidates.length > 0) break;
-  }
-  diag.webstaurantCandidates = candidates.length;
-
-  // Fallback: if WebstaurantStore came up empty, ask Anthropic to
-  // web-search for product images across retailers.
-  if (candidates.length === 0) {
-    candidates = await searchViaAnthropic(anthropic, brand, model, itemName, diag);
-  }
-
-  if (candidates.length === 0) return null;
-
-  const modelNormalized = (model || '').replace(/[\s\-_]/g, '').toLowerCase();
-  const filtered = modelNormalized
-    ? candidates.filter((c) => c.title.replace(/[\s\-_]/g, '').toLowerCase().includes(modelNormalized))
-    : candidates;
-
-  const toVerify = filtered.length > 0 ? filtered : candidates;
-  if (filtered.length === 1) {
-    diag.vision = 'skipped';
-    return { imageUrl: filtered[0].imageUrl, price: filtered[0].price };
-  }
-
+  // Download user photos ourselves and delegate to the shared core.
   const userImagesB64: string[] = [];
-  for (const photoUrl of userPhotoUrls.slice(0, 3)) {
+  for (const photoUrl of userPhotoUrls.slice(0, 5)) {
     try {
       const res = await fetch(photoUrl);
       if (res.ok) {
@@ -234,43 +245,170 @@ export async function findAndVerifyStockImage(
       }
     } catch {}
   }
+  return findAndVerifyStockImageCore(anthropic, brand, model, itemName, userImagesB64, diag);
+}
+
+// Variant for callers that already have user photos as base64 strings
+// (e.g. the new-lot flow, where the images are fresh client uploads not
+// yet in Supabase storage). Accepts raw base64 or data URLs — strips the
+// prefix if present.
+export async function findAndVerifyStockImageFromB64(
+  anthropic: Anthropic,
+  brand: string,
+  model: string,
+  itemName: string,
+  userImagesB64: string[],
+  diag: SearchDiagnostics = emptyDiag()
+): Promise<{ imageUrl: string; price: number } | null> {
+  const stripped = userImagesB64
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((s) => s.replace(/^data:image\/\w+;base64,/, ''));
+  return findAndVerifyStockImageCore(anthropic, brand, model, itemName, stripped, diag);
+}
+
+async function findAndVerifyStockImageCore(
+  anthropic: Anthropic,
+  brand: string,
+  model: string,
+  itemName: string,
+  userImagesB64: string[],
+  diag: SearchDiagnostics
+): Promise<{ imageUrl: string; price: number } | null> {
+  if (!brand && !model) return null;
+
+  const queries = [
+    `${brand} ${model}`.trim(),
+    model?.trim(),
+    `${brand} ${itemName}`.trim(),
+  ]
+    .filter((q) => q && q.length > 2)
+    // Dedupe queries (brand+model vs model alone may collide when brand
+    // is empty).
+    .filter((q, i, arr) => arr.indexOf(q) === i);
+
+  diag.queriesTried = queries;
+  diag.queryResults = {};
+
+  // Aggregate candidates across ALL queries (previous code short-circuited
+  // on first hit — that threw away perfectly good candidates whenever the
+  // first query returned noise).
+  const seen = new Set<string>();
+  let candidates: StockCandidate[] = [];
+  for (const q of queries) {
+    const found = await searchWebstaurant(q);
+    diag.queryResults[q] = found.length;
+    // The hypernova-regex / html-bytes fields are per-query; retain the
+    // first query's numbers for backward-compatible diag display.
+    if (diag.webstaurantHtmlBytes === 0) {
+      diag.webstaurantRegexMatched = found.some((c) => c.source === 'webstaurant');
+    }
+    for (const c of found) {
+      if (!seen.has(c.imageUrl)) {
+        seen.add(c.imageUrl);
+        candidates.push(c);
+      }
+    }
+  }
+  diag.webstaurantCandidates = candidates.length;
+
+  // Always widen with Anthropic web-search when restaurant-only coverage
+  // is thin. Previously this ran ONLY when WebstaurantStore returned
+  // zero, so categories like tools / furniture / electronics never got
+  // non-restaurant candidates.
+  if (candidates.length < 3) {
+    diag.webSearchTried = true;
+    const anth = await searchViaAnthropic(anthropic, brand, model, itemName);
+    for (const c of anth) {
+      if (!seen.has(c.imageUrl)) {
+        seen.add(c.imageUrl);
+        candidates.push(c);
+      }
+    }
+    if (anth.length > 0) diag.webSearchImageFound = true;
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Loose model-match filter: keep candidates whose title contains the
+  // model number (normalized). Only apply if it leaves 2+ matches,
+  // otherwise fall back to all candidates (vision will adjudicate).
+  const modelNormalized = normalizeForMatch(model);
+  const strictFiltered = modelNormalized
+    ? candidates.filter((c) => normalizeForMatch(c.title).includes(modelNormalized))
+    : candidates;
+
+  let toVerify: StockCandidate[];
+  if (strictFiltered.length === 1) {
+    diag.vision = 'skipped';
+    return { imageUrl: strictFiltered[0].imageUrl, price: strictFiltered[0].price };
+  } else if (strictFiltered.length >= 2) {
+    toVerify = strictFiltered;
+  } else {
+    // Strict filter killed everything — vision picks from the full set.
+    toVerify = candidates;
+  }
 
   if (userImagesB64.length === 0) {
     diag.vision = 'no-user-photos';
-    return filtered.length > 0
-      ? { imageUrl: filtered[0].imageUrl, price: filtered[0].price }
-      : { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
+    return { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
   }
 
-  const candidateData: { url: string; title: string; price: number; base64: string }[] = [];
-  for (const c of toVerify.slice(0, 4)) {
+  // Download candidate images. 6 (was 4). Skip tiny / failed fetches.
+  const candidateData: { url: string; title: string; price: number; base64: string; mediaType: string }[] = [];
+  for (const c of toVerify.slice(0, 6)) {
     try {
       const res = await fetch(c.imageUrl);
       if (!res.ok) continue;
       const buf = await res.arrayBuffer();
-      candidateData.push({ url: c.imageUrl, title: c.title, price: c.price, base64: Buffer.from(buf).toString('base64') });
+      // Skip tiny placeholders / 1x1 pixels / spacers.
+      if (buf.byteLength < 4000) continue;
+      // Honor the actual content-type where present — forcing image/jpeg
+      // on a .webp made Claude choke.
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      let mediaType = 'image/jpeg';
+      if (ct.includes('png')) mediaType = 'image/png';
+      else if (ct.includes('webp')) mediaType = 'image/webp';
+      else if (ct.includes('gif')) mediaType = 'image/gif';
+      candidateData.push({
+        url: c.imageUrl,
+        title: c.title,
+        price: c.price,
+        base64: Buffer.from(buf).toString('base64'),
+        mediaType,
+      });
     } catch {}
   }
   if (candidateData.length === 0) {
     diag.vision = 'skipped';
-    // Nothing we could download from the candidate URLs — fall back to
-    // the first raw candidate so the caller at least has an imageUrl.
     return { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
   }
 
   try {
     const content: any[] = [];
-    content.push({ type: 'text', text: `USER'S PHOTOS of the actual item (${itemName}):` });
+    content.push({
+      type: 'text',
+      text: `You are verifying stock images for an auction listing. The user is listing a ${itemName} (brand: ${brand || 'Unknown'}, model: ${model || 'Unknown'}).
+
+Below are the USER'S PHOTOS of the actual physical item they're selling:`,
+    });
     for (const b64 of userImagesB64) {
       content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } });
     }
     content.push({
       type: 'text',
-      text: `\nCANDIDATE STOCK IMAGES (numbered). Which one BEST matches the user's actual item? Respond with ONLY the number (1-${candidateData.length}) or "NONE" if none match:`,
+      text: `\nNow here are ${candidateData.length} CANDIDATE stock images from retailer product pages. Pick the single candidate that is clearly the SAME product (same brand, same model, same form factor) as the user's item.
+
+Only answer "NONE" if NO candidate plausibly depicts the same product — different form factor, wrong product category, obviously unrelated. If several candidates could match, pick the single best one — do NOT answer NONE just because the colors or background differ.
+
+Respond with ONLY the number (1-${candidateData.length}) or the word NONE. No other text.`,
     });
     for (let i = 0; i < candidateData.length; i++) {
-      content.push({ type: 'text', text: `\n${i + 1}. ${candidateData[i].title}` });
-      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: candidateData[i].base64 } });
+      content.push({ type: 'text', text: `\nCandidate ${i + 1} — "${candidateData[i].title}":` });
+      content.push({
+        type: 'image',
+        source: { type: 'base64', media_type: candidateData[i].mediaType as any, data: candidateData[i].base64 },
+      });
     }
 
     const response = await anthropic.messages.create({
@@ -280,6 +418,10 @@ export async function findAndVerifyStockImage(
     });
 
     const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+    if (/^none/i.test(text)) {
+      diag.vision = 'model-none';
+      return null;
+    }
     const numMatch = text.match(/(\d+)/);
     if (numMatch) {
       const idx = parseInt(numMatch[1]) - 1;
@@ -289,13 +431,13 @@ export async function findAndVerifyStockImage(
         return { imageUrl: candidateData[idx].url, price: candidateData[idx].price };
       }
     }
-    diag.vision = 'model-answer';
-    // Model said NONE — return the first candidate anyway (better than
-    // nothing; user can delete if wrong).
-    return { imageUrl: candidateData[0].url, price: candidateData[0].price };
+    // Unparseable response — treat as NONE rather than forcing a wrong
+    // match. Chase said accuracy matters more than hit-rate on bad data.
+    diag.vision = 'model-none';
+    return null;
   } catch {
     diag.vision = 'model-error';
-    return { imageUrl: candidateData[0].url, price: candidateData[0].price };
+    return null;
   }
 }
 
@@ -307,6 +449,7 @@ export async function processStockImageJob(
 ): Promise<{ success: boolean; found: boolean; error?: string; diag?: SearchDiagnostics }> {
   const diag: SearchDiagnostics = {
     queriesTried: [],
+    queryResults: {},
     webstaurantHtmlBytes: 0,
     webstaurantRegexMatched: false,
     webstaurantCandidates: 0,
@@ -416,7 +559,7 @@ export async function processStockImageJob(
 
     const userPhotoUrls = (lot.lot_photos || [])
       .filter((p: any) => !p.storage_path.includes('/stock_'))
-      .slice(0, 3)
+      .slice(0, 5)
       .map((p: any) => supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl);
 
     const found = await findAndVerifyStockImage(
