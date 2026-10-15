@@ -5,8 +5,10 @@ import { logApiUsage } from '@/lib/api-usage';
 import { computeListedPrice, syncRetailLine, formatLotTitle } from '@/lib/listing-price';
 import {
   findAndVerifyStockImageFromB64,
-  researchRetailPrice,
+  researchItemFacts,
+  getAFArchiveMedianRetail,
 } from '@/lib/stock-image-processor';
+import { extractDimensionsFromText, fillBlankDimensions } from '@/lib/dimensions';
 
 const SYSTEM_PROMPT = `You are a restaurant equipment identification expert for Auction Factory Ohio in Cleveland, OH.
 
@@ -265,22 +267,61 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Use Claude web search to find prices across the internet (5+ sites).
-    // Skip when we reused a sibling's known-good retail — the whole point
-    // of the shortcut is to avoid this call for duplicate items.
-    let webSearchMaxPrice = 0;
+    // Research price + dimensions via Anthropic web_search. We ask for
+    // the MEDIAN across 3-5 reputable retailers rather than the max —
+    // the old max-biased strategy produced wild outliers (a one-off
+    // $12k Amazon listing when real retail was $2.5k) and the lotter
+    // trusted them. Chase: "retail prices are off dramatically."
+    //
+    // Skip when we reused a sibling's known-good retail — the shortcut
+    // exists specifically to avoid this call for duplicate items.
+    let webMedianPrice: number | null = null;
+    let factsDims = { width: '', depth: '', height: '' };
     if (!reusedSibling && hasBrand && hasModel) {
       try {
-        const maxFound = await researchRetailPrice(anthropic, listing.brand, listing.model, listing.item_name);
-        if (maxFound > 0) webSearchMaxPrice = maxFound;
+        const facts = await researchItemFacts(
+          anthropic,
+          listing.brand,
+          listing.model,
+          listing.item_name
+        );
+        webMedianPrice = facts.priceMedian;
+        factsDims = facts.dimensions;
       } catch (e) {
         console.error('Price research error:', e);
       }
     }
 
-    // Take the highest of: AI estimate, WebstaurantStore price, web search max
+    // Also check AF archive for prior listings of this exact brand+model.
+    // 2+ prior AF retails is the single strongest signal.
+    let afArchiveMedian: { median: number; sampleCount: number } | null = null;
+    if (!reusedSibling && hasBrand && hasModel && auction_id) {
+      try {
+        afArchiveMedian = await getAFArchiveMedianRetail(
+          supabase,
+          listing.brand,
+          listing.model
+        );
+      } catch (e) {
+        console.error('AF archive median lookup failed:', e);
+      }
+    }
+
     const aiEstimate = Number(listing.estimated_retail_new) || 0;
-    listing.estimated_retail_new = Math.max(aiEstimate, webstaurantPrice, webSearchMaxPrice);
+
+    // Priority: AF archive median (2+ samples) > web median > WebstaurantStore
+    // single hit > AI estimate. Each candidate is sanity-capped at 5x the AI
+    // estimate so an outlier can never drive the final number.
+    const capAt = aiEstimate > 0 ? aiEstimate * 5 : Infinity;
+    let finalRetail = aiEstimate;
+    if (afArchiveMedian && afArchiveMedian.sampleCount >= 2 && afArchiveMedian.median <= capAt) {
+      finalRetail = afArchiveMedian.median;
+    } else if (webMedianPrice && webMedianPrice > 0 && webMedianPrice <= capAt) {
+      finalRetail = webMedianPrice;
+    } else if (webstaurantPrice > 0 && webstaurantPrice <= capAt) {
+      finalRetail = webstaurantPrice;
+    }
+    listing.estimated_retail_new = finalRetail;
 
     // Compute listed price (retail + markup). Lives in @/lib/listing-price.
     listing.listed_price = computeListedPrice(listing.estimated_retail_new);
@@ -310,6 +351,21 @@ export async function POST(request: NextRequest) {
         listing.listed_price
       );
     }
+
+    // Backfill width/depth/height from (a) the web_search spec-sheet
+    // lookup, falling back to (b) parsing dimensions out of the
+    // auction_description text the AI generated. Only fills blanks —
+    // never overwrites values the AI's vision pass of the user's actual
+    // photos extracted.
+    const descDims = extractDimensionsFromText(listing.auction_description);
+    const dimsOut = fillBlankDimensions(listing as any, {
+      width: factsDims.width || descDims.width,
+      depth: factsDims.depth || descDims.depth,
+      height: factsDims.height || descDims.height,
+    });
+    listing.width = dimsOut.width;
+    listing.depth = dimsOut.depth;
+    listing.height = dimsOut.height;
 
     // Ensure stock_image_url exists in response
     if (!listing.stock_image_url) {

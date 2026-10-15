@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { searchAFArchiveIndex } from '@/lib/af-archive';
+import { extractDimensionsFromText, fillBlankDimensions } from '@/lib/dimensions';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -25,6 +26,12 @@ export interface SearchDiagnostics {
   webSearchTried: boolean;
   webSearchImageFound: boolean;
   webSearchPrice: number;
+  webSearchPriceSamples: number[];
+  webSearchPriceSources: string[];
+  afArchiveMedianPrice: number | null;
+  afArchiveMedianSampleCount: number;
+  priceSourceChosen: 'af-archive-median' | 'web-median' | 'ai-estimate' | 'webstaurant-single' | 'kept-current' | null;
+  dimensionsBackfilled: boolean;
   webstaurantPrice: number;
   vision:
     | 'skipped'
@@ -76,6 +83,12 @@ export function emptyDiag(): SearchDiagnostics {
     webSearchTried: false,
     webSearchImageFound: false,
     webSearchPrice: 0,
+    webSearchPriceSamples: [],
+    webSearchPriceSources: [],
+    afArchiveMedianPrice: null,
+    afArchiveMedianSampleCount: 0,
+    priceSourceChosen: null,
+    dimensionsBackfilled: false,
     webstaurantPrice: 0,
     vision: 'skipped',
     visionPickedIndex: null,
@@ -199,6 +212,244 @@ Rules:
   } catch (err: any) {
     console.error('Anthropic web-search fallback failed:', err?.message || err);
     return [];
+  }
+}
+
+export interface ItemFacts {
+  // Median across the retail prices web_search returned, rounded to the
+  // nearest dollar. Null when no credible price was surfaced.
+  priceMedian: number | null;
+  // The raw samples. Kept for diagnostics and so the caller can audit
+  // what sources drove the median — if the samples are wildly dispersed
+  // the median may still be unreliable.
+  priceSamples: number[];
+  // Dimensions in inches, as strings (matches lots.{width,depth,height}
+  // column shape). Empty strings when not confidently extracted.
+  dimensions: { width: string; depth: string; height: string };
+  // Sources the model cited; used for diag logging.
+  sources: string[];
+}
+
+// Replaces researchRetailPrice. Still fetches via Anthropic web_search,
+// but asks for 3–5 retailer samples and uses the MEDIAN of credible
+// prices instead of the max. Max-biased calls kept returning wild
+// outliers — a one-off $12k Amazon listing when the item's real retail
+// was $2.5k — and the lotter trusted those numbers.
+//
+// Also fetches dimensions in the same call so we don't need a separate
+// web_search roundtrip for them.
+export async function researchItemFacts(
+  anthropic: Anthropic,
+  brand: string,
+  model: string,
+  itemName: string
+): Promise<ItemFacts> {
+  const empty: ItemFacts = {
+    priceMedian: null,
+    priceSamples: [],
+    dimensions: { width: '', depth: '', height: '' },
+    sources: [],
+  };
+  try {
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 18000)
+    );
+    const apiPromise = anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      tools: [
+        {
+          type: 'web_search_20250305' as any,
+          name: 'web_search',
+          max_uses: 3,
+        },
+        {
+          name: 'report_item_facts',
+          description:
+            'Report the credible US retail price median and physical dimensions for this item, after cross-checking several reputable retailers.',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              price_samples: {
+                type: 'array',
+                description:
+                  'Retail prices (USD, number only, no $) observed on 3-5 reputable retailer product pages for the EXACT brand+model. Exclude clear outliers (used-item listings, bulk pallets, liquidation, obvious data-entry errors like a $59,999 price on a $599 item). If you can only find 1-2 credible samples, return those.',
+                items: { type: 'number' },
+              },
+              sources: {
+                type: 'array',
+                description: 'Short labels for each retailer you pulled a price from, same order as price_samples (e.g. "WebstaurantStore", "KaTom", "Amazon").',
+                items: { type: 'string' },
+              },
+              width_inches: {
+                type: 'number',
+                description: 'Width in inches from the manufacturer spec. 0 if not found.',
+              },
+              depth_inches: {
+                type: 'number',
+                description: 'Depth in inches from the manufacturer spec. 0 if not found.',
+              },
+              height_inches: {
+                type: 'number',
+                description: 'Height in inches from the manufacturer spec. 0 if not found.',
+              },
+            },
+            required: ['price_samples', 'sources', 'width_inches', 'depth_inches', 'height_inches'],
+          },
+        },
+      ] as any,
+      tool_choice: { type: 'auto' } as any,
+      messages: [
+        {
+          role: 'user',
+          content: `Research this item's current US retail and dimensions: ${brand} ${model} ${itemName}
+
+STEP 1 — Price: find 3-5 DIFFERENT reputable retailers that sell the EXACT brand+model brand-new. Prefer: manufacturer's own site, WebstaurantStore, KaTom, Central Restaurant, CKitchen, Grainger, Amazon, Home Depot, Lowe's, Wayfair. Record each price as a sample.
+
+Exclude:
+- Used-item listings (eBay auctions, "pre-owned", refurb).
+- Clearance / liquidation pallets.
+- Obvious data-entry errors (e.g. 10x the normal price).
+- Resellers you don't recognize.
+
+STEP 2 — Dimensions: from the manufacturer spec sheet or a reputable retailer's spec section, record Width × Depth × Height in inches. 0 if any dimension isn't confidently stated.
+
+STEP 3 — Call the report_item_facts tool with your findings. Do not reply in prose; call the tool.`,
+        },
+      ],
+    });
+    const response = await Promise.race([apiPromise, timeoutPromise]);
+    if (!response) return empty;
+
+    // Pull the tool call. The model may still emit text alongside; we
+    // only care about the structured output.
+    let toolInput: any = null;
+    for (const block of (response as any).content || []) {
+      if (block.type === 'tool_use' && block.name === 'report_item_facts') {
+        toolInput = block.input;
+        break;
+      }
+    }
+    if (!toolInput) return empty;
+
+    const rawSamples: number[] = Array.isArray(toolInput.price_samples)
+      ? toolInput.price_samples
+          .map((n: any) => Number(n))
+          .filter((n: number) => Number.isFinite(n) && n > 0 && n < 100_000)
+      : [];
+    const sources: string[] = Array.isArray(toolInput.sources)
+      ? toolInput.sources.map((s: any) => String(s)).slice(0, 10)
+      : [];
+
+    const priceMedian = rawSamples.length > 0 ? median(rawSamples) : null;
+
+    const dims = {
+      width: toInchesString(toolInput.width_inches),
+      depth: toInchesString(toolInput.depth_inches),
+      height: toInchesString(toolInput.height_inches),
+    };
+
+    return {
+      priceMedian: priceMedian != null ? Math.round(priceMedian) : null,
+      priceSamples: rawSamples.map((n) => Math.round(n)),
+      dimensions: dims,
+      sources,
+    };
+  } catch (err: any) {
+    console.error('researchItemFacts failed:', err?.message || err);
+    return empty;
+  }
+}
+
+function median(nums: number[]): number {
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted[mid];
+}
+
+// Decide which retail price to trust. Priority order:
+//   1. AF archive median (2+ prior listings): most trustworthy — Chase's
+//      team has already set and verified these on past listings.
+//   2. Web search median: credible if we got 2+ samples. Fall back to a
+//      single sample only when no AF data exists.
+//   3. WebstaurantStore single hit from the stock-image candidate.
+//   4. AI estimate — the floor; used when nothing else surfaced.
+//
+// Also validates: if the chosen candidate is wildly higher than the AI's
+// estimate (>5x), the AI estimate wins. Keeps us from attaching a bogus
+// $12k retail to a $2k item.
+function pickBestRetail(args: {
+  aiEstimate: number;
+  webstaurantPrice: number;
+  webMedian: number | null;
+  afArchiveMedian: number | null;
+  afArchiveSampleCount: number;
+}): { retail: number; source: 'af-archive-median' | 'web-median' | 'ai-estimate' | 'webstaurant-single' | 'kept-current' } {
+  const ai = args.aiEstimate > 0 ? args.aiEstimate : null;
+
+  // Hard preference: AF archive median with 2+ samples.
+  if (args.afArchiveMedian != null && args.afArchiveSampleCount >= 2) {
+    // Even AF archive gets a sanity check vs AI if present — a stale
+    // historical outlier shouldn't dominate.
+    if (ai == null || args.afArchiveMedian <= ai * 5) {
+      return { retail: args.afArchiveMedian, source: 'af-archive-median' };
+    }
+  }
+
+  // Web median next, but only trust 2+ samples unless AI estimate is
+  // way off (null/zero).
+  if (args.webMedian != null && args.webMedian > 0) {
+    const trustSingle = ai == null || ai === 0;
+    if (trustSingle || args.webMedian <= ai * 5) {
+      return { retail: args.webMedian, source: 'web-median' };
+    }
+  }
+
+  if (args.webstaurantPrice > 0 && (ai == null || args.webstaurantPrice <= ai * 5)) {
+    return { retail: args.webstaurantPrice, source: 'webstaurant-single' };
+  }
+
+  if (ai != null && ai > 0) return { retail: ai, source: 'ai-estimate' };
+  return { retail: args.aiEstimate, source: 'kept-current' };
+}
+
+function toInchesString(n: unknown): string {
+  const num = Number(n);
+  if (!Number.isFinite(num) || num <= 0 || num > 500) return '';
+  // Keep the decimal if the value is non-integer (e.g. 24.5), else drop
+  // the trailing .0 so the lot field reads "24" not "24.0".
+  return num % 1 === 0 ? String(Math.round(num)) : String(num);
+}
+
+// Compute the median retail across prior AF archive listings of the
+// same brand+model. Returns null if < 2 prior listings exist (one data
+// point isn't trustworthy on its own). This is the strongest signal we
+// have: real sold-item retails that the AF team already verified.
+export async function getAFArchiveMedianRetail(
+  supabase: SupabaseClient,
+  brand: string,
+  model: string
+): Promise<{ median: number; sampleCount: number } | null> {
+  const b = (brand || '').trim();
+  const m = (model || '').trim();
+  if (!b || !m) return null;
+  try {
+    const { data, error } = await supabase
+      .from('af_archive_items')
+      .select('retail_new')
+      .ilike('brand', b)
+      .ilike('model', m)
+      .not('retail_new', 'is', null)
+      .limit(50);
+    if (error || !data || data.length < 2) return null;
+    const nums = data
+      .map((r: any) => Number(r.retail_new))
+      .filter((n: number) => Number.isFinite(n) && n > 0 && n < 100_000);
+    if (nums.length < 2) return null;
+    return { median: Math.round(median(nums)), sampleCount: nums.length };
+  } catch {
+    return null;
   }
 }
 
@@ -784,31 +1035,74 @@ export async function processStockImageJob(
     const currentRetail = Number(lot.estimated_retail_new) || 0;
     diag.webstaurantPrice = found?.price || 0;
 
-    // Always do web search for pricing
-    const webSearchPrice = await researchRetailPrice(
+    // Research price (median of 3-5 samples, not max) + dimensions in one
+    // web_search call. The old max-of-samples strategy pulled wild
+    // outliers (one-off $12k Amazon listings when real retail was $2.5k)
+    // and the lotter trusted them. Chase: "retail prices are off
+    // dramatically — get them more accurate."
+    const facts = await researchItemFacts(
       anthropic,
       lot.brand || '',
       lot.model || '',
       lot.item_name || ''
     );
-    diag.webSearchPrice = webSearchPrice;
+    diag.webSearchPrice = facts.priceMedian ?? 0;
+    diag.webSearchPriceSamples = facts.priceSamples;
+    diag.webSearchPriceSources = facts.sources;
 
-    const maxPrice = Math.max(currentRetail, diag.webstaurantPrice, webSearchPrice);
-    if (maxPrice > currentRetail) {
-      const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
-      const newRetail = Math.round(maxPrice);
-      const newListed = computeListedPrice(newRetail);
-      const updates: any = {
-        estimated_retail_new: newRetail,
-        listed_price: newListed,
-      };
-      // Keep the "Retail Price: $X" line inside the description in sync
-      // with the new listed_price so the two don't drift apart.
-      if (lot.auction_description) {
-        updates.auction_description = syncRetailLine(lot.auction_description, newListed);
+    // Also consult AF archive — if we've sold this exact brand+model
+    // 2+ times before, that median is the single most trustworthy
+    // retail number (real completed listings a human already verified).
+    const archiveStats = await getAFArchiveMedianRetail(
+      supabase,
+      lot.brand || '',
+      lot.model || ''
+    );
+    diag.afArchiveMedianPrice = archiveStats?.median ?? null;
+    diag.afArchiveMedianSampleCount = archiveStats?.sampleCount ?? 0;
+
+    const picked = pickBestRetail({
+      aiEstimate: currentRetail,
+      webstaurantPrice: diag.webstaurantPrice,
+      webMedian: facts.priceMedian,
+      afArchiveMedian: archiveStats?.median ?? null,
+      afArchiveSampleCount: archiveStats?.sampleCount ?? 0,
+    });
+    diag.priceSourceChosen = picked.source;
+
+    const dimParsed = {
+      width: facts.dimensions.width || '',
+      depth: facts.dimensions.depth || '',
+      height: facts.dimensions.height || '',
+    };
+    // Fallback: parse any dims the AI left in the description text.
+    if (!dimParsed.width || !dimParsed.depth || !dimParsed.height) {
+      const fromDesc = extractDimensionsFromText(lot.auction_description);
+      dimParsed.width = dimParsed.width || fromDesc.width || '';
+      dimParsed.depth = dimParsed.depth || fromDesc.depth || '';
+      dimParsed.height = dimParsed.height || fromDesc.height || '';
+    }
+    const dimsOut = fillBlankDimensions(lot, dimParsed);
+
+    const needsRetailUpdate = picked.retail !== currentRetail && picked.retail > 0;
+    if (needsRetailUpdate || dimsOut.changed) {
+      const updates: any = {};
+      if (needsRetailUpdate) {
+        const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
+        updates.estimated_retail_new = picked.retail;
+        updates.listed_price = computeListedPrice(picked.retail);
+        if (lot.auction_description) {
+          updates.auction_description = syncRetailLine(lot.auction_description, updates.listed_price);
+        }
+      }
+      if (dimsOut.changed) {
+        updates.width = dimsOut.width;
+        updates.depth = dimsOut.depth;
+        updates.height = dimsOut.height;
+        diag.dimensionsBackfilled = true;
       }
       await supabase.from('lots').update(updates).eq('id', lot.id);
-      diag.finalOutcome = 'price-updated-only';
+      if (needsRetailUpdate) diag.finalOutcome = 'price-updated-only';
     }
 
     // Upload stock image if found

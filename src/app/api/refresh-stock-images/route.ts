@@ -4,10 +4,66 @@ import Anthropic from '@anthropic-ai/sdk';
 import { computeListedPrice, syncRetailLine } from '@/lib/listing-price';
 import {
   findAndVerifyStockImage,
-  researchRetailPrice,
+  researchItemFacts,
+  getAFArchiveMedianRetail,
 } from '@/lib/stock-image-processor';
+import { extractDimensionsFromText, fillBlankDimensions } from '@/lib/dimensions';
 
 export const maxDuration = 60;
+
+// Shared helper: pull web-search price median + dimensions + AF archive
+// median, pick the best retail with sanity gates, and backfill blank
+// dimensions on the lot. Used by both the stock-image-found and
+// no-image branches below so the pricing/dimension flow is identical.
+async function updateLotPriceAndDimensions(
+  supabase: any,
+  anthropic: Anthropic,
+  lot: any,
+  currentRetail: number,
+  webstaurantPrice: number
+): Promise<void> {
+  const brand = (lot.brand || '').trim();
+  const model = (lot.model || '').trim();
+  if (!brand && !model) return;
+
+  const facts = await researchItemFacts(anthropic, brand, model, lot.item_name || '');
+  const archiveStats = await getAFArchiveMedianRetail(supabase, brand, model);
+
+  const capAt = currentRetail > 0 ? currentRetail * 5 : Infinity;
+  let newRetail = currentRetail;
+  if (archiveStats && archiveStats.sampleCount >= 2 && archiveStats.median <= capAt) {
+    newRetail = archiveStats.median;
+  } else if (facts.priceMedian && facts.priceMedian > 0 && facts.priceMedian <= capAt) {
+    newRetail = facts.priceMedian;
+  } else if (webstaurantPrice > 0 && webstaurantPrice <= capAt) {
+    newRetail = webstaurantPrice;
+  }
+
+  const descDims = extractDimensionsFromText(lot.auction_description);
+  const dimsOut = fillBlankDimensions(lot, {
+    width: facts.dimensions.width || descDims.width,
+    depth: facts.dimensions.depth || descDims.depth,
+    height: facts.dimensions.height || descDims.height,
+  });
+
+  const needsRetailUpdate = newRetail !== currentRetail && newRetail > 0;
+  if (needsRetailUpdate || dimsOut.changed) {
+    const updates: any = {};
+    if (needsRetailUpdate) {
+      updates.estimated_retail_new = newRetail;
+      updates.listed_price = computeListedPrice(newRetail);
+      if (lot.auction_description) {
+        updates.auction_description = syncRetailLine(lot.auction_description, updates.listed_price);
+      }
+    }
+    if (dimsOut.changed) {
+      updates.width = dimsOut.width;
+      updates.depth = dimsOut.depth;
+      updates.height = dimsOut.height;
+    }
+    await supabase.from('lots').update(updates).eq('id', lot.id);
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -175,31 +231,9 @@ async function processRefresh(request: NextRequest) {
             display_order: 0,
           });
 
-          // Find the highest retail price from multiple sources
           const currentRetail = Number(lot.estimated_retail_new) || 0;
           const webstaurantPrice = found.price || 0;
-
-          // Web search for prices across multiple retailers
-          const webSearchPrice = await researchRetailPrice(
-            anthropic,
-            lot.brand || '',
-            lot.model || '',
-            lot.item_name || ''
-          );
-
-          const maxPrice = Math.max(currentRetail, webstaurantPrice, webSearchPrice);
-          if (maxPrice > currentRetail) {
-            const newRetail = Math.round(maxPrice);
-            const newListed = computeListedPrice(newRetail);
-            const updates: any = {
-              estimated_retail_new: newRetail,
-              listed_price: newListed,
-            };
-            if (lot.auction_description) {
-              updates.auction_description = syncRetailLine(lot.auction_description, newListed);
-            }
-            await supabase.from('lots').update(updates).eq('id', lot.id);
-          }
+          await updateLotPriceAndDimensions(supabase, anthropic, lot, currentRetail, webstaurantPrice);
 
           updated++;
           results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: true });
@@ -207,26 +241,8 @@ async function processRefresh(request: NextRequest) {
           results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
         }
       } else {
-        // No stock image found, but still try web search for pricing
         const currentRetail = Number(lot.estimated_retail_new) || 0;
-        const webSearchPrice = await researchRetailPrice(
-          anthropic,
-          lot.brand || '',
-          lot.model || '',
-          lot.item_name || ''
-        );
-        if (webSearchPrice > currentRetail) {
-          const newRetail = Math.round(webSearchPrice);
-          const newListed = computeListedPrice(newRetail);
-          const updates: any = {
-            estimated_retail_new: newRetail,
-            listed_price: newListed,
-          };
-          if (lot.auction_description) {
-            updates.auction_description = syncRetailLine(lot.auction_description, newListed);
-          }
-          await supabase.from('lots').update(updates).eq('id', lot.id);
-        }
+        await updateLotPriceAndDimensions(supabase, anthropic, lot, currentRetail, 0);
         results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
       }
     } catch (err: any) {
