@@ -600,6 +600,13 @@ export default function LotReviewPage() {
 
       setSaveProgress({ current: 0, total: lotsToCreate });
 
+      // Pre-fetch on save: collect ids of lots that end up WITHOUT a stock
+      // image inline so we can fire a background stock-image job for each
+      // of them. By the time Chase opens the auction later, most lots are
+      // already searched — the end-of-day "Find Stock Images for all"
+      // click no longer blocks on 30-180 min of work.
+      const lotIdsNeedingStockImage: string[] = [];
+
       for (let i = 0; i < lotsToCreate; i++) {
         const lotNumber = nextLotNumber + i;
 
@@ -727,6 +734,16 @@ export default function LotReviewPage() {
           }
         }
 
+        // If no stock image was attached inline (neither sibling-dedupe
+        // nor the generator surfaced one), queue a background job to
+        // search the AF archive + web for one. The job runs after the
+        // lotter has moved on, so no wait on their critical path.
+        const hasBrand = !!(listing.brand && listing.brand.trim() && listing.brand !== 'Unknown');
+        const hasModel = !!(listing.model && listing.model.trim() && listing.model !== 'Unknown');
+        if (hasBrand && hasModel && photoIndex === 0) {
+          lotIdsNeedingStockImage.push(lotData.id);
+        }
+
         // Persist "next lot" pointer INSIDE the loop after every successful
         // insert, not just after the whole range completes. If a later
         // iteration throws (duplicate-key collision, network blip, etc.)
@@ -737,6 +754,25 @@ export default function LotReviewPage() {
         } catch {}
 
         setSaveProgress({ current: i + 1, total: lotsToCreate });
+      }
+
+      // Fire-and-forget: enqueue background stock-image jobs for lots
+      // that didn't get an image inline. Explicit lot_ids path skips the
+      // enqueue endpoint's condition-10 gate, so condition 5-9 lots with
+      // brand+model also get a search attempt (previously they got none).
+      if (lotIdsNeedingStockImage.length > 0) {
+        fetch('/api/jobs/enqueue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            auction_id: auctionId,
+            job_type: 'refresh_stock_images',
+            lot_ids: lotIdsNeedingStockImage,
+          }),
+        }).catch(() => {
+          // The lots are already saved; a failed enqueue just means Chase
+          // has to click "Find Stock Images" himself later. No surfacing.
+        });
       }
 
       // Clear pending data
