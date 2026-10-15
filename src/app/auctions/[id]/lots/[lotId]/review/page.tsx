@@ -1403,7 +1403,7 @@ export default function LotReviewPage() {
                     This lot has a stock image as its primary photo
                     {sourceLabel ? ` (source: ${sourceLabel}` : ''}
                     {confidence != null ? `, vision confidence: ${confidence}/10)` : sourceLabel ? ')' : ''}.
-                    If it's wrong, retry (we'll never suggest the same image again) or
+                    If it&apos;s wrong, retry (we&apos;ll never suggest the same image again) or
                     revert to your own photos.
                   </p>
                   <div className="grid grid-cols-2 gap-2">
