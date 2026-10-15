@@ -16,6 +16,9 @@ export interface SearchDiagnostics {
   queryResults: Record<string, number>;
   afArchiveQueried: boolean;
   afArchiveHits: number;
+  rejectedUrlsFiltered: number;
+  serialOcrAttempted: boolean;
+  serialOcrResult: string | null;
   webstaurantHtmlBytes: number;
   webstaurantRegexMatched: boolean;
   webstaurantCandidates: number;
@@ -23,19 +26,40 @@ export interface SearchDiagnostics {
   webSearchImageFound: boolean;
   webSearchPrice: number;
   webstaurantPrice: number;
-  vision: 'skipped' | 'no-user-photos' | 'model-answer' | 'model-error' | 'model-none';
+  vision:
+    | 'skipped'
+    | 'no-user-photos'
+    | 'model-answer'
+    | 'model-error'
+    | 'model-none'
+    | 'low-confidence';
   visionPickedIndex: number | null;
   visionPickedSource: string | null;
+  visionConfidence: number | null;
   imageDownloaded: boolean;
   imageDownloadError: string | null;
   finalOutcome:
     | 'no-brand-or-model'
     | 'no-candidates'
     | 'vision-rejected'
+    | 'low-confidence-skipped'
     | 'image-download-failed'
     | 'image-saved'
     | 'price-updated-only';
 }
+
+export interface StockImageResult {
+  imageUrl: string;
+  price: number;
+  source: string;
+  confidence: number | null;
+}
+
+// Minimum vision-confidence score (1-10) a candidate must earn before we
+// attach it as a lot's primary photo. Chase: "accuracy > hit-rate." At 7
+// vision has to be reasonably sure same brand + model + form factor;
+// below that we leave the user's own photos as the primary.
+const MIN_VISION_CONFIDENCE = 7;
 
 export function emptyDiag(): SearchDiagnostics {
   return {
@@ -43,6 +67,9 @@ export function emptyDiag(): SearchDiagnostics {
     queryResults: {},
     afArchiveQueried: false,
     afArchiveHits: 0,
+    rejectedUrlsFiltered: 0,
+    serialOcrAttempted: false,
+    serialOcrResult: null,
     webstaurantHtmlBytes: 0,
     webstaurantRegexMatched: false,
     webstaurantCandidates: 0,
@@ -53,6 +80,7 @@ export function emptyDiag(): SearchDiagnostics {
     vision: 'skipped',
     visionPickedIndex: null,
     visionPickedSource: null,
+    visionConfidence: null,
     imageDownloaded: false,
     imageDownloadError: null,
     finalOutcome: 'no-candidates',
@@ -241,7 +269,7 @@ export async function findAndVerifyStockImage(
   userPhotoUrls: string[],
   diag: SearchDiagnostics = emptyDiag(),
   supabase?: SupabaseClient
-): Promise<{ imageUrl: string; price: number } | null> {
+): Promise<StockImageResult | null> {
   // Download user photos ourselves and delegate to the shared core.
   const userImagesB64: string[] = [];
   for (const photoUrl of userPhotoUrls.slice(0, 5)) {
@@ -268,12 +296,74 @@ export async function findAndVerifyStockImageFromB64(
   userImagesB64: string[],
   diag: SearchDiagnostics = emptyDiag(),
   supabase?: SupabaseClient
-): Promise<{ imageUrl: string; price: number } | null> {
+): Promise<StockImageResult | null> {
   const stripped = userImagesB64
     .filter(Boolean)
     .slice(0, 5)
     .map((s) => s.replace(/^data:image\/\w+;base64,/, ''));
   return findAndVerifyStockImageCore(anthropic, brand, model, itemName, stripped, diag, supabase);
+}
+
+// Serial-plate OCR pass: look at the user's photos for a visible model
+// number plate / sticker / tag and extract that exact string. Used when
+// the main AI's model-identification is weak (empty / "Unknown") so we
+// still have a specific query to run through the search pipeline.
+export async function extractModelFromPhotos(
+  anthropic: Anthropic,
+  userImagesB64: string[]
+): Promise<string | null> {
+  if (userImagesB64.length === 0) return null;
+  try {
+    const content: any[] = [
+      {
+        type: 'text',
+        text: `Look at these photos of a used piece of equipment. Find a visible model number — on a nameplate, data sticker, serial tag, or printed label. The model number is usually a short alphanumeric string like "KM-340MAJ" or "RP-241" or "L16E".
+
+If you can clearly read a model number string, respond with ONLY that string, nothing else. Preserve dashes/spaces exactly as printed.
+
+If you cannot clearly see any model number string, respond with ONLY "NONE".`,
+      },
+    ];
+    for (const b64 of userImagesB64.slice(0, 5)) {
+      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } });
+    }
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 40,
+      messages: [{ role: 'user', content }],
+    });
+    const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+    if (!text || /^none/i.test(text)) return null;
+    // Guard against the model echoing a long sentence instead of the
+    // bare model number — take the first non-whitespace token up to 60
+    // chars and reject anything that looks like prose.
+    const token = text.split(/\s+/)[0]?.slice(0, 60) || '';
+    if (!token || /[a-z]/.test(token) === false && /\d/.test(token) === false) return null;
+    if (token.length < 2) return null;
+    return token;
+  } catch (err: any) {
+    console.error('Serial OCR failed:', err?.message || err);
+    return null;
+  }
+}
+
+async function fetchRejectedUrlsFor(
+  supabase: SupabaseClient,
+  brand: string,
+  model: string
+): Promise<Set<string>> {
+  if (!brand || !model) return new Set();
+  try {
+    const { data } = await supabase
+      .from('rejected_stock_images')
+      .select('image_url')
+      .ilike('brand', brand)
+      .ilike('model', model)
+      .limit(200);
+    return new Set((data || []).map((r: any) => r.image_url).filter(Boolean));
+  } catch {
+    return new Set();
+  }
 }
 
 async function findAndVerifyStockImageCore(
@@ -284,8 +374,28 @@ async function findAndVerifyStockImageCore(
   userImagesB64: string[],
   diag: SearchDiagnostics,
   supabase?: SupabaseClient
-): Promise<{ imageUrl: string; price: number } | null> {
+): Promise<StockImageResult | null> {
   if (!brand && !model) return null;
+
+  // Serial OCR assist: when the main AI couldn't pin down a model, try a
+  // tightly-scoped vision pass over the user photos looking only for a
+  // visible model-number plate/sticker. If we find one, use it as the
+  // model string for the search pipeline below.
+  const modelIsWeak =
+    !model || /^(unknown|n\/a|none|)$/i.test(model.trim());
+  if (modelIsWeak && userImagesB64.length > 0) {
+    diag.serialOcrAttempted = true;
+    const ocrd = await extractModelFromPhotos(anthropic, userImagesB64);
+    if (ocrd) {
+      diag.serialOcrResult = ocrd;
+      model = ocrd;
+    }
+  }
+
+  // Pull the list of previously-rejected image URLs for this brand+model
+  // so we never resurrect a bad match the user clicked "Wrong — try
+  // another" on.
+  const rejected = supabase ? await fetchRejectedUrlsFor(supabase, brand, model) : new Set<string>();
 
   const queries = [
     `${brand} ${model}`.trim(),
@@ -368,6 +478,14 @@ async function findAndVerifyStockImageCore(
     if (anth.length > 0) diag.webSearchImageFound = true;
   }
 
+  // Drop any URL the user has previously rejected for this brand+model
+  // — nothing worse than seeing the same bad image appear on every retry.
+  if (rejected.size > 0) {
+    const before = candidates.length;
+    candidates = candidates.filter((c) => !rejected.has(c.imageUrl));
+    diag.rejectedUrlsFiltered = before - candidates.length;
+  }
+
   if (candidates.length === 0) return null;
 
   // Loose model-match filter: keep candidates whose title contains the
@@ -382,7 +500,12 @@ async function findAndVerifyStockImageCore(
   if (strictFiltered.length === 1) {
     diag.vision = 'skipped';
     diag.visionPickedSource = strictFiltered[0].source;
-    return { imageUrl: strictFiltered[0].imageUrl, price: strictFiltered[0].price };
+    return {
+      imageUrl: strictFiltered[0].imageUrl,
+      price: strictFiltered[0].price,
+      source: strictFiltered[0].source,
+      confidence: null,
+    };
   } else if (strictFiltered.length >= 2) {
     toVerify = strictFiltered;
   } else {
@@ -393,7 +516,12 @@ async function findAndVerifyStockImageCore(
   if (userImagesB64.length === 0) {
     diag.vision = 'no-user-photos';
     diag.visionPickedSource = toVerify[0].source;
-    return { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
+    return {
+      imageUrl: toVerify[0].imageUrl,
+      price: toVerify[0].price,
+      source: toVerify[0].source,
+      confidence: null,
+    };
   }
 
   // Download candidate images. 6 (was 4). Skip tiny / failed fetches.
@@ -428,7 +556,12 @@ async function findAndVerifyStockImageCore(
   if (candidateData.length === 0) {
     diag.vision = 'skipped';
     diag.visionPickedSource = toVerify[0].source;
-    return { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
+    return {
+      imageUrl: toVerify[0].imageUrl,
+      price: toVerify[0].price,
+      source: toVerify[0].source,
+      confidence: null,
+    };
   }
 
   try {
@@ -444,14 +577,28 @@ Below are the USER'S PHOTOS of the actual physical item they're selling:`,
     }
     content.push({
       type: 'text',
-      text: `\nNow here are ${candidateData.length} CANDIDATE stock images from retailer product pages. Pick the single candidate that is clearly the SAME product (same brand, same model, same form factor) as the user's item.
+      text: `\nNow here are ${candidateData.length} CANDIDATE stock images from retailer product pages. For each one, judge whether it depicts the SAME product (same brand, same model, same form factor) as the user's item.
 
-Only answer "NONE" if NO candidate plausibly depicts the same product — different form factor, wrong product category, obviously unrelated. If several candidates could match, pick the single best one — do NOT answer NONE just because the colors or background differ.
+Pick the single best match and rate how confident you are, 1-10:
+  10 = certain same brand+model, confirmed by visible model number/nameplate
+  8-9 = clearly same brand, model, form factor and all visible features line up
+  7   = very likely same product; minor differences could be angle or revision
+  5-6 = probably same product family but can't confirm the exact model
+  3-4 = ambiguous; could be the same or could be a sibling product
+  1-2 = probably not the same product
+  0   = clearly not the same product
 
-Respond with ONLY the number (1-${candidateData.length}) or the word NONE. No other text.`,
+Respond with EXACTLY one of:
+- "N conf:C"   where N is the 1-${candidateData.length} candidate number and C is 0-10
+- "NONE"       if no candidate plausibly depicts the same product
+
+Examples: "3 conf:9", "1 conf:5", "NONE". No other text.`,
     });
     for (let i = 0; i < candidateData.length; i++) {
-      content.push({ type: 'text', text: `\nCandidate ${i + 1} — "${candidateData[i].title}":` });
+      content.push({
+        type: 'text',
+        text: `\nCandidate ${i + 1} — source: ${candidateData[i].source} — title: "${candidateData[i].title}":`,
+      });
       content.push({
         type: 'image',
         source: { type: 'base64', media_type: candidateData[i].mediaType as any, data: candidateData[i].base64 },
@@ -460,7 +607,7 @@ Respond with ONLY the number (1-${candidateData.length}) or the word NONE. No ot
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 20,
+      max_tokens: 40,
       messages: [{ role: 'user', content }],
     });
 
@@ -469,20 +616,47 @@ Respond with ONLY the number (1-${candidateData.length}) or the word NONE. No ot
       diag.vision = 'model-none';
       return null;
     }
-    const numMatch = text.match(/(\d+)/);
-    if (numMatch) {
-      const idx = parseInt(numMatch[1]) - 1;
-      if (idx >= 0 && idx < candidateData.length) {
-        diag.vision = 'model-answer';
-        diag.visionPickedIndex = idx;
-        diag.visionPickedSource = candidateData[idx].source;
-        return { imageUrl: candidateData[idx].url, price: candidateData[idx].price };
-      }
+
+    // Expected format: "N conf:C". Be forgiving — accept just "N" (back-
+    // compat) with confidence null, or "N:C" / "N confidence C" variants.
+    const combo = text.match(/(\d+)\D+(?:conf(?:idence)?\s*[:=]?\s*)?(\d+)/i);
+    const bareNum = text.match(/^\s*(\d+)/);
+    let pickedIdx: number | null = null;
+    let confidence: number | null = null;
+    if (combo) {
+      pickedIdx = parseInt(combo[1], 10) - 1;
+      confidence = parseInt(combo[2], 10);
+      if (confidence > 10) confidence = 10;
+      if (confidence < 0) confidence = 0;
+    } else if (bareNum) {
+      pickedIdx = parseInt(bareNum[1], 10) - 1;
     }
-    // Unparseable response — treat as NONE rather than forcing a wrong
-    // match. Chase said accuracy matters more than hit-rate on bad data.
-    diag.vision = 'model-none';
-    return null;
+
+    if (pickedIdx == null || pickedIdx < 0 || pickedIdx >= candidateData.length) {
+      // Unparseable response — treat as NONE rather than forcing a wrong
+      // match. Chase said accuracy matters more than hit-rate on bad data.
+      diag.vision = 'model-none';
+      return null;
+    }
+
+    diag.visionPickedIndex = pickedIdx;
+    diag.visionPickedSource = candidateData[pickedIdx].source;
+    diag.visionConfidence = confidence;
+
+    // Confidence gate: a candidate below MIN_VISION_CONFIDENCE is treated
+    // as "no good match found" — the user's own photos stay primary.
+    if (confidence != null && confidence < MIN_VISION_CONFIDENCE) {
+      diag.vision = 'low-confidence';
+      return null;
+    }
+
+    diag.vision = 'model-answer';
+    return {
+      imageUrl: candidateData[pickedIdx].url,
+      price: candidateData[pickedIdx].price,
+      source: candidateData[pickedIdx].source,
+      confidence,
+    };
   } catch {
     diag.vision = 'model-error';
     return null;
@@ -495,25 +669,7 @@ export async function processStockImageJob(
   anthropic: Anthropic,
   lotId: string
 ): Promise<{ success: boolean; found: boolean; error?: string; diag?: SearchDiagnostics }> {
-  const diag: SearchDiagnostics = {
-    queriesTried: [],
-    queryResults: {},
-    afArchiveQueried: false,
-    afArchiveHits: 0,
-    webstaurantHtmlBytes: 0,
-    webstaurantRegexMatched: false,
-    webstaurantCandidates: 0,
-    webSearchTried: false,
-    webSearchImageFound: false,
-    webSearchPrice: 0,
-    webstaurantPrice: 0,
-    vision: 'skipped',
-    visionPickedIndex: null,
-    visionPickedSource: null,
-    imageDownloaded: false,
-    imageDownloadError: null,
-    finalOutcome: 'no-candidates',
-  };
+  const diag: SearchDiagnostics = emptyDiag();
 
   try {
     const { data: lot, error: lotError } = await supabase
@@ -542,7 +698,7 @@ export async function processStockImageJob(
       try {
         const { data: siblings } = await supabase
           .from('lots')
-          .select('id, estimated_retail_new, lot_photos(storage_path, display_order)')
+          .select('id, estimated_retail_new, lot_photos(storage_path, display_order, source_url)')
           .eq('auction_id', lot.auction_id)
           .ilike('brand', lot.brand)
           .ilike('model', lot.model)
@@ -577,6 +733,8 @@ export async function processStockImageJob(
                 lot_id: lot.id,
                 storage_path: sibStock.storage_path,
                 display_order: 0,
+                source_type: 'af-sibling',
+                source_url: sibStock.source_url || null,
               });
             }
             // Price bump + description sync, same shape as the normal
@@ -687,6 +845,9 @@ export async function processStockImageJob(
               lot_id: lot.id,
               storage_path: storagePath,
               display_order: 0,
+              source_type: found.source,
+              source_url: found.imageUrl,
+              vision_confidence: found.confidence,
             });
           }
           diag.finalOutcome = 'image-saved';
@@ -701,11 +862,91 @@ export async function processStockImageJob(
         diag.finalOutcome = 'image-download-failed';
       }
     } else {
-      diag.finalOutcome = diag.webstaurantCandidates === 0 ? 'no-candidates' : 'vision-rejected';
+      // Distinguish the "we had candidates but none scored high enough"
+      // case from "we literally found nothing" and "vision outright said
+      // NONE" so the admin UI can show the right status.
+      if (diag.vision === 'low-confidence') {
+        diag.finalOutcome = 'low-confidence-skipped';
+      } else if ((diag.webstaurantCandidates + diag.afArchiveHits) === 0) {
+        diag.finalOutcome = 'no-candidates';
+      } else {
+        diag.finalOutcome = 'vision-rejected';
+      }
     }
 
     return { success: true, found: false, diag };
   } catch (err: any) {
     return { success: false, found: false, error: err?.message || 'Processing failed', diag };
   }
+}
+
+// Add a (brand, model, image_url) tuple to the rejected list so future
+// stock-image searches for the same brand+model never resurface this URL.
+// Used by the retry endpoint when Chase clicks "Wrong — try another".
+export async function recordRejectedStockImage(
+  supabase: SupabaseClient,
+  args: { brand: string; model: string; image_url: string; rejected_by?: string; reason?: string }
+): Promise<void> {
+  const { brand, model, image_url } = args;
+  if (!brand || !model || !image_url) return;
+  try {
+    await supabase.from('rejected_stock_images').upsert(
+      {
+        brand,
+        model,
+        image_url,
+        rejected_by: args.rejected_by ?? null,
+        reason: args.reason ?? null,
+        rejected_at: new Date().toISOString(),
+      },
+      { onConflict: 'brand,model,image_url', ignoreDuplicates: false }
+    );
+  } catch (err) {
+    console.error('recordRejectedStockImage failed:', err);
+  }
+}
+
+// Delete the stock-image lot_photos row(s) for a lot and shift the user's
+// own photos down to fill display_order 0..N. Used by:
+//   - The explicit "Use my photos" revert button
+//   - The retry flow, after the user has rejected the current image
+//     (we strip the bad one before searching for a replacement so the UI
+//     never shows the wrong image while the retry runs)
+// Does NOT delete the underlying storage object — a different lot may
+// still reference the same object via sibling-lot dedupe. Storage
+// reclamation is handled by /admin/storage separately.
+export async function revertLotToUserPhotos(
+  supabase: SupabaseClient,
+  lotId: string
+): Promise<{ removed: number; kept: number }> {
+  const { data: photos } = await supabase
+    .from('lot_photos')
+    .select('id, storage_path, display_order')
+    .eq('lot_id', lotId)
+    .order('display_order', { ascending: true });
+
+  if (!photos || photos.length === 0) return { removed: 0, kept: 0 };
+
+  const stockRows = photos.filter((p: any) =>
+    (p.storage_path || '').includes('/stock_')
+  );
+  const userRows = photos.filter(
+    (p: any) => !(p.storage_path || '').includes('/stock_')
+  );
+
+  for (const s of stockRows) {
+    await supabase.from('lot_photos').delete().eq('id', s.id);
+  }
+
+  // Resequence the surviving user photos to display_order 0..N so the
+  // first one becomes the primary image.
+  for (let i = 0; i < userRows.length; i++) {
+    if ((userRows[i] as any).display_order === i) continue;
+    await supabase
+      .from('lot_photos')
+      .update({ display_order: i })
+      .eq('id', (userRows[i] as any).id);
+  }
+
+  return { removed: stockRows.length, kept: userRows.length };
 }

@@ -461,6 +461,82 @@ export default function LotReviewPage() {
     }
   };
 
+  // "Wrong image — try another". Marks the current image's source URL as
+  // rejected for this brand+model (so no future search ever picks it
+  // again), strips it from the lot, and runs a fresh search. If the
+  // search can't do better (confidence gate rejects or nothing left in
+  // the pool), the user's own photos stay primary.
+  const handleRetryStockImage = async () => {
+    if (!existingLot) return;
+    setFindingStockImage(true);
+    setStockImageMsg('Rejecting current image and searching again…');
+    try {
+      const res = await fetch('/api/stock-image/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lot_id: existingLot.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Server error ${res.status}`);
+
+      // Pick up the new state and refresh existingLot so the stock-image
+      // thumbnails re-render immediately.
+      const { data: fresh } = await supabase
+        .from('lots')
+        .select('*, lot_photos(*)')
+        .eq('id', existingLot.id)
+        .single();
+      if (fresh) setExistingLot(fresh as LotWithPhotos);
+
+      if (data.found) {
+        setStockImageMsg('Replaced with a different candidate.');
+      } else {
+        setStockImageMsg(
+          'No better match found — kept your photos as primary. The rejected image won\'t be suggested again.'
+        );
+      }
+    } catch (err: any) {
+      setStockImageMsg(`Retry failed: ${err?.message || String(err)}`);
+    } finally {
+      setFindingStockImage(false);
+    }
+  };
+
+  // "Use my photos" — hard revert. Drop any stock image on the lot,
+  // promote the user's own photos back to primary. Records the removed
+  // source URL as rejected so a future retry on a sibling lot (same
+  // brand+model) won't resurface it.
+  const handleRevertStockImage = async () => {
+    if (!existingLot) return;
+    if (!confirm('Remove the stock image from this lot and use your own photos as primary?')) return;
+    setFindingStockImage(true);
+    setStockImageMsg('Reverting to your own photos…');
+    try {
+      const res = await fetch('/api/stock-image/revert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lot_id: existingLot.id, record_rejection: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Server error ${res.status}`);
+
+      const { data: fresh } = await supabase
+        .from('lots')
+        .select('*, lot_photos(*)')
+        .eq('id', existingLot.id)
+        .single();
+      if (fresh) setExistingLot(fresh as LotWithPhotos);
+
+      setStockImageMsg(
+        `Reverted. ${data.removed_count} stock image removed; your ${data.kept_count} photos are primary.`
+      );
+    } catch (err: any) {
+      setStockImageMsg(`Revert failed: ${err?.message || String(err)}`);
+    } finally {
+      setFindingStockImage(false);
+    }
+  };
+
   const handleReuploadLot = async () => {
     if (!existingLot) return;
     if (!confirm('Re-upload this lot to AF? This creates a NEW lot on AF — delete the old one manually from AF admin.')) return;
@@ -1274,31 +1350,68 @@ export default function LotReviewPage() {
         )}
 
         {/* Per-lot stock image search (existing lots only) */}
-        {!isNew && existingLot && (
-          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-2">
-              Stock Image
-            </h3>
-            <p className="text-xs text-gray-500 mb-3">
-              Search WebstaurantStore + the web for a stock image and current retail price for this lot.
-            </p>
-            <button
-              onClick={handleFindStockImage}
-              disabled={findingStockImage}
-              className="w-full py-2 rounded-lg border-2 border-brand-blue text-brand-blue font-bold text-sm uppercase tracking-wide disabled:opacity-50"
-            >
-              {findingStockImage ? 'Searching…' : 'Find Stock Image'}
-            </button>
-            {findingStockImage && (
-              <div className="mt-3">
-                <IndeterminateBar label={stockImageMsg || 'Searching...'} />
-              </div>
-            )}
-            {stockImageMsg && !findingStockImage && (
-              <p className="mt-3 text-xs text-gray-600">{stockImageMsg}</p>
-            )}
-          </div>
-        )}
+        {!isNew && existingLot && (() => {
+          const stockPhoto = (existingLot.lot_photos || []).find((p: any) =>
+            (p.storage_path || '').includes('/stock_')
+          );
+          const sourceLabel = stockPhoto?.source_type ?? null;
+          const confidence = stockPhoto?.vision_confidence ?? null;
+          return (
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <h3 className="font-black text-sm text-brand-navy uppercase tracking-wide mb-2">
+                Stock Image
+              </h3>
+              {stockPhoto ? (
+                <>
+                  <p className="text-xs text-gray-500 mb-3">
+                    This lot has a stock image as its primary photo
+                    {sourceLabel ? ` (source: ${sourceLabel}` : ''}
+                    {confidence != null ? `, vision confidence: ${confidence}/10)` : sourceLabel ? ')' : ''}.
+                    If it's wrong, retry (we'll never suggest the same image again) or
+                    revert to your own photos.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleRetryStockImage}
+                      disabled={findingStockImage}
+                      className="py-2 rounded-lg border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                    >
+                      Wrong — Try Another
+                    </button>
+                    <button
+                      onClick={handleRevertStockImage}
+                      disabled={findingStockImage}
+                      className="py-2 rounded-lg border-2 border-gray-300 text-gray-600 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                    >
+                      Use My Photos
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Search the AF archive + WebstaurantStore + the web for a stock image and current retail price for this lot.
+                  </p>
+                  <button
+                    onClick={handleFindStockImage}
+                    disabled={findingStockImage}
+                    className="w-full py-2 rounded-lg border-2 border-brand-blue text-brand-blue font-bold text-sm uppercase tracking-wide disabled:opacity-50"
+                  >
+                    {findingStockImage ? 'Searching…' : 'Find Stock Image'}
+                  </button>
+                </>
+              )}
+              {findingStockImage && (
+                <div className="mt-3">
+                  <IndeterminateBar label={stockImageMsg || 'Searching...'} />
+                </div>
+              )}
+              {stockImageMsg && !findingStockImage && (
+                <p className="mt-3 text-xs text-gray-600">{stockImageMsg}</p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Lot assignment toggle (new lots only) */}
         {isNew && (
