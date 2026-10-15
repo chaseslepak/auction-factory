@@ -61,16 +61,22 @@ function parseAuctionName(html: string): string {
 function parseAuctionItems(html: string): ScrapedAFItem[] {
   const items: ScrapedAFItem[] = [];
 
-  // Split the HTML by "Item Number:" markers to isolate each item block
-  const itemBlocks = html.split(/Item\s*Number:\s*/i);
+  // Split on the structural <div class="itemNumber"> wrapper. AF changed
+  // their live-auction markup: it used to render visible "Item Number: N"
+  // text (what the old splitter grepped for); the new markup is just
+  // `<div class="itemNumber"><span>Lot </span>N</div>`. Archive pages
+  // still show "Item Number: " BUT inside a hidden desktop-span, inside
+  // the same `<div class="itemNumber">` wrapper. Splitting on the wrapper
+  // works on BOTH page shapes.
+  const itemBlocks = html.split(/<div\s+class="itemNumber"[^>]*>/i);
 
   for (let i = 1; i < itemBlocks.length; i++) {
     const block = itemBlocks[i];
 
-    // Strip HTML tags for lot-number extraction only, then grab the first
-    // run of digits (optionally with thousands commas / non-breaking space
-    // padding).
-    const lotHeader = block.slice(0, 200).replace(/<[^>]*>/g, '');
+    // The lot number is the first run of digits inside this block's
+    // header. Strip HTML (hidden spans like "Item Number: " on archive
+    // pages, visible "Lot " on live pages) and grab the first int.
+    const lotHeader = block.slice(0, 500).replace(/<[^>]*>/g, '');
     const lotMatch = lotHeader.match(/[\s ]*([\d,]+)/);
     let lot_number: number | null = null;
     if (lotMatch) {
@@ -272,38 +278,44 @@ export async function scrapeAuction(
     );
   }
 
-  // Add itemsPerPage=200 to get all items at once
+  // Fetch the first page. The server ignores `itemsPerPage` entirely —
+  // historically we tried `itemsPerPage=200` and the pagination gate
+  // below expected `items.length >= 200`, so pagination never fired and
+  // audit silently missed every lot past page 1. Instead: always
+  // paginate with `pageNum_items` until a page returns zero NEW lots.
   const fetchUrl = new URL(url);
-  fetchUrl.searchParams.set('itemsPerPage', '200');
-
-  // Fetch the auction listing page
   const html = await fetchPage(fetchUrl.toString());
   const af_name = parseAuctionName(html);
   let items = parseAuctionItems(html);
 
-  // Check for additional pages if items count suggests pagination
-  const totalMatch = html.match(/totalRows_items=(\d+)/);
-  const totalRows = totalMatch ? parseInt(totalMatch[1]) : items.length;
-
-  if (totalRows > 200 && items.length >= 200) {
-    // Fetch additional pages
-    let pageNum = 1;
-    while (items.length < totalRows) {
-      const pageUrl = new URL(url);
-      pageUrl.searchParams.set('itemsPerPage', '200');
-      pageUrl.searchParams.set('pageNum_items', String(pageNum));
-      pageUrl.searchParams.set('totalRows_items', String(totalRows));
-
-      const pageHtml = await fetchPage(pageUrl.toString());
-      const pageItems = parseAuctionItems(pageHtml);
-      if (pageItems.length === 0) break;
-
-      items = items.concat(pageItems);
-      pageNum++;
-
-      // Safety limit
-      if (pageNum > 10) break;
+  // Walk subsequent pages until the server returns nothing new or we
+  // hit the safety cap (50 pages × ~18 lots = 900 lots, covers Chase's
+  // largest batches with headroom). Dedupe by af_item_id — if the
+  // server loops back to page 0 content when asked past the end, the
+  // dedupe stops us immediately.
+  const seenItemIds = new Set<string>(
+    items.map((it) => it.af_item_id).filter(Boolean)
+  );
+  const MAX_PAGES = 50;
+  for (let pageNum = 1; pageNum < MAX_PAGES; pageNum++) {
+    const pageUrl = new URL(url);
+    pageUrl.searchParams.set('pageNum_items', String(pageNum));
+    let pageHtml: string;
+    try {
+      pageHtml = await fetchPage(pageUrl.toString());
+    } catch {
+      break;
     }
+    const pageItems = parseAuctionItems(pageHtml);
+    if (pageItems.length === 0) break;
+    let addedThisPage = 0;
+    for (const it of pageItems) {
+      if (it.af_item_id && seenItemIds.has(it.af_item_id)) continue;
+      if (it.af_item_id) seenItemIds.add(it.af_item_id);
+      items.push(it);
+      addedThisPage++;
+    }
+    if (addedThisPage === 0) break;
   }
 
   // Optionally fetch individual item details for full descriptions + all photos
