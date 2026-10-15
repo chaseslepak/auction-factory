@@ -255,7 +255,9 @@ export async function POST(request: NextRequest) {
         listing.brand,
         listing.model,
         listing.item_name,
-        images
+        images,
+        undefined,
+        supabase
       );
       if (found) {
         listing.stock_image_url = found.imageUrl;

@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { searchAFArchiveIndex } from '@/lib/af-archive';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -13,6 +14,8 @@ interface StockCandidate {
 export interface SearchDiagnostics {
   queriesTried: string[];
   queryResults: Record<string, number>;
+  afArchiveQueried: boolean;
+  afArchiveHits: number;
   webstaurantHtmlBytes: number;
   webstaurantRegexMatched: boolean;
   webstaurantCandidates: number;
@@ -22,6 +25,7 @@ export interface SearchDiagnostics {
   webstaurantPrice: number;
   vision: 'skipped' | 'no-user-photos' | 'model-answer' | 'model-error' | 'model-none';
   visionPickedIndex: number | null;
+  visionPickedSource: string | null;
   imageDownloaded: boolean;
   imageDownloadError: string | null;
   finalOutcome:
@@ -37,6 +41,8 @@ export function emptyDiag(): SearchDiagnostics {
   return {
     queriesTried: [],
     queryResults: {},
+    afArchiveQueried: false,
+    afArchiveHits: 0,
     webstaurantHtmlBytes: 0,
     webstaurantRegexMatched: false,
     webstaurantCandidates: 0,
@@ -46,6 +52,7 @@ export function emptyDiag(): SearchDiagnostics {
     webstaurantPrice: 0,
     vision: 'skipped',
     visionPickedIndex: null,
+    visionPickedSource: null,
     imageDownloaded: false,
     imageDownloadError: null,
     finalOutcome: 'no-candidates',
@@ -232,7 +239,8 @@ export async function findAndVerifyStockImage(
   model: string,
   itemName: string,
   userPhotoUrls: string[],
-  diag: SearchDiagnostics = emptyDiag()
+  diag: SearchDiagnostics = emptyDiag(),
+  supabase?: SupabaseClient
 ): Promise<{ imageUrl: string; price: number } | null> {
   // Download user photos ourselves and delegate to the shared core.
   const userImagesB64: string[] = [];
@@ -245,7 +253,7 @@ export async function findAndVerifyStockImage(
       }
     } catch {}
   }
-  return findAndVerifyStockImageCore(anthropic, brand, model, itemName, userImagesB64, diag);
+  return findAndVerifyStockImageCore(anthropic, brand, model, itemName, userImagesB64, diag, supabase);
 }
 
 // Variant for callers that already have user photos as base64 strings
@@ -258,13 +266,14 @@ export async function findAndVerifyStockImageFromB64(
   model: string,
   itemName: string,
   userImagesB64: string[],
-  diag: SearchDiagnostics = emptyDiag()
+  diag: SearchDiagnostics = emptyDiag(),
+  supabase?: SupabaseClient
 ): Promise<{ imageUrl: string; price: number } | null> {
   const stripped = userImagesB64
     .filter(Boolean)
     .slice(0, 5)
     .map((s) => s.replace(/^data:image\/\w+;base64,/, ''));
-  return findAndVerifyStockImageCore(anthropic, brand, model, itemName, stripped, diag);
+  return findAndVerifyStockImageCore(anthropic, brand, model, itemName, stripped, diag, supabase);
 }
 
 async function findAndVerifyStockImageCore(
@@ -273,7 +282,8 @@ async function findAndVerifyStockImageCore(
   model: string,
   itemName: string,
   userImagesB64: string[],
-  diag: SearchDiagnostics
+  diag: SearchDiagnostics,
+  supabase?: SupabaseClient
 ): Promise<{ imageUrl: string; price: number } | null> {
   if (!brand && !model) return null;
 
@@ -295,6 +305,35 @@ async function findAndVerifyStockImageCore(
   // first query returned noise).
   const seen = new Set<string>();
   let candidates: StockCandidate[] = [];
+
+  // STEP 1: Query the AF archive FIRST. A prior AF listing of the same
+  // brand+model is the best possible match — same photo quality, same
+  // framing convention, and if the retail is set it's already been
+  // verified by a human. These candidates are given to vision first so
+  // they're preferred when they match.
+  if (supabase && brand && model) {
+    diag.afArchiveQueried = true;
+    try {
+      const archiveHits = await searchAFArchiveIndex(supabase, brand, model);
+      diag.afArchiveHits = archiveHits.length;
+      for (const hit of archiveHits) {
+        if (!hit.image_url || seen.has(hit.image_url)) continue;
+        seen.add(hit.image_url);
+        candidates.push({
+          imageUrl: hit.image_url,
+          title: hit.item_name || `${brand} ${model}`,
+          price: hit.retail_new || 0,
+          source: 'af-archive',
+        });
+      }
+    } catch (err) {
+      // Archive lookup is best-effort — never let a schema/perm issue
+      // block the WebstaurantStore + Anthropic pipeline below.
+      console.error('AF archive lookup failed:', err);
+    }
+  }
+
+  let webstaurantAdded = 0;
   for (const q of queries) {
     const found = await searchWebstaurant(q);
     diag.queryResults[q] = found.length;
@@ -307,10 +346,11 @@ async function findAndVerifyStockImageCore(
       if (!seen.has(c.imageUrl)) {
         seen.add(c.imageUrl);
         candidates.push(c);
+        webstaurantAdded++;
       }
     }
   }
-  diag.webstaurantCandidates = candidates.length;
+  diag.webstaurantCandidates = webstaurantAdded;
 
   // Always widen with Anthropic web-search when restaurant-only coverage
   // is thin. Previously this ran ONLY when WebstaurantStore returned
@@ -341,6 +381,7 @@ async function findAndVerifyStockImageCore(
   let toVerify: StockCandidate[];
   if (strictFiltered.length === 1) {
     diag.vision = 'skipped';
+    diag.visionPickedSource = strictFiltered[0].source;
     return { imageUrl: strictFiltered[0].imageUrl, price: strictFiltered[0].price };
   } else if (strictFiltered.length >= 2) {
     toVerify = strictFiltered;
@@ -351,11 +392,15 @@ async function findAndVerifyStockImageCore(
 
   if (userImagesB64.length === 0) {
     diag.vision = 'no-user-photos';
+    diag.visionPickedSource = toVerify[0].source;
     return { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
   }
 
   // Download candidate images. 6 (was 4). Skip tiny / failed fetches.
-  const candidateData: { url: string; title: string; price: number; base64: string; mediaType: string }[] = [];
+  // Prefer AF-archive hits — they lead `toVerify` already (push order),
+  // but if we trim to 6 we want to be sure at least the top AF hits
+  // survive. Keep the order as-is since AF came first in the aggregation.
+  const candidateData: { url: string; title: string; price: number; base64: string; mediaType: string; source: string }[] = [];
   for (const c of toVerify.slice(0, 6)) {
     try {
       const res = await fetch(c.imageUrl);
@@ -376,11 +421,13 @@ async function findAndVerifyStockImageCore(
         price: c.price,
         base64: Buffer.from(buf).toString('base64'),
         mediaType,
+        source: c.source,
       });
     } catch {}
   }
   if (candidateData.length === 0) {
     diag.vision = 'skipped';
+    diag.visionPickedSource = toVerify[0].source;
     return { imageUrl: toVerify[0].imageUrl, price: toVerify[0].price };
   }
 
@@ -428,6 +475,7 @@ Respond with ONLY the number (1-${candidateData.length}) or the word NONE. No ot
       if (idx >= 0 && idx < candidateData.length) {
         diag.vision = 'model-answer';
         diag.visionPickedIndex = idx;
+        diag.visionPickedSource = candidateData[idx].source;
         return { imageUrl: candidateData[idx].url, price: candidateData[idx].price };
       }
     }
@@ -450,6 +498,8 @@ export async function processStockImageJob(
   const diag: SearchDiagnostics = {
     queriesTried: [],
     queryResults: {},
+    afArchiveQueried: false,
+    afArchiveHits: 0,
     webstaurantHtmlBytes: 0,
     webstaurantRegexMatched: false,
     webstaurantCandidates: 0,
@@ -459,6 +509,7 @@ export async function processStockImageJob(
     webstaurantPrice: 0,
     vision: 'skipped',
     visionPickedIndex: null,
+    visionPickedSource: null,
     imageDownloaded: false,
     imageDownloadError: null,
     finalOutcome: 'no-candidates',
@@ -568,7 +619,8 @@ export async function processStockImageJob(
       lot.model || '',
       lot.item_name || '',
       userPhotoUrls,
-      diag
+      diag,
+      supabase
     );
 
     const currentRetail = Number(lot.estimated_retail_new) || 0;

@@ -125,7 +125,9 @@ async function processRefresh(request: NextRequest) {
         lot.brand || '',
         lot.model || '',
         lot.item_name || '',
-        userPhotoUrls
+        userPhotoUrls,
+        undefined,
+        supabase
       );
 
       if (found) {

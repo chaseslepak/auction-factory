@@ -9,6 +9,7 @@ const sections = [
   { href: '/admin/hq-upload-queue', title: 'HQ Upload Queue', desc: 'Auctions locations have marked ready — push to AF here' },
   { href: '/admin/sop', title: 'SOP / Manual', desc: 'How to use the Auction Factory Official Lotter — step by step guide' },
   { href: '/admin/jobs', title: 'Jobs', desc: 'View background job status, errors, retry failed' },
+  { href: '/admin/af-archive', title: 'AF Archive Index', desc: 'Prior-auction photo index — the first place stock-image search looks' },
   { href: '/admin/trash', title: 'Trash', desc: 'Restore or permanently delete removed lots' },
   { href: '/admin/storage', title: 'Storage Cleanup', desc: 'Purge photos from archived auctions to reclaim Supabase storage' },
   { href: '/admin/users', title: 'Users', desc: 'Manage authorized emails' },

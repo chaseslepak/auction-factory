@@ -252,15 +252,27 @@ export default function AuctionDetailPage() {
 
   // Cap the poll loop so a stuck job (Anthropic outage, orphaned pending
   // row, etc.) can't burn tablet battery and rack up processor kicks
-  // forever. 60 polls * 3s = 3 minutes before we back off.
-  const MAX_POLLS = 60;
+  // forever. Scale the cap to how many lots we actually queued — each
+  // stock-image lookup can take 10–30 s, so a 300-lot batch legitimately
+  // runs 60+ min. Floor 3 min, ceiling 90 min; poll every 3 s.
+  const POLL_INTERVAL_MS = 3000;
+  const SECONDS_PER_LOT_ESTIMATE = 25;
+  const pollCapForLots = (lots: number) => {
+    const estSec = Math.max(180, Math.min(5400, lots * SECONDS_PER_LOT_ESTIMATE));
+    return Math.ceil(estSec * 1000 / POLL_INTERVAL_MS);
+  };
 
-  const pollJobStatus = async (lastDone = -1, stallCount = 0, attempts = 0) => {
-    if (attempts >= MAX_POLLS) {
+  const pollJobStatus = async (lastDone = -1, stallCount = 0, attempts = 0, cap: number | null = null) => {
+    // When the first poll fires we may not yet know how many lots were queued.
+    // The cap gets set below once we see `data.total`. Until then we use a
+    // generous default (10 min) so a slow queue-enqueue call doesn't trip us.
+    const effectiveCap = cap ?? 200;
+    if (attempts >= effectiveCap) {
       setRefreshing(false);
+      const minutes = Math.round((effectiveCap * POLL_INTERVAL_MS) / 60000);
       setUploadMsg({
         type: 'error',
-        text: 'Still running after 3 min — closed the poll. Check Admin → Jobs for status; reopen this auction to resume.',
+        text: `Browser stopped tracking after ${minutes} min — jobs are still running on the server. Check Admin → Jobs or reload this page to resume live tracking.`,
       });
       return;
     }
@@ -277,6 +289,11 @@ export default function AuctionDetailPage() {
 
       setRefreshProgress({ current: done, total });
 
+      // Lock in a lot-count-scaled cap as soon as we know `total`. Keeps a
+      // 368-lot batch from hitting a 3-min cap it legitimately needs 90+
+      // min to finish.
+      const nextCap = cap ?? (total > 0 ? pollCapForLots(total) : null);
+
       if (data.active) {
         // Detect stall: if nothing changed since last poll, kick the processor
         const isStalled = done === lastDone;
@@ -291,8 +308,8 @@ export default function AuctionDetailPage() {
           fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
         }
 
-        // Still processing, poll again in 3 seconds
-        setTimeout(() => pollJobStatus(done, newStallCount, attempts + 1), 3000);
+        // Still processing, poll again
+        setTimeout(() => pollJobStatus(done, newStallCount, attempts + 1, nextCap), POLL_INTERVAL_MS);
       } else {
         // All done
         setRefreshing(false);

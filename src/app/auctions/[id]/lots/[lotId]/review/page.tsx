@@ -377,13 +377,16 @@ export default function LotReviewPage() {
 
       setStockImageMsg('Queued — waiting for processor…');
 
-      // Poll until this lot's job is no longer pending/processing. Cap
-      // at 60 polls (~3 min) so a stuck job (Anthropic outage, orphaned
-      // pending row) can't spin the poller forever.
-      const MAX_JOB_POLLS = 60;
+      // Per-lot search runs AF-archive + WebstaurantStore + Anthropic
+      // web_search + vision verify — legitimately 20–60 s per lot. Cap at
+      // 200 polls × 3 s = 10 min so a stuck job can't spin forever, but
+      // generous enough that a slow run doesn't look broken.
+      const MAX_JOB_POLLS = 200;
       const pollJob = async (attempts = 0): Promise<void> => {
         if (attempts >= MAX_JOB_POLLS) {
-          setStockImageMsg('Still running after 3 min — closed the poll. Check Admin → Jobs and reopen this lot.');
+          setStockImageMsg(
+            'Browser stopped tracking after 10 min — the job is still running on the server. Reopen this lot in a moment to see the result, or check Admin → Jobs.'
+          );
           setFindingStockImage(false);
           return;
         }
