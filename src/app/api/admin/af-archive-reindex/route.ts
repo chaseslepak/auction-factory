@@ -26,7 +26,14 @@ export async function POST(request: NextRequest) {
   const fromPage = Math.max(0, Number(body.fromPage ?? 0));
   const pagesToProcess = Math.max(1, Math.min(10, Number(body.pagesToProcess ?? 1)));
   const skipKnown = body.skipKnown !== false; // default true
-  const maxAuctions = Math.max(1, Math.min(25, Number(body.maxAuctions ?? 5)));
+  // Default 3 (not 5) so a single call is far more likely to finish
+  // inside the Vercel 60s function timeout even when auctions have
+  // 400+ lots across 20+ page fetches.
+  const maxAuctions = Math.max(1, Math.min(25, Number(body.maxAuctions ?? 3)));
+  // Server-side wall-clock budget: return a cursor at 50s regardless of
+  // where we are in processing. Vercel kills at 60s; 10s of headroom
+  // keeps every call returning a usable response, never a 504.
+  const timeBudgetMs = Math.max(5_000, Math.min(55_000, Number(body.timeBudgetMs ?? 50_000)));
 
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json(
@@ -46,6 +53,7 @@ export async function POST(request: NextRequest) {
       pagesToProcess,
       skipKnown,
       maxAuctions,
+      timeBudgetMs,
     });
     return NextResponse.json(result);
   } catch (err: any) {

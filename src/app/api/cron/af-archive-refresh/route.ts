@@ -28,7 +28,12 @@ export async function GET(request: NextRequest) {
       fromPage: 0,
       pagesToProcess: 2,
       skipKnown: true,
+      // Nightly only touches auctions not already crawled, so most
+      // calls are near-no-op (page fetch + skip-decision). But a brand
+      // new auction with 400 lots could still blow the budget — leave
+      // the time guard to protect us.
       maxAuctions: 10,
+      timeBudgetMs: 50_000,
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (err: any) {

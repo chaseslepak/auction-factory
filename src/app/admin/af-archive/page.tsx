@@ -47,7 +47,7 @@ export default function AFArchiveAdminPage() {
     return () => clearInterval(t);
   }, []);
 
-  const runOnce = async (fromPage: number, skipKnown: boolean, maxAuctions = 5) => {
+  const runOnce = async (fromPage: number, skipKnown: boolean, maxAuctions = 3) => {
     const res = await fetch('/api/admin/af-archive-reindex', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -60,6 +60,32 @@ export default function AFArchiveAdminPage() {
     return res.json();
   };
 
+  // Retry a 504 / 502 / network blip up to N times with backoff. A single
+  // dropped call shouldn't torpedo the whole crawl — the server-side
+  // bookkeeping lets us pick back up at the same cursor.
+  const runOnceWithRetry = async (
+    fromPage: number,
+    skipKnown: boolean,
+    maxAuctions: number,
+    maxRetries = 3
+  ) => {
+    let lastErr: any = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await runOnce(fromPage, skipKnown, maxAuctions);
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message || err);
+        const isTransient = /^(5\d\d|FUNCTION_INVOCATION_TIMEOUT|network|fetch failed|aborted)/i.test(msg);
+        if (!isTransient || attempt === maxRetries) throw err;
+        const backoff = 2000 * (attempt + 1);
+        setStatus(`Transient error (${msg.substring(0, 60)}…) — retrying in ${backoff / 1000}s`);
+        await new Promise((r) => setTimeout(r, backoff));
+      }
+    }
+    throw lastErr;
+  };
+
   const runUntilDone = async (mode: 'refresh' | 'full') => {
     setRunning(true);
     setLog([]);
@@ -67,17 +93,33 @@ export default function AFArchiveAdminPage() {
     try {
       let page = 0;
       const skipKnown = mode === 'refresh';
-      const safetyCap = 100; // ~100 calls × 5 auctions = 500 auctions, way beyond AF's 200
+      // ~200 past auctions ÷ 3 auctions/call = ~67 calls to walk the
+      // whole archive on a full recrawl. Allow 150 calls to cover
+      // retries and the odd mid-stream failure.
+      const safetyCap = 150;
       for (let i = 0; i < safetyCap; i++) {
         setStatus(`Crawling page ${page}… (call ${i + 1})`);
-        const r = await runOnce(page, skipKnown, 5);
-        setLog((l) => [
-          `page ${page}: ${r.auctions_crawled} crawled, ${r.auctions_skipped} skipped, ${r.lots_upserted} lots upserted, ${r.errors.length} errors`,
-          ...l,
-        ]);
-        await refreshStats();
-        if (r.next_page == null) break;
-        page = r.next_page;
+        try {
+          const r = await runOnceWithRetry(page, skipKnown, 3);
+          setLog((l) => [
+            `page ${page}: ${r.auctions_crawled} crawled, ${r.auctions_skipped} skipped, ${r.lots_upserted} lots upserted, ${r.errors.length} errors`,
+            ...l,
+          ]);
+          await refreshStats();
+          if (r.next_page == null) break;
+          page = r.next_page;
+        } catch (err: any) {
+          // Persistent failure on a single call. Advance the page cursor
+          // past it so we don't infinite-loop on a bad auction — the
+          // bookkeeping table will show its last_crawl_error for Chase
+          // to inspect. If this was the last page, break; otherwise
+          // continue with the next.
+          setLog((l) => [
+            `page ${page}: FAILED after retries — ${err?.message || String(err)}; skipping to next page`,
+            ...l,
+          ]);
+          page = page + 1;
+        }
       }
       setStatus('Done.');
     } catch (err: any) {

@@ -211,6 +211,12 @@ export interface ReindexOptions {
   // function timeouts). The orchestrator returns a cursor for the admin
   // UI to continue from.
   maxAuctions: number;
+  // Soft wall-clock budget in ms. The orchestrator returns a cursor as
+  // soon as elapsed time exceeds this, regardless of how many auctions
+  // are still to go. Set below the Vercel function timeout so the client
+  // sees a cursor instead of a 504. Default 50_000 (10s under the 60s
+  // Hobby plan cap).
+  timeBudgetMs?: number;
 }
 
 export interface ReindexResult {
@@ -241,6 +247,10 @@ export async function reindexArchive(
   };
 
   let crawledThisCall = 0;
+  const startedAt = Date.now();
+  const timeBudgetMs = opts.timeBudgetMs ?? 50_000;
+  const timeExhausted = () => Date.now() - startedAt > timeBudgetMs;
+
   for (let p = opts.fromPage; p < opts.fromPage + opts.pagesToProcess; p++) {
     let page: ScrapedAuction[];
     try {
@@ -290,8 +300,13 @@ export async function reindexArchive(
     }
 
     for (const a of toCrawl) {
-      if (crawledThisCall >= opts.maxAuctions) {
-        // Save cursor and exit — admin UI continues from here.
+      // Return early with a cursor if we've hit maxAuctions OR run out of
+      // wall-clock budget. The second case is critical: a single large
+      // auction (300+ lots across 20+ page fetches) could blow past the
+      // Vercel 60s function timeout mid-work and leave the admin loop
+      // staring at a 504 with no way to resume. Checking before we start
+      // the next auction keeps every call returning cleanly.
+      if (crawledThisCall >= opts.maxAuctions || timeExhausted()) {
         result.next_page = p;
         const idx = page.findIndex((x) => x.af_auction_id === a.af_auction_id);
         result.next_auction_offset = idx;
