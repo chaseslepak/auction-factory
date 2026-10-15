@@ -39,12 +39,17 @@ export async function POST(request: NextRequest) {
     serviceKey
   );
 
-  const { data: lot } = await supabase
+  const { data: lot, error: lotErr } = await supabase
     .from('lots')
-    .select('id, brand, model, lot_photos(id, storage_path, display_order, source_url)')
+    .select('id, brand, model, lot_photos(*)')
     .eq('id', lotId)
     .single();
-  if (!lot) return NextResponse.json({ error: 'Lot not found' }, { status: 404 });
+  if (lotErr || !lot) {
+    return NextResponse.json(
+      { error: lotErr?.message || 'Lot not found' },
+      { status: 404 }
+    );
+  }
 
   const brand = (lot.brand || '').trim();
   const model = (lot.model || '').trim();
@@ -66,7 +71,7 @@ export async function POST(request: NextRequest) {
 
   const { data: fresh } = await supabase
     .from('lots')
-    .select('id, lot_photos(id, storage_path, display_order, source_url, source_type, vision_confidence)')
+    .select('id, lot_photos(*)')
     .eq('id', lotId)
     .single();
 

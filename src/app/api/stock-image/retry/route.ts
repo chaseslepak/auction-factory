@@ -49,12 +49,21 @@ export async function POST(request: NextRequest) {
   }
   const anthropic = new Anthropic({ apiKey });
 
-  const { data: lot } = await supabase
+  // Use `lot_photos(*)` so this still works if phase14 hasn't been run —
+  // the explicit `source_url` column reference would make this SELECT
+  // fail with "column does not exist" and surface as "Retry failed: Lot
+  // not found" to the user.
+  const { data: lot, error: lotErr } = await supabase
     .from('lots')
-    .select('id, brand, model, lot_photos(id, storage_path, display_order, source_url)')
+    .select('id, brand, model, lot_photos(*)')
     .eq('id', lotId)
     .single();
-  if (!lot) return NextResponse.json({ error: 'Lot not found' }, { status: 404 });
+  if (lotErr || !lot) {
+    return NextResponse.json(
+      { error: lotErr?.message || 'Lot not found' },
+      { status: 404 }
+    );
+  }
 
   const brand = (lot.brand || '').trim();
   const model = (lot.model || '').trim();
@@ -85,7 +94,7 @@ export async function POST(request: NextRequest) {
   // Pull the lot's photos again so the client renders the new state.
   const { data: fresh } = await supabase
     .from('lots')
-    .select('id, lot_photos(id, storage_path, display_order, source_url, source_type, vision_confidence)')
+    .select('id, lot_photos(*)')
     .eq('id', lotId)
     .single();
 
