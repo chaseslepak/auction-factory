@@ -12,6 +12,7 @@ const sections = [
   { href: '/admin/upload-telemetry', title: 'Upload Telemetry', desc: 'Per-attempt diagnostics for HQ Push — error histogram, success rate, cookie rotations' },
   { href: '/admin/pricing-feedback', title: 'Pricing Feedback', desc: 'Listed vs sold hammer prices from AF archive — flags chronic over/underpricing' },
   { href: '/admin/af-archive', title: 'AF Archive Index', desc: 'Prior-auction photo index — the first place stock-image search looks' },
+  { href: '/admin/backfill', title: 'Backfill af_item_id', desc: 'One-time: match pre-phase15 lots to AF admin item list, fill durable keys' },
   { href: '/admin/trash', title: 'Trash', desc: 'Restore or permanently delete removed lots' },
   { href: '/admin/storage', title: 'Storage Cleanup', desc: 'Purge photos from archived auctions to reclaim Supabase storage' },
   { href: '/admin/users', title: 'Users', desc: 'Manage authorized emails' },

@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/af-archive-refresh",
       "schedule": "15 7 * * *"
+    },
+    {
+      "path": "/api/cron/daily-digest",
+      "schedule": "30 7 * * *"
     }
   ]
 }
