@@ -55,14 +55,14 @@ export async function POST(request: NextRequest) {
   // backfilled. af_auction_id lives on af_auction_map, not auctions.
   const { data: mappings, error: mappingsErr } = await supabase
     .from('af_auction_map')
-    .select('auction_id, af_auction_id, auctions(id, title)');
+    .select('auction_id, af_auction_id, auctions(id, name)');
   if (mappingsErr) {
     return NextResponse.json({ error: mappingsErr.message }, { status: 500 });
   }
   const auctions = (mappings || []).map((m: any) => ({
     id: m.auction_id,
     af_auction_id: m.af_auction_id,
-    title: m.auctions?.title ?? null,
+    title: m.auctions?.name ?? null,
   }));
 
   const perAuction: Array<{
