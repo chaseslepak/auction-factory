@@ -82,19 +82,40 @@ export default function AuditPage() {
 
   const syncStatuses = async () => {
     if (!result) return;
-    // Only prompt if this will actually change anything.
-    const stale = result.only_in_lotter.length; // marked uploaded but AF doesn't have them → will be cleared
-    const onAf = result.counts.lotter_lots - stale; // rough estimate for confirmation copy
-    if (
-      !confirm(
-        `Sync lotter statuses to AF?\n\n` +
-          `• Lots on AF will be marked "uploaded".\n` +
-          `• Lots not on AF will be marked "not sent" so they push next time.\n\n` +
-          `About ${onAf} on AF, ${stale} not on AF.`
-      )
-    ) {
+    const stale = result.only_in_lotter.length;
+    const lotterCount = result.counts.lotter_lots;
+    const afCount = result.counts.af_lots;
+
+    // Client-side guardrail. The server also refuses when the gap is
+    // this wide, but surfacing it here prevents a round-trip and lets
+    // Chase understand the risk BEFORE accidentally hitting OK on a
+    // misleading dialog.
+    if (stale > 0 && afCount < lotterCount * 0.9) {
+      alert(
+        `BLOCKED to prevent duplicates.\n\n` +
+        `Lotter has ${lotterCount} lots. Scraper found ${afCount} items on AF — a gap of ${lotterCount - afCount}. ` +
+        `This usually means the scraper missed items, not that AF is actually missing them. ` +
+        `If you Sync now, those lots get their "uploaded" status cleared, and the next HQ Push RE-UPLOADS them as duplicates on AF.\n\n` +
+        `Fix: open an AF auction detail page in a browser and count the items manually. ` +
+        `If AF really does have ${afCount}, you can force the sync via SQL or ask Claude. ` +
+        `Otherwise the scraper is wrong — report it.`
+      );
       return;
     }
+
+    const dialog =
+      `Sync lotter statuses to AF?\n\n` +
+      `Scraper found ${afCount} items on AF.\n` +
+      `Lotter has ${lotterCount} lots.\n\n` +
+      (stale > 0
+        ? `${stale} lots will be cleared back to "not sent" (status cleared) ` +
+          `because the scraper didn't find them on AF. On next HQ Push they will be re-uploaded. ` +
+          `If any of those ${stale} ARE actually on AF, you will create duplicates.\n\n`
+        : `No lots to clear.\n\n`) +
+      `${result.only_in_lotter.length === 0 ? 'All' : afCount} AF items will be marked "uploaded" in the lotter.\n\n` +
+      `Proceed?`;
+    if (!confirm(dialog)) return;
+
     setSyncing(true);
     setSyncResult(null);
     try {

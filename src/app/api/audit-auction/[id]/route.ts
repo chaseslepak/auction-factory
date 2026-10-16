@@ -277,6 +277,37 @@ export async function POST(
     }
   });
 
+  // SAFETY GATE — never clear 'uploaded' statuses when the scraper
+  // may have missed items. Scenario: AF has 300 items, scraper
+  // returns 180 (scraper regression / timeout / pagination miss),
+  // audit decides the missing 120 lots were "only in lotter" and
+  // clears their status, next HQ Push re-uploads all 120 as
+  // duplicates on AF.
+  //
+  // Heuristic: refuse to clear any status if the scraped AF count
+  // is less than 90% of the lotter's non-deleted lot count. Chase
+  // can override with `force: true` in the body for the rare case
+  // AF genuinely does have far fewer items (e.g. half the auction
+  // got manually deleted from AF admin).
+  const lotterCount = (lots || []).length;
+  const scrapedCount = scraped.items.length;
+  const dangerousClear =
+    toClear.length > 0 && scrapedCount < lotterCount * 0.9 && !body?.force;
+  if (dangerousClear) {
+    return NextResponse.json(
+      {
+        error:
+          `Refusing to clear ${toClear.length} statuses. Scraper found ${scrapedCount} items on AF but lotter has ${lotterCount} lots — the gap is too wide to trust the "only in lotter" bucket. Clearing could cause duplicate uploads on next HQ Push. ` +
+          `If AF genuinely has that many fewer items (e.g. half the auction was manually deleted from AF admin), re-run with { "confirm": true, "force": true }.`,
+        scraped_af_count: scrapedCount,
+        lotter_count: lotterCount,
+        would_mark_uploaded: toMarkUploaded.length,
+        would_clear: toClear.length,
+      },
+      { status: 400 }
+    );
+  }
+
   const errors: string[] = [];
 
   if (toMarkUploaded.length > 0) {
