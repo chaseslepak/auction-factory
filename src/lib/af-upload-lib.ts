@@ -5,6 +5,43 @@
 // route/auth concerns — pass in a decrypted AF session cookie and a lot
 // row (with photos joined) and it returns success/failure.
 
+// AF's photo validator rejects anything smaller than ~400px or
+// non-standard formats. Normalize every image before sending: upscale
+// to this minimum dimension if smaller, re-encode as JPEG at reasonable
+// quality. Lets Chase keep stock images as primary while making them
+// AF-acceptable even when the vendor served a 150px thumbnail.
+const AF_MIN_DIMENSION = 500;
+const AF_JPEG_QUALITY = 88;
+
+async function normalizeImageForAF(buf: Buffer): Promise<Buffer> {
+  try {
+    const sharp = (await import('sharp')).default;
+    const img = sharp(buf, { failOn: 'none' });
+    const meta = await img.metadata();
+    const width = meta.width || 0;
+    const height = meta.height || 0;
+    const needsUpscale =
+      width > 0 && height > 0 && (width < AF_MIN_DIMENSION || height < AF_MIN_DIMENSION);
+    let pipeline = img.rotate(); // honor EXIF orientation
+    if (needsUpscale) {
+      // Preserve aspect ratio; the shorter side becomes AF_MIN_DIMENSION.
+      pipeline = pipeline.resize({
+        width: width <= height ? AF_MIN_DIMENSION : undefined,
+        height: height < width ? AF_MIN_DIMENSION : undefined,
+        fit: 'inside',
+        withoutEnlargement: false,
+        kernel: 'lanczos3',
+      });
+    }
+    return await pipeline.jpeg({ quality: AF_JPEG_QUALITY, mozjpeg: true }).toBuffer();
+  } catch {
+    // Sharp failed (unsupported format, corrupt, etc.). Return original;
+    // AF will reject if it's bad, but we don't want to drop a valid
+    // photo over a Sharp quirk.
+    return buf;
+  }
+}
+
 // Condition rating map: our 1-10 to AF's actual dropdown values
 const CONDITION_MAP: Record<number, string> = {
   10: '10 - New in box',
@@ -167,19 +204,6 @@ export async function uploadLotToAF(
   sessionCookie: string,
   saveAction: 'next' | 'exit'
 ): Promise<UploadLotResult> {
-  // DETERMINISTIC PHOTO ORDER: user-uploaded photos always come first;
-  // stock images (storage_path contains '/stock_') always come last.
-  // AF's photo validator is strict about the primary photo — vendor
-  // stock images (especially placeholders) sometimes fail; user
-  // warehouse photos always pass. This runtime sort guarantees the
-  // first photo AF sees is a user photo whenever one exists, no matter
-  // what display_order the DB has. Zero AI, zero probability.
-  const userFirst = [...(photos || [])].sort((a, b) => {
-    const aStock = a.storage_path?.includes('/stock_') ? 1 : 0;
-    const bStock = b.storage_path?.includes('/stock_') ? 1 : 0;
-    return aStock - bStock;
-  });
-  photos = userFirst;
   const startedAt = Date.now();
   try {
     // AF's rebuilt backend 302-redirects /admin/add_item_2new.php to
@@ -310,10 +334,16 @@ export async function uploadLotToAF(
         clearTimeout(timeoutId);
         if (!photoRes.ok) continue;
         const arrayBuf = await photoRes.arrayBuffer();
+        // Normalize every photo to AF spec right before upload: upscale
+        // if below AF_MIN_DIMENSION, re-encode as JPEG. Stock images
+        // that would otherwise be rejected for being too small now meet
+        // AF's validator every time. User photos are already fine, this
+        // just re-encodes them which is harmless.
+        const normalized = await normalizeImageForAF(Buffer.from(arrayBuf));
         photoParts.push({
           name: 'file[]',
           filename: `photo_${i}.jpg`,
-          data: Buffer.from(arrayBuf),
+          data: normalized,
           contentType: 'image/jpeg',
         });
       } catch {}
