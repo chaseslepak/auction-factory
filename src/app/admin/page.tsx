@@ -13,6 +13,7 @@ const sections = [
   { href: '/admin/pricing-feedback', title: 'Pricing Feedback', desc: 'Listed vs sold hammer prices from AF archive — flags chronic over/underpricing' },
   { href: '/admin/af-archive', title: 'AF Archive Index', desc: 'Prior-auction photo index — the first place stock-image search looks' },
   { href: '/admin/purge-placeholders', title: 'Purge Placeholder Photos', desc: 'Clean "IMAGE COMING SOON" vendor fallbacks from an auction — fixes AF photo-rejection failures' },
+  { href: '/admin/reorder-photos', title: 'Reorder: User Photos First', desc: 'Deterministic — stock images go to the end so a placeholder can never be primary' },
   { href: '/admin/trash', title: 'Trash', desc: 'Restore or permanently delete removed lots' },
   { href: '/admin/storage', title: 'Storage Cleanup', desc: 'Purge photos from archived auctions to reclaim Supabase storage' },
   { href: '/admin/users', title: 'Users', desc: 'Manage authorized emails' },

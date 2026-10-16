@@ -462,7 +462,7 @@ export async function classifyImageAsPlaceholder(
             {
               type: 'text',
               text:
-                'Is this image a real product photograph, OR a placeholder / no-image graphic / "coming soon" graphic / generic silhouette? Reply with exactly one word: PRODUCT or PLACEHOLDER.',
+                'Classify this image. Reply with exactly ONE word: PRODUCT or PLACEHOLDER.\n\nReturn PLACEHOLDER if the image is ANY of these:\n- Contains the text "IMAGE COMING SOON", "COMING SOON", "NO IMAGE", "NO PHOTO", "PICTURE COMING SOON", or similar\n- A generic silhouette, outline, or icon used as a stand-in for an actual photo\n- A vendor fallback graphic (grey camera icon, question mark, broken image symbol)\n- A plain colored background with text and no actual product visible\n- A watermark or copyright-protected sample where the actual product is obscured\n\nReturn PRODUCT only if there is an actual photograph of a physical object, item, or product visible. When in doubt, prefer PLACEHOLDER — a false-positive just means we skip a questionable image; a false-negative causes AF to reject the entire lot upload.',
             },
           ],
         },
