@@ -1,7 +1,77 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
-import { scrapeAuction } from '@/lib/af-scraper';
+import { scrapeAuction, ScrapedAFAuction, ScrapedAFItem } from '@/lib/af-scraper';
+import { fetchAdminItemList } from '@/lib/af-admin-scraper';
+
+// Try the admin-flow item list first (authenticated, more stable markup),
+// fall back to the public buyer-facing scrape if no cookie or if admin
+// errors. Returns the same shape as scrapeAuction so the diff logic
+// doesn't need to care which source produced the items. The `source`
+// field lets the UI show "scraped from admin" vs "scraped from public."
+async function scrapeAuctionPreferAdmin(
+  afAuctionId: string,
+  cookie: string | null
+): Promise<ScrapedAFAuction & { source: 'admin' | 'public' }> {
+  if (cookie) {
+    try {
+      const adminItems = await fetchAdminItemList(afAuctionId, cookie);
+      // Shape adapter: AdminItem → ScrapedAFItem. The admin list only
+      // has (af_item_id, title, lot_number); the richer public fields
+      // (photos, description, condition, current_bid, brand, model,
+      // dimensions) are unavailable — audit doesn't need them.
+      const items: ScrapedAFItem[] = adminItems.map((a) => ({
+        lot_number: a.lot_number,
+        title: a.title,
+        af_item_id: String(a.af_item_id),
+        af_item_url: `https://auctionfactory.com/item_detail.php?item=${a.af_item_id}`,
+        description: '',
+        photos: [],
+        condition: '',
+        current_bid: '',
+        brand: '',
+        model: '',
+        dimensions: '',
+      }));
+      return {
+        af_url: `https://auctionfactory.com/admin/relot_auction.php?auction=${afAuctionId}`,
+        af_name: '', // admin flow doesn't surface auction name
+        items,
+        parse_source: 'primary',
+        parse_errors: 0,
+        source: 'admin',
+      };
+    } catch (err) {
+      // Admin flow failed (likely cookie expired or admin page redesign);
+      // fall through to the public scrape so audit still runs.
+      console.warn('Admin item list fetch failed, falling back to public scrape:', err);
+    }
+  }
+  const publicScrape = await scrapeAuction(
+    `https://auctionfactory.com/auction_details.php?auction=${afAuctionId}`,
+    false
+  );
+  return { ...publicScrape, source: 'public' };
+}
+
+async function readAFCookie(supabase: any): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from('af_session')
+      .select('session_cookie')
+      .eq('id', 1)
+      .single();
+    if (!data?.session_cookie) return null;
+    let cookie = data.session_cookie;
+    try {
+      const { decrypt } = await import('@/lib/crypto');
+      cookie = decrypt(cookie);
+    } catch {}
+    return cookie;
+  } catch {
+    return null;
+  }
+}
 
 export const maxDuration = 60;
 
@@ -63,10 +133,11 @@ export async function GET(
   }
 
   const afUrl = `https://auctionfactory.com/auction_details.php?auction=${mapRow.af_auction_id}`;
+  const cookie = await readAFCookie(supabase);
 
   let scraped;
   try {
-    scraped = await scrapeAuction(afUrl, false);
+    scraped = await scrapeAuctionPreferAdmin(String(mapRow.af_auction_id), cookie);
   } catch (err: any) {
     return NextResponse.json(
       { error: `Failed to scrape AF: ${err?.message || String(err)}` },
@@ -315,10 +386,10 @@ export async function POST(
     );
   }
 
-  const afUrl = `https://auctionfactory.com/auction_details.php?auction=${mapRow.af_auction_id}`;
+  const cookie = await readAFCookie(supabase);
   let scraped;
   try {
-    scraped = await scrapeAuction(afUrl, false);
+    scraped = await scrapeAuctionPreferAdmin(String(mapRow.af_auction_id), cookie);
   } catch (err: any) {
     return NextResponse.json(
       { error: `Failed to scrape AF: ${err?.message || String(err)}` },

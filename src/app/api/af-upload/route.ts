@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { uploadLotToAF, UploadLotResult } from '@/lib/af-upload-lib';
+import { fetchAdminItemList, normalizeTitle } from '@/lib/af-admin-scraper';
 
 // Increase Vercel function timeout (max 60s on Hobby plan)
 export const maxDuration = 60;
@@ -15,6 +16,30 @@ function telemetryClient(userClient: any) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) return userClient;
   return createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key);
+}
+
+// Check whether the lot's item_name already exists on AF under this
+// auction, using the admin's authenticated item list. Returns the
+// af_item_id when a match is found. Used to disambiguate uncertain
+// upload results (TIMEOUT_UNCERTAIN, NETWORK_ERROR mid-POST) BEFORE
+// retrying — if the first attempt actually landed, retrying creates a
+// duplicate on AF.
+async function checkIfAlreadyPosted(
+  afAuctionId: string,
+  cookie: string,
+  itemName: string
+): Promise<number | null> {
+  if (!itemName) return null;
+  try {
+    const items = await fetchAdminItemList(afAuctionId, cookie);
+    const needle = normalizeTitle(itemName);
+    if (!needle) return null;
+    const match = items.find((i) => normalizeTitle(i.title) === needle);
+    return match ? match.af_item_id : null;
+  } catch (err) {
+    console.warn('checkIfAlreadyPosted failed:', err);
+    return null;
+  }
 }
 
 // Record a single upload attempt. Best-effort: schema mismatch or
@@ -246,6 +271,39 @@ export async function POST(request: NextRequest) {
       // POST, so the next lot MUST use the latest value or AF bounces
       // us to the login page mid-batch.
       if (result.updated_cookie) cookieUsed = result.updated_cookie;
+
+      // Idempotency disambiguation on uncertain results. TIMEOUT_UNCERTAIN
+      // and NETWORK_ERROR both leave open the question "did AF actually
+      // receive the POST?" If we blindly retry, a successful first POST
+      // becomes a duplicate on AF. Query the admin item list for the
+      // lot's item_name — if it's already there, treat this as a
+      // successful upload with the found af_item_id instead of retrying.
+      const isUncertain =
+        !result.success &&
+        (result.error?.includes('TIMEOUT_UNCERTAIN') || result.error?.startsWith('NETWORK_ERROR:'));
+      if (isUncertain && lot.item_name) {
+        const foundId = await checkIfAlreadyPosted(
+          mapping.af_auction_id,
+          cookieUsed,
+          lot.item_name
+        );
+        if (foundId) {
+          // The first POST landed. Treat as success. Prevents a
+          // duplicate on the next retry.
+          result = {
+            success: true,
+            af_item_id: foundId,
+            updated_cookie: cookieUsed,
+            http_status: result.http_status,
+            elapsed_ms: result.elapsed_ms,
+            csrf_present: result.csrf_present,
+            cookie_rotated: result.cookie_rotated,
+            debug: `recovered via admin item list after ${result.error}`,
+          };
+          attemptNum++;
+          await recordAttempt(tc, lot.id, attemptNum, result);
+        }
+      }
 
       // Retry transient failures: NETWORK_ERROR, FORBIDDEN_BY_AF (CSRF
       // rotation; next attempt refetches a fresh token), HTTP 5xx,

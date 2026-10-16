@@ -161,7 +161,7 @@ export async function POST(
     supabase.from('af_session').select('session_cookie').eq('id', 1).single(),
     supabase
       .from('lots')
-      .select('lot_number, item_name')
+      .select('lot_number, item_name, af_item_id')
       .eq('auction_id', params.id)
       .is('deleted_at', null)
       .order('lot_number', { ascending: true }),
@@ -230,37 +230,88 @@ export async function POST(
     );
   }
 
-  // 2) Match each AF row to a lotter lot by normalized name.
-  const byName = new Map<string, number[]>();
-  for (const l of lots) {
+  // 2) Match each AF row to a lotter lot.
+  //
+  // Priority order:
+  //   (a) af_item_id — when the lotter captured it on upload. This is
+  //       durable and immune to title drift. Guarantees we don't swap
+  //       two items with identical titles.
+  //   (b) Normalized item_name with cursor pattern — legacy path for
+  //       lots without af_item_id (pre-phase15 rows, or lots that
+  //       failed to parse the id from the upload response).
+  //
+  // Build the id → lot_number map first; whatever matches on id is
+  // consumed and NOT eligible for the title cursor path.
+  const byAfItemId = new Map<number, number>(); // af_item_id → lot_number
+  const titleOptions = new Map<string, number[]>(); // normalized title → lot_numbers (ordered)
+  const consumedLotNumbers = new Set<number>();
+
+  for (const l of lots as any[]) {
+    if (l.af_item_id != null) {
+      byAfItemId.set(Number(l.af_item_id), l.lot_number);
+    }
+  }
+  // Title options only include lots NOT already claimed by af_item_id.
+  for (const l of lots as any[]) {
+    if (l.af_item_id != null && byAfItemId.get(Number(l.af_item_id)) === l.lot_number) {
+      continue;
+    }
     const key = normalize(l.item_name || '');
-    const arr = byName.get(key) || [];
+    const arr = titleOptions.get(key) || [];
     arr.push(l.lot_number);
-    byName.set(key, arr);
+    titleOptions.set(key, arr);
   }
 
-  const cursors = new Map<string, number>();
+  const titleCursors = new Map<string, number>();
+  let afIdMatches = 0;
+  let titleMatches = 0;
   const plan: Array<{
     af_item_id: string;
     title: string;
     current_lot: string;
     target_lot: number | null;
     status: 'change' | 'same' | 'unmatched';
+    matched_by: 'af_item_id' | 'title' | 'none';
   }> = [];
 
   for (const row of form.rows) {
-    const key = normalize(row.title);
-    const options = byName.get(key) || [];
-    const idx = cursors.get(key) || 0;
-    const target = options[idx] ?? null;
+    const afIdNum = Number(row.af_item_id);
+    let target: number | null = null;
+    let matchedBy: 'af_item_id' | 'title' | 'none' = 'none';
+
+    // (a) af_item_id match — strongest, used first.
+    if (Number.isFinite(afIdNum) && byAfItemId.has(afIdNum)) {
+      target = byAfItemId.get(afIdNum)!;
+      matchedBy = 'af_item_id';
+      afIdMatches++;
+      consumedLotNumbers.add(target);
+    } else {
+      // (b) title cursor match — walk through same-title lotter lots
+      // in lot_number order. Skip lot_numbers already claimed by an
+      // af_item_id match (shouldn't happen but defensive).
+      const key = normalize(row.title);
+      const options = titleOptions.get(key) || [];
+      const startIdx = titleCursors.get(key) || 0;
+      for (let i = startIdx; i < options.length; i++) {
+        const candidate = options[i];
+        if (consumedLotNumbers.has(candidate)) continue;
+        target = candidate;
+        titleCursors.set(key, i + 1);
+        consumedLotNumbers.add(candidate);
+        matchedBy = 'title';
+        titleMatches++;
+        break;
+      }
+    }
+
     if (target != null) {
-      cursors.set(key, idx + 1);
       plan.push({
         af_item_id: row.af_item_id,
         title: row.title,
         current_lot: row.current_lot,
         target_lot: target,
         status: String(row.current_lot) === String(target) ? 'same' : 'change',
+        matched_by: matchedBy,
       });
     } else {
       plan.push({
@@ -269,6 +320,7 @@ export async function POST(
         current_lot: row.current_lot,
         target_lot: null,
         status: 'unmatched',
+        matched_by: 'none',
       });
     }
   }
@@ -289,6 +341,11 @@ export async function POST(
       title: u.title.substring(0, 80),
       current_lot: u.current_lot,
     })),
+    // Match-source breakdown so Chase sees how many matches came from
+    // the durable af_item_id vs the fuzzier title cursor. More
+    // af_id_matches = less chance of a wrong-swap on duplicate titles.
+    matched_by_af_item_id: afIdMatches,
+    matched_by_title: titleMatches,
   };
 
   if (dryRun) {
