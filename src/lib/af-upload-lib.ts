@@ -167,6 +167,19 @@ export async function uploadLotToAF(
   sessionCookie: string,
   saveAction: 'next' | 'exit'
 ): Promise<UploadLotResult> {
+  // DETERMINISTIC PHOTO ORDER: user-uploaded photos always come first;
+  // stock images (storage_path contains '/stock_') always come last.
+  // AF's photo validator is strict about the primary photo — vendor
+  // stock images (especially placeholders) sometimes fail; user
+  // warehouse photos always pass. This runtime sort guarantees the
+  // first photo AF sees is a user photo whenever one exists, no matter
+  // what display_order the DB has. Zero AI, zero probability.
+  const userFirst = [...(photos || [])].sort((a, b) => {
+    const aStock = a.storage_path?.includes('/stock_') ? 1 : 0;
+    const bStock = b.storage_path?.includes('/stock_') ? 1 : 0;
+    return aStock - bStock;
+  });
+  photos = userFirst;
   const startedAt = Date.now();
   try {
     // AF's rebuilt backend 302-redirects /admin/add_item_2new.php to
