@@ -374,6 +374,68 @@ function median(nums: number[]): number {
   return sorted[mid];
 }
 
+// Minimum image dimensions AF's photo validator accepts. Vendor
+// catalog thumbnails below this reliably trigger "Photo upload needs
+// attention". 400px on either side is empirically safe (verified
+// against the Mega CLE failures: all rejected thumbnails were <300px).
+const MIN_IMAGE_DIMENSION = 400;
+// Minimum file size — a real product JPEG at 400x400 is typically
+// >15KB; <5KB is almost always a tiny thumbnail or placeholder.
+const MIN_IMAGE_BYTES = 5 * 1024;
+
+// Parse width/height out of common image formats without pulling in a
+// dep. Only reads enough header bytes to find dimensions; returns null
+// if the format is unrecognized or truncated.
+export function parseImageDimensions(buf: Buffer): { width: number; height: number } | null {
+  if (!buf || buf.length < 24) return null;
+  // PNG: starts with 89 50 4E 47 0D 0A 1A 0A, then IHDR at offset 16-23.
+  if (
+    buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
+  ) {
+    const width = buf.readUInt32BE(16);
+    const height = buf.readUInt32BE(20);
+    return { width, height };
+  }
+  // JPEG: starts with FF D8. Walk SOFn markers for dimensions.
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2;
+    while (i < buf.length - 9) {
+      if (buf[i] !== 0xff) {
+        i++;
+        continue;
+      }
+      const marker = buf[i + 1];
+      // SOF0-SOF3, SOF5-SOF7, SOF9-SOF11, SOF13-SOF15 — all carry h/w.
+      if (
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf)
+      ) {
+        const height = buf.readUInt16BE(i + 5);
+        const width = buf.readUInt16BE(i + 7);
+        return { width, height };
+      }
+      // Skip past this segment: 2-byte marker + 2-byte length.
+      const segLen = buf.readUInt16BE(i + 2);
+      i += 2 + segLen;
+    }
+  }
+  // WebP: "RIFF" ... "WEBP". VP8/VP8L/VP8X layouts vary; just the
+  // simplest VP8 case here.
+  if (
+    buf.length >= 30 &&
+    buf.slice(0, 4).toString('ascii') === 'RIFF' &&
+    buf.slice(8, 12).toString('ascii') === 'WEBP' &&
+    buf.slice(12, 16).toString('ascii') === 'VP8 '
+  ) {
+    const width = buf.readUInt16LE(26) & 0x3fff;
+    const height = buf.readUInt16LE(28) & 0x3fff;
+    return { width, height };
+  }
+  return null;
+}
+
 // Classify an image as a real product photo vs a placeholder graphic
 // ("IMAGE COMING SOON", "no image available", generic silhouettes). One
 // Haiku call per image, ~$0.0004. Returns true if it looks like a
@@ -1207,19 +1269,33 @@ export async function processStockImageJob(
       try {
         const imgRes = await fetch(found.imageUrl);
         if (imgRes.ok) {
-          const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
+          const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+          const imgBytes = new Uint8Array(imgBuf);
           diag.imageDownloaded = true;
 
-          // Reject vendor "IMAGE COMING SOON" / "no image available"
-          // placeholders at source. Vendors (Libbey, WebstaurantStore,
-          // etc.) sometimes serve a generic stock graphic when a product
-          // isn't in their catalog yet. AF's photo validator rejects
-          // those as "Photo upload needs attention" — causing silent
-          // whole-lot failures. One Haiku classification per image is
-          // ~$0.0004 and worth the cost.
+          // GATE 1 — file size. Tiny files are almost always placeholder
+          // graphics or 1-pixel tracking images. AF rejects them.
+          if (imgBuf.length < MIN_IMAGE_BYTES) {
+            diag.imageDownloadError = `Stock image too small (${imgBuf.length} bytes < ${MIN_IMAGE_BYTES}) — not saving`;
+            diag.finalOutcome = 'image-download-failed';
+            return { success: false, found: false, diag };
+          }
+
+          // GATE 2 — dimensions. AF reliably rejects photos below ~300px
+          // on either side; use 400px as a safe floor.
+          const dims = parseImageDimensions(imgBuf);
+          if (dims && (dims.width < MIN_IMAGE_DIMENSION || dims.height < MIN_IMAGE_DIMENSION)) {
+            diag.imageDownloadError = `Stock image too small (${dims.width}x${dims.height} < ${MIN_IMAGE_DIMENSION}px) — not saving`;
+            diag.finalOutcome = 'image-download-failed';
+            return { success: false, found: false, diag };
+          }
+
+          // GATE 3 — placeholder content. Vendors (Libbey, WebstaurantStore,
+          // etc.) sometimes serve "IMAGE COMING SOON" when a product
+          // isn't in their catalog. AF's validator rejects those.
           const isPlaceholder = await classifyImageAsPlaceholder(
             anthropic,
-            Buffer.from(imgBytes).toString('base64'),
+            imgBuf.toString('base64'),
           );
           if (isPlaceholder) {
             diag.imageDownloadError =
@@ -1231,18 +1307,19 @@ export async function processStockImageJob(
           // Check if a stock image already exists for this lot
           const existingStock = (lot.lot_photos || []).find((p: any) => p.storage_path.includes('/stock_'));
 
-          if (!existingStock) {
-            // Shift existing photos up by 1
-            const existingPhotos = (lot.lot_photos || []).sort(
-              (a: any, b: any) => a.display_order - b.display_order
-            );
-            for (const photo of existingPhotos) {
-              await supabase
-                .from('lot_photos')
-                .update({ display_order: photo.display_order + 1 })
-                .eq('id', photo.id);
-            }
-          }
+          // Compute the next display_order so the stock image lands
+          // AFTER any user-uploaded photos (if present). User photos
+          // are always AF-safe (real warehouse shots); stock images are
+          // supplementary. Keeping user photos primary prevents the
+          // Mega CLE class of failures when a stock image slips the
+          // gates above or when AF changes its validator rules.
+          const existingPhotos = (lot.lot_photos || []).sort(
+            (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0)
+          );
+          const nextOrder =
+            existingPhotos.length > 0
+              ? (existingPhotos[existingPhotos.length - 1].display_order ?? -1) + 1
+              : 0;
 
           const storagePath = `${lot.auction_id}/${lot.id}/stock_0.jpg`;
           const { error: uploadError } = await supabase.storage
@@ -1253,7 +1330,7 @@ export async function processStockImageJob(
             await supabase.from('lot_photos').insert({
               lot_id: lot.id,
               storage_path: storagePath,
-              display_order: 0,
+              display_order: nextOrder,
               source_type: found.source,
               source_url: found.imageUrl,
               vision_confidence: found.confidence,
