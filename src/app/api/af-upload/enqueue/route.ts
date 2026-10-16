@@ -53,10 +53,11 @@ export async function POST(request: NextRequest) {
     : userClient;
 
   // Verify auction has an AF mapping — nothing to push to otherwise.
+  // The mapping lives on af_auction_map, not on auctions.
   const { data: mapping } = await supabase
-    .from('auctions')
+    .from('af_auction_map')
     .select('af_auction_id')
-    .eq('id', auction_id)
+    .eq('auction_id', auction_id)
     .single();
   if (!mapping?.af_auction_id) {
     return NextResponse.json(
