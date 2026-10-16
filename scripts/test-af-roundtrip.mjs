@@ -125,17 +125,23 @@ async function main() {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
-  const { data: auction, error: auctionErr } = await supabase
+  const { data: baseAuction, error: auctionErr } = await supabase
     .from('auctions')
-    .select('id, af_auction_id, title')
+    .select('id, title')
     .eq('id', AUCTION_ID)
     .single();
-  if (auctionErr || !auction) {
+  if (auctionErr || !baseAuction) {
     fail(`Auction ${AUCTION_ID} not found: ${auctionErr?.message || 'no row'}`);
     return;
   }
+  const { data: mapping } = await supabase
+    .from('af_auction_map')
+    .select('af_auction_id')
+    .eq('auction_id', AUCTION_ID)
+    .single();
+  const auction = { ...baseAuction, af_auction_id: mapping?.af_auction_id ?? null };
   if (!auction.af_auction_id) {
-    fail(`Auction has no af_auction_id — nothing to validate`);
+    fail(`Auction has no AF mapping — nothing to validate`);
     return;
   }
   info(`Validating ${auction.title || auction.id} (AF #${auction.af_auction_id})`);

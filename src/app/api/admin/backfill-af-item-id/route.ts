@@ -51,15 +51,19 @@ export async function POST(request: NextRequest) {
     cookie = decrypt(cookie);
   } catch {}
 
-  // Find auctions that have at least one lot pushed to AF but missing
-  // af_item_id. These are the ones worth touching.
-  const { data: auctions, error: auctionsErr } = await supabase
-    .from('auctions')
-    .select('id, af_auction_id, title')
-    .not('af_auction_id', 'is', null);
-  if (auctionsErr) {
-    return NextResponse.json({ error: auctionsErr.message }, { status: 500 });
+  // Find auctions that have an AF mapping — only those can be
+  // backfilled. af_auction_id lives on af_auction_map, not auctions.
+  const { data: mappings, error: mappingsErr } = await supabase
+    .from('af_auction_map')
+    .select('auction_id, af_auction_id, auctions(id, title)');
+  if (mappingsErr) {
+    return NextResponse.json({ error: mappingsErr.message }, { status: 500 });
   }
+  const auctions = (mappings || []).map((m: any) => ({
+    id: m.auction_id,
+    af_auction_id: m.af_auction_id,
+    title: m.auctions?.title ?? null,
+  }));
 
   const perAuction: Array<{
     auction_id: string;
