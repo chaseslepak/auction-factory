@@ -104,7 +104,7 @@ export async function GET(
 
   const auctionId = params.id;
 
-  const [{ data: auction }, { data: mapRow }, { data: lots }] = await Promise.all([
+  const [auctionRes, mapRes, lotsRes] = await Promise.all([
     supabase.from('auctions').select('id, name').eq('id', auctionId).single(),
     supabase
       .from('af_auction_map')
@@ -116,8 +116,25 @@ export async function GET(
       .select('lot_number, item_name, brand, model, af_upload_status, af_item_id')
       .eq('auction_id', auctionId)
       .is('deleted_at', null)
-      .order('lot_number', { ascending: true }),
+      .order('lot_number', { ascending: true, nullsFirst: false })
+      .limit(10000),
   ]);
+  const { data: auction } = auctionRes;
+  const { data: mapRow } = mapRes;
+  const { data: lots, error: lotsErr } = lotsRes;
+
+  // Surface silent query errors — a schema mismatch (e.g. an older
+  // migration missing a column) returns data=null without throwing,
+  // which previously made the UI show "LOTTER: 0" even when the DB had
+  // hundreds of rows.
+  if (lotsErr) {
+    return NextResponse.json(
+      {
+        error: `Lots query failed: ${lotsErr.message}. The audit cannot run until this is resolved — likely a missing migration (phase15 af_item_id?).`,
+      },
+      { status: 500 },
+    );
+  }
 
   if (!auction) {
     return NextResponse.json({ error: 'Auction not found' }, { status: 404 });
