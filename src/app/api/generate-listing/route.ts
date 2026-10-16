@@ -273,11 +273,32 @@ export async function POST(request: NextRequest) {
     // $12k Amazon listing when real retail was $2.5k) and the lotter
     // trusted them. Chase: "retail prices are off dramatically."
     //
-    // Skip when we reused a sibling's known-good retail — the shortcut
-    // exists specifically to avoid this call for duplicate items.
+    // Query order (API-efficiency pass):
+    //   1. Sibling-dedupe short-circuits everything else.
+    //   2. AF archive median (cheap Supabase SELECT, zero API cost).
+    //   3. Only hit Anthropic web_search if the archive doesn't have
+    //      2+ samples. The archive median is MORE accurate than a web
+    //      search median (it's actual sold-item history), so when it
+    //      exists we skip the paid call entirely. On a 300-lot auction
+    //      with 50% archive coverage this saves ~150 Anthropic
+    //      web_search calls per push.
+    let afArchiveMedian: { median: number; sampleCount: number } | null = null;
+    if (!reusedSibling && hasBrand && hasModel && auction_id) {
+      try {
+        afArchiveMedian = await getAFArchiveMedianRetail(
+          supabase,
+          listing.brand,
+          listing.model
+        );
+      } catch (e) {
+        console.error('AF archive median lookup failed:', e);
+      }
+    }
+
     let webMedianPrice: number | null = null;
     let factsDims = { width: '', depth: '', height: '' };
-    if (!reusedSibling && hasBrand && hasModel) {
+    const archiveIsSufficient = afArchiveMedian != null && afArchiveMedian.sampleCount >= 2;
+    if (!reusedSibling && hasBrand && hasModel && !archiveIsSufficient) {
       try {
         const facts = await researchItemFacts(
           anthropic,
@@ -289,21 +310,6 @@ export async function POST(request: NextRequest) {
         factsDims = facts.dimensions;
       } catch (e) {
         console.error('Price research error:', e);
-      }
-    }
-
-    // Also check AF archive for prior listings of this exact brand+model.
-    // 2+ prior AF retails is the single strongest signal.
-    let afArchiveMedian: { median: number; sampleCount: number } | null = null;
-    if (!reusedSibling && hasBrand && hasModel && auction_id) {
-      try {
-        afArchiveMedian = await getAFArchiveMedianRetail(
-          supabase,
-          listing.brand,
-          listing.model
-        );
-      } catch (e) {
-        console.error('AF archive median lookup failed:', e);
       }
     }
 

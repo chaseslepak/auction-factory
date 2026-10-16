@@ -98,6 +98,49 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Per-auction push lock. Prevents two concurrent HQ Pushes on the
+  // same auction from racing each other's atomic claims. We refresh
+  // (not just acquire) the lock on every call so a long batch loop
+  // can hold it across many requests. Stale locks (older than 15 min)
+  // are reclaimable — covers the case where the last client died
+  // without releasing.
+  const lockClient = telemetryClient(supabase);
+  const lockHolder = user.email || user.id;
+  const nowIso = new Date().toISOString();
+  const expiresIso = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  try {
+    const { data: existingLock } = await lockClient
+      .from('auction_push_locks')
+      .select('locked_by, locked_at, expires_at')
+      .eq('auction_id', auction_id)
+      .maybeSingle();
+    if (existingLock) {
+      const expired = new Date((existingLock as any).expires_at).getTime() < Date.now();
+      const sameHolder = (existingLock as any).locked_by === lockHolder;
+      if (!expired && !sameHolder) {
+        return NextResponse.json(
+          {
+            error: `Another HQ Push is already running on this auction (started by ${(existingLock as any).locked_by || 'unknown'} at ${(existingLock as any).locked_at}). If that session died without releasing, wait 15 minutes for the lock to expire and try again.`,
+          },
+          { status: 409 }
+        );
+      }
+    }
+    await lockClient.from('auction_push_locks').upsert(
+      {
+        auction_id,
+        locked_by: lockHolder,
+        locked_at: nowIso,
+        expires_at: expiresIso,
+      },
+      { onConflict: 'auction_id' }
+    );
+  } catch (err) {
+    // Lock failure is non-fatal — the atomic claim at the row level is
+    // the backstop. Log for diagnosis and continue.
+    console.error('auction_push_locks acquire failed:', err);
+  }
+
   // Get AF session cookie
   const { data: session } = await supabase
     .from('af_session')
@@ -419,6 +462,17 @@ export async function POST(request: NextRequest) {
         details: { count: succeededIds.length, lot_ids: succeededIds.slice(0, 20) },
       });
     }
+  } catch {}
+
+  // Release the per-auction lock so a follow-up push doesn't have to
+  // wait 15 min. Best-effort: a failure here just means the lock
+  // expires naturally.
+  try {
+    await lockClient
+      .from('auction_push_locks')
+      .delete()
+      .eq('auction_id', auction_id)
+      .eq('locked_by', lockHolder);
   } catch {}
 
   return NextResponse.json({ results });

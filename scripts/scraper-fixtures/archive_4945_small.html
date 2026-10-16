@@ -1,0 +1,1161 @@
+<script>
+
+
+function updateBid(inputID) {
+	var inputValue = $("#m"+inputID).val();
+	$("#"+inputID).val( inputValue );
+}
+function updateMaxBid(inputID) {
+	var inputValue = $("#m"+inputID).val();
+	$("#"+inputID).val( inputValue );
+}
+</script>
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <!--[if IE]><meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'><![endif]-->
+        <meta name="keywords" content="restaurant equipment auctions, commercial equipment auctions" />
+        <meta name="description" content="See what restaurant and commercial equipment sold for in past Auction Factory auctions. Use real results to plan your next sale or bid." />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Past Auction Results | Auction Factory</title>
+<link rel="apple-touch-icon" sizes="57x57" href="/apple-icon-57x57.png">
+<link rel="apple-touch-icon" sizes="60x60" href="/apple-icon-60x60.png">
+<link rel="apple-touch-icon" sizes="72x72" href="/apple-icon-72x72.png">
+<link rel="apple-touch-icon" sizes="76x76" href="/apple-icon-76x76.png">
+<link rel="apple-touch-icon" sizes="114x114" href="/apple-icon-114x114.png">
+<link rel="apple-touch-icon" sizes="120x120" href="/apple-icon-120x120.png">
+<link rel="apple-touch-icon" sizes="144x144" href="/apple-icon-144x144.png">
+<link rel="apple-touch-icon" sizes="152x152" href="/apple-icon-152x152.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-icon-180x180.png">
+<link rel="icon" type="image/png" sizes="192x192"  href="/android-icon-192x192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest2.webmanifest">
+<meta name="msapplication-TileColor" content="#ffffff">
+<meta name="msapplication-TileImage" content="/ms-icon-144x144.png">
+<meta name="theme-color" content="#ffffff">
+        <!-- Font -->
+      <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&family=Passion+One:wght@400;700&family=Source+Sans+Pro&display=swap" rel="stylesheet">
+        <!-- Font Awesome Icons -->
+        <link href='/themes/theme01/css/font-awesome.min.css' rel='stylesheet' type='text/css' />
+        <!-- Bootstrap core CSS -->
+        <link href="/themes/theme01/css/bootstrap.min.css" rel="stylesheet" />
+        <link href="/themes/theme01/css/hover-dropdown-menu.css" rel="stylesheet" />
+        <!-- Icomoon Icons -->
+        <link href="/themes/theme01/css/icons.css" rel="stylesheet" />
+        <!-- Revolution Slider -->
+        <link href="/themes/theme01/css/revolution-slider.css" rel="stylesheet" />
+        <link href="/themes/theme01/rs-plugin/css/settings.css" rel="stylesheet" />
+        <!-- Animations -->
+        <link href="/themes/theme01/css/animate.min.css" rel="stylesheet" />
+        <!-- Owl Carousel Slider -->
+        <link href="/themes/theme01/css/owl/owl.carousel.css" rel="stylesheet" />
+        <link href="/themes/theme01/css/owl/owl.theme.css" rel="stylesheet" />
+        <link href="/themes/theme01/css/owl/owl.transitions.css" rel="stylesheet" />
+        <!-- PrettyPhoto Popup -->
+        <link href="/themes/theme01/css/prettyPhoto.css" rel="stylesheet" />
+        <!-- Custom Style -->
+        <link href="/themes/theme01/css/style.css" rel="stylesheet" />
+		<link href="/themes/theme01/css/responsive.css" rel="stylesheet">
+
+        
+        <link rel="stylesheet" type="text/css" href="/css/jquery.countdown.css"> 
+        <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+        <script type="text/javascript" src="/js/jquery.plugin.js"></script> 
+        <script type="text/javascript" src="/js/jquery.countdown.js"></script>
+		<script
+  src="https://code.jquery.com/ui/1.9.1/jquery-ui.min.js"
+  integrity="sha256-UezNdLBLZaG/YoRcr48I68gr8pb5gyTBM+di5P8p6t8="
+  crossorigin="anonymous"></script>
+
+        <link rel="stylesheet" type="text/css" href="/css/hotauctions.css"> 
+        <link rel="stylesheet" type="text/css" href="/css/auctions.css"> 
+		<link rel="stylesheet" type="text/css" href="/css/mobile.css"> 
+		
+		<!-- Color Scheme -->
+        <link href="/themes/theme01/css/green.css" rel="stylesheet" />
+		<link rel="stylesheet" type="text/css" href="/css/siteupdate.css">
+		<meta property="og:url" content="https://auctionfactory.com/" />
+  <meta property="og:type"          content="website" />
+  <meta property="og:title" content="Past Auction Results | Auction Factory" />
+  <meta property="og:description" content="See what restaurant and commercial equipment sold for in past Auction Factory auctions. Use real results to plan your next sale or bid." />
+  <meta property="og:image" content="https://auctionfactory.com/large_logo.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+        <meta name="facebook-domain-verification" content="6mqnuzgkehi5qhdz6goos00l1rajgz" />
+<!-- Global site tag (gtag.js) - Google Ads -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=AW-792068283"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'AW-792068283');
+</script>
+
+<script>
+  gtag('config', 'AW-792068283/UJyVCJKnmogBELuB2PkC', {
+    'phone_conversion_number': '888-570-1153'
+  });
+</script>
+
+<!-- Facebook Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window,document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+ fbq('init', '514711877255569'); 
+fbq('track', 'PageView');
+    	</script>
+<noscript>
+ <img height="1" width="1" alt=""
+src="https://www.facebook.com/tr?id=514711877255569&ev=PageView
+&noscript=1"/>
+</noscript>
+<!-- End Facebook Pixel Code -->
+
+  <script>
+  $( function() {
+    $( "#accordion" ).accordion({
+      active: false,
+	  collapsible: true
+    });
+  } );
+  </script>
+<style>
+	.itemDetailTop {
+		font-family: Oswald, Arial, sans-serif;
+		text-transform: uppercase;
+		font-size: 24px;
+		line-height: 29px;
+		font-weight: 400;
+		margin-top:20px;
+		margin-bottom: 50px;
+	}
+	.itemDetailTop a {
+		text-decoration: underline;
+	}
+	.itemDetailsName {
+		font-family: Oswald, Arial, sans-serif;
+		font-size: 18px;
+		font-weight: 700;
+		line-height: 26px;
+	}
+	.itemDetailNumber {
+		font-family: Oswald, Arial, sans-serif;
+		font-size: 18px;
+		font-weight: 700;
+		line-height: 24px;
+		margin-top: 20px;
+		margin-bottom: 20px;
+		padding-bottom: 20px;
+		border-bottom: solid 2px #8fae3e;
+	}
+	.currentWinner {
+		font-family: Oswald, Arial, sans-serif;
+		font-size: 12px;
+		font-weight: 500;
+		text-transform: uppercase;
+	}
+	.bidInput {
+		font-family: Oswald, Arial, sans-serif;
+		font-size: 20px;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+	.yourBid {
+		font-family: Oswald, Arial, sans-serif;
+		font-size: 12px;
+		font-weight: 500;
+		text-transform: uppercase;
+	}
+	.margin-top-10 {
+		margin-top: 10px;
+	}
+	.border-bottom-padding {
+		border-bottom: solid 1px #E8E8E8;
+		margin-bottom: 20px;
+		padding-bottom: 20px;
+	}
+	.thumbnails {
+		border-bottom: solid 1px #E8E8E8;
+		margin-bottom: 20px;
+		padding-bottom: 20px;
+		border-top: solid 1px #E8E8E8;
+		margin-top: 20px;
+		padding-top: 20px;
+	}
+	.thumbnailNew {
+		height: 85px;
+		width: 85px;
+		background-repeat: no-repeat;
+		background-position: center center;
+		background-size: cover;
+		display: inline-block;
+		margin-left: 5px;
+		margin-right: 5px;
+		cursor: pointer;
+		margin-bottom: 5px;
+	}
+	.itemDetailsDeets {
+		font-family: Oswald, Arial, sans-serif;
+		font-size: 16px;
+		text-transform: uppercase;
+	}
+	.imageNav {
+		position: absolute;
+		font-size: 40px;
+		top: 190px;
+		width: 100%;
+		color:#FFFFFF;
+	}
+	.prevButton {
+		position: absolute;
+		left: 10px;
+		cursor: pointer;
+		opacity: .8;
+		text-shadow: 1px 1px 4px #000000;
+	}
+	.prevButton:hover, .nextButton:hover {
+		opacity: 1;
+	}
+	.nextButton {
+		position: absolute;
+		right: 40px;
+		cursor: pointer;
+		opacity: .8;
+		text-shadow: 1px 1px 4px #000000;
+	}
+	.countdown-amount {
+		font-family: Oswald, Arial, sans-serif;
+		font-size: 27px;
+	}
+	.countdown-row {
+		text-align: center;
+	}
+	.countdown-amount {
+		
+	}
+	@media (max-width: 991px) {
+		.bidInput .text-right, .yourBid .text-right {
+			text-align: left;
+		}
+	}
+	@media (max-width: 550px) {
+		.imageNav {
+			top: 100px;
+		}
+	}
+	@media (max-width: 991px) {
+				#mobileNav li.active .subnav {
+					position: relative;
+					z-index:99999;
+				}
+			}
+</style>
+		<style>
+			.langbar {
+				position: absolute;
+				top: 0px;
+				right: 10px;
+			}
+			@media (max-width: 991px) {
+				.langbar {
+					top: 40px;
+				}
+			}
+		</style>
+        <link rel="stylesheet" href="/css/af-luxury-system.css?v=20260925-home1">
+        <link rel="stylesheet" href="/css/af-footer-refresh.css?v=20260924-3">
+        <link rel="stylesheet" href="/css/af-homepage-refinement.css?v=20260925-8">
+        <link rel="stylesheet" href="/css/af-layout-audit.css?v=20261001-1">
+        <script src="/js/af-luxury-system.js?v=20260930-sms1" defer></script>
+    </head>
+    	
+    <body class="web">
+
+    <div id="page">
+		<!-- Page Loader -->
+		
+        <!-- Top Bar -->
+        <div id="top-bar" class="top-bar-section top-bar-bg-color">
+            <div class="container">
+                <div class="row">
+					<div class="col-sm-4 searchBar">
+						<form action="results.php" method="post" name="search">
+							<div class="searchIcon"><i class="fa fa-search"></i></div>
+							<input id="term" name="term" type="text" placeholder="Enter Keywords Here...">
+							<input id="searchSubmit" type="submit" class="" value="Search">
+						</form>
+					</div>
+                    <div class="col-sm-8">
+                        <!-- Top Contact -->
+                        <div class="top-contact link-hover-black">             <a href="/Login.php" class="toptab"><i class="fa fa-lock"></i> Login</a>
+						<a href="contact.php" class="toptab">Contact Us</a>
+						<a href="page.php?id=30&page=Repo+and+Remarketing" class="toptab">Repo & Remarketing</a>
+											<a href="appraise.php" class="toptab">Appraise My Assets</a>
+											<a href="blog.php" class="toptab">Blog</a>
+											<a href="https://www.facebook.com/auctionfactory/" target="_blank" class="toptab last"><i class="fa fa-facebook"></i></a>        
+                       
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Top Bar -->
+        <!-- Sticky Navbar -->
+         <header id="" class="">
+			<!-- Sticky Menu -->
+            <div class="sticky-menu relative">
+				<!-- navbar -->
+				<div class="navbar navbar-default navbar-bg-light" role="navigation">
+					<div class="mobileMenuButton desktop-hide androidHide openIt text-center">
+                        <span class="androidHide">MENU</span> <i class="fa fa-bars"></i>
+					</div>
+					<div class="mobileMenuButton desktop-hide closeIt text-center">
+									<span class="androidHide">MENU</span> <i class="fa fa-times"></i>
+					</div>
+                     
+                    <div class="mobileMenuButton desktop-hide androidShow appBack text-center" onclick="history.back()">
+                        <i class="fa fa-arrow-left"></i>
+					</div>
+                    <div class="mobileMenuButton desktop-hide androidShow openItApp text-center">
+                        <span class="androidHide">MENU</span> <i class="fa fa-bars"></i>
+					</div>
+					<div class="mobileMenuButton desktop-hide closeItApp text-center" style="display:none;">
+									<span class="androidHide">MENU</span> <i class="fa fa-times"></i>
+					</div>
+								<div class="mobileMenu desktop-hide">
+									<div class="searchBar">
+										<form action="results.php" method="post" name="search">
+											<div class="searchIcon"><i class="fa fa-search"></i></div>
+											<input id="term" name="term" type="text" placeholder="Enter Keywords Here...">
+											<input id="searchSubmit" type="submit" class="" value="Search">
+										</form>
+									</div>
+									
+										<!-- Top Contact -->
+										<div class="top-contact link-hover-black">             <a href="/Login.php" class="toptab"><i class="fa fa-lock"></i> Login</a>
+						<a href="contact.php" class="toptab">Contact Us</a>
+						<a href="page.php?id=30&page=Repo+and+Remarketing" class="toptab">Repo & Remarketing</a>
+											<a href="appraise.php" class="toptab">Appraise My Assets</a>
+											<a href="blog.php" class="toptab">Blog</a>
+											<a href="https://www.facebook.com/auctionfactory/" target="_blank" class="toptab last"><i class="fa fa-facebook"></i></a>         
+										
+										</div>
+									
+									<ul id="mobileNav" class="">
+											<link rel="stylesheet" href="/css/af-auction-navigation.css?v=20261002-2"><li class="af-auctions-menu"><details><summary>Auctions <i class="fa fa-chevron-down" aria-hidden="true"></i></summary><div class="af-auctions-links"><a href="/">Current Auctions</a><a href="/past_auctions.php">Past Auctions</a><a href="locator.php">Find Auctions By Location</a><a href="auctions_by_franchise.php?franchise=43">Auctions in California</a><a href="auctions_by_franchise.php?franchise=59">Auctions in the Carolinas</a><a href="auctions_by_franchise.php?franchise=61">Auctions in Colorado</a><a href="auctions_by_franchise.php?franchise=79">Auctions in Florida</a><a href="auctions_by_franchise.php?franchise=78">Auctions in Illinois </a><a href="auctions_by_franchise.php?franchise=73">Auctions in New Mexico</a><a href="auctions_by_franchise.php?franchise=72">Auctions in New York</a><a href="auctions_by_franchise.php?franchise=80">Auctions in Maryland &amp; Delaware</a><a href="auctions_by_franchise.php?franchise=50">Auctions in Mideast</a><a href="auctions_by_franchise.php?franchise=49">Auctions in Missouri</a><a href="auctions_by_franchise.php?franchise=63">Auctions in Northwest</a><a href="auctions_by_franchise.php?franchise=50">Auctions in Ohio</a><a href="auctions_by_franchise.php?franchise=71">Auctions in Texas</a><a href="auctions_by_franchise.php?franchise=77">Auctions in Tennessee</a></div></details></li><li class="normal_menu hasChildren mobile_menu_toggle "><a href="about_us.php"><span>About Us</span></a><ul class='subnav dropdown-menu'><li class="normal_menu "><a href="about_us.php">About Us</a></li><li class="normal_menu "><a href="sell_with_us.php">Sell With Us</a></li><li class="normal_menu "><a href="testimonials.php">Testimonials</a></li><li class="normal_menu "><a href="contact.php">Contact Us</a></li><li class="normal_menu "><a href="blog.php">Blog</a></li></ul></li><li class="normal_menu hasChildren mobile_menu_toggle "><a href="faq_bid.php"><span>FAQ</span></a><ul class='subnav dropdown-menu'><li class="normal_menu "><a href="faq_register.php">How To Register</a></li><li class="normal_menu "><a href="faq_bid.php">How To Bid</a></li><li class="normal_menu "><a href="faq_post_auction.php">After The Auction Ends</a></li><li class="normal_menu "><a href="faq_shipping.php">Shipping</a></li></ul></li><li class="normal_menu "><a href="faq_shipping.php"><span>Shipping</span></a></li><li class="normal_menu "><a href="register.php"><span>Register</span></a></li><li class="normal_menu hasChildren mobile_menu_toggle "><a href="settings.php"><span>My Account</span></a><ul class='subnav dropdown-menu'><li class="normal_menu "><a href="history.php">Bidding History</a></li><li class="normal_menu "><a href="watch_list.php">Watchlist</a></li><li class="normal_menu "><a href="settings.php">Account Settings</a></li><li class="normal_menu "><a href="invoices.php">My Invoices</a></li></ul></li><li class="hidden-767">
+											<a href="#" class="header-search">
+												<span>
+													<i class="fa fa-search"></i>
+												</span>
+											</a>
+										</li>
+										</ul>
+								</div>
+                    <div class="mobileMenuApp" style="display: none;">
+                                       
+                                        <div class="searchBar">
+                                            <form action="results.php" method="post" name="search">
+                                                <div class="searchIcon"><i class="fa fa-search"></i></div>
+                                                <input id="term" name="term" type="text" placeholder="Enter Keywords Here...">
+                                                <input id="searchSubmit" type="submit" class="" value="Search">
+                                            </form>
+                                        </div>
+                                        <ul class="mobileMenu androidShow">
+                                            <li><a href="auctions.php">Current Auctions</a></li>
+                                            <li><a href="past_auctions.php">Past Auctions</a></li>
+                                            <li><a href="locator.php">Find Auctions Near You</a></li>
+                                            
+                                            <li><a href="faq_register.php">FAQ - How To Register</a></li>
+                                            <li><a href="faq_bid.php">FAQ - How To Bid</a></li>
+                                            <li><a href="faq_post_auction.php">FAQ - After the Auction Ends</a></li>
+                                            <li><a href="faq_shipping.php">FAQ - Shipping</a></li>
+                                            <li><a href="Login.php">Login</a></li>
+                                            <li><a href="history.php">Bidding History</a></li>
+                                            <li><a href="watch_list.php">Watchlist</a></li>
+                                            <li><a href="settings.php">Account Settings</a></li>
+                                            <li><a href="invoices.php">My Invoices</a></li>
+                                            <li><a href="how-are-we-doing.php">How Are We Doing?</a></li>
+                                        </ul>
+                                    </div>
+					<div class="container androidHide">
+						<div class="row">
+							<div class="col-md-12">
+								<div class="navbar-header">
+								<!-- Button For Responsive toggle -->
+								<button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+								<span class="sr-only">Toggle navigation</span> 
+								<span class="icon-bar"></span> 
+								<span class="icon-bar"></span> 
+								<span class="icon-bar"></span></button> 
+								<!-- Logo -->
+								 
+								<a class="navbar-brand" href="/">
+									<img class="site_logo" alt="Auction Factory" src="/graphics/af-logo-header-20260804.png" width="1029" height="240" style="width:230px;max-width:100%;height:auto;object-fit:contain" />
+								</a></div>
+								<!-- Navbar Collapse -->
+								<div class="navbar-collapse collapse">
+									<!-- nav -->
+									<div id="nav_menu" class="navigation navbar-collapse collapse"><!-- nav -->
+										<ul id="navy" class="nav navbar-nav sm clearfix">
+											<link rel="stylesheet" href="/css/af-auction-navigation.css?v=20261002-2"><li class="af-auctions-menu"><details><summary>Auctions <i class="fa fa-chevron-down" aria-hidden="true"></i></summary><div class="af-auctions-links"><a href="/">Current Auctions</a><a href="/past_auctions.php">Past Auctions</a><a href="locator.php">Find Auctions By Location</a><a href="auctions_by_franchise.php?franchise=43">Auctions in California</a><a href="auctions_by_franchise.php?franchise=59">Auctions in the Carolinas</a><a href="auctions_by_franchise.php?franchise=61">Auctions in Colorado</a><a href="auctions_by_franchise.php?franchise=79">Auctions in Florida</a><a href="auctions_by_franchise.php?franchise=78">Auctions in Illinois </a><a href="auctions_by_franchise.php?franchise=73">Auctions in New Mexico</a><a href="auctions_by_franchise.php?franchise=72">Auctions in New York</a><a href="auctions_by_franchise.php?franchise=80">Auctions in Maryland &amp; Delaware</a><a href="auctions_by_franchise.php?franchise=50">Auctions in Mideast</a><a href="auctions_by_franchise.php?franchise=49">Auctions in Missouri</a><a href="auctions_by_franchise.php?franchise=63">Auctions in Northwest</a><a href="auctions_by_franchise.php?franchise=50">Auctions in Ohio</a><a href="auctions_by_franchise.php?franchise=71">Auctions in Texas</a><a href="auctions_by_franchise.php?franchise=77">Auctions in Tennessee</a></div></details></li><li class="normal_menu hasChildren mobile_menu_toggle "><a href="about_us.php"><span>About Us</span></a><ul class='subnav dropdown-menu'><li class="normal_menu "><a href="about_us.php">About Us</a></li><li class="normal_menu "><a href="sell_with_us.php">Sell With Us</a></li><li class="normal_menu "><a href="testimonials.php">Testimonials</a></li><li class="normal_menu "><a href="contact.php">Contact Us</a></li><li class="normal_menu "><a href="blog.php">Blog</a></li></ul></li><li class="normal_menu hasChildren mobile_menu_toggle "><a href="faq_bid.php"><span>FAQ</span></a><ul class='subnav dropdown-menu'><li class="normal_menu "><a href="faq_register.php">How To Register</a></li><li class="normal_menu "><a href="faq_bid.php">How To Bid</a></li><li class="normal_menu "><a href="faq_post_auction.php">After The Auction Ends</a></li><li class="normal_menu "><a href="faq_shipping.php">Shipping</a></li></ul></li><li class="normal_menu "><a href="faq_shipping.php"><span>Shipping</span></a></li><li class="normal_menu "><a href="register.php"><span>Register</span></a></li><li class="normal_menu hasChildren mobile_menu_toggle "><a href="settings.php"><span>My Account</span></a><ul class='subnav dropdown-menu'><li class="normal_menu "><a href="history.php">Bidding History</a></li><li class="normal_menu "><a href="watch_list.php">Watchlist</a></li><li class="normal_menu "><a href="settings.php">Account Settings</a></li><li class="normal_menu "><a href="invoices.php">My Invoices</a></li></ul></li><li class="hidden-767">
+											<a href="#" class="header-search">
+												<span>
+													<i class="fa fa-search"></i>
+												</span>
+											</a>
+										</li>
+										</ul>
+									</div>
+									<!-- Right nav -->
+									<!-- Header Contact Content -->
+								</div>
+								
+								<!-- /.navbar-collapse -->
+							</div>
+							<!-- /.col-md-12 -->
+						</div>
+						<!-- /.row -->
+					</div>
+					<!-- /.container -->
+					<div class="langbar androidHide">
+						<a href="https://www-auctionfactory-com.translate.goog/?_x_tr_sl=auto&_x_tr_tl=es&_x_tr_hl=en&_x_tr_pto=wapp"  class="notranslate">Español</a>
+					</div>
+				</div>
+				<!-- navbar -->
+			</div>
+			 <!-- Sticky Menu -->
+		</header>
+
+        <section id="main-content" class="page-section ">
+			<div class="auctionTitle">
+				<h1>Lavina Floor Grinder &  Ridgid Seesnake</h1>
+			</div>
+			<script language="JavaScript">
+<!--
+
+//  The "refresh" function implementations are identical
+//  to our regular "JavaScript-Refresh" example.  The only
+//  difference from our JavaScript Refresh example is
+//  we do not have a doLoad function that starts our
+//  refresh timer (since we use a refresh button).
+
+var sURL = unescape(window.location.pathname);
+
+function refresh()
+{
+    window.location.href = sURL;
+}
+//-->
+</script>
+
+<script language="JavaScript1.1">
+<!--
+function refresh()
+{
+    window.location.replace( sURL );
+}
+//-->
+</script>
+
+<script language="JavaScript1.2">
+<!--
+function refresh()
+{
+    window.location.reload( false );
+}
+//-->
+</script>
+<script type="text/javascript">
+<!--
+function confirmation() {
+	var start = 381942;
+	var end = 382449;
+	var alertMessage = '';
+	var itemNO = '';
+	var maxBid = '';
+	var bid = '';
+	for(i = start; i < end; i++){
+		if (document.getElementById('bid_' + i)) {
+			if ((document.getElementById('bid_' + i).value > 0) || (document.getElementById('maxbid_' + i).value > 0))  {
+				itemNo = document.getElementById('bidno_' + i).value;
+				bid = document.getElementById('bid_' + i).value;
+				maxBid = document.getElementById('maxbid_' + i).value;
+				if (bid == '') {
+					bid = '----';
+				} else {
+					bid = '$' + bid;	
+				}
+				if (maxBid == '') {
+					maxBid = '----';
+				} else {
+					maxBid = '$' + maxBid;	
+				}
+				alertMessage = alertMessage + '\nITEM ' + itemNo + ': BID: ' + bid + ' MAX: ' + maxBid;
+			}
+		}
+	}
+	if (alertMessage != '') {
+		var answer = confirm("Please Verify Your Bid Amounts:" + alertMessage)
+		if (answer){
+		 	document.forms["form1"].submit();
+		}
+	} else {
+		document.forms["form1"].submit();
+	}	
+}
+function confirmation2() {
+	var start = 381942;
+	var end = 382449;
+	var alertMessage = '';
+	var itemNO = '';
+	var maxBid = '';
+	var bid = '';
+	for(i = start; i < end; i++){
+		if (document.getElementById('bid_' + i)) {
+			if ((document.getElementById('bid_' + i).value > 0) || (document.getElementById('maxbid_' + i).value > 0))  {
+				itemNo = document.getElementById('bidno_' + i).value;
+				bid = document.getElementById('bid_' + i).value;
+				maxBid = document.getElementById('maxbid_' + i).value;
+				if (bid == '') {
+					bid = '----';
+				} else {
+					bid = '$' + bid;	
+				}
+				if (maxBid == '') {
+					maxBid = '----';
+				} else {
+					maxBid = '$' + maxBid;	
+				}
+				alertMessage = alertMessage + '\nITEM ' + itemNo + ': BID: ' + bid + ' MAX: ' + maxBid;
+			}
+		}
+	}
+	if (alertMessage != '') {
+		var answer = confirm("Please Verify Your Bid Amounts:" + alertMessage + "\nBy clicking ok, you agree to the terms of this auction.")
+		if (answer){
+		 	document.forms["form1"].submit();
+		}
+	} else {
+		document.forms["form1"].submit();
+	}	
+}
+//-->
+</script>
+<style>
+    .button {
+    background-color: #305ca6;
+    color: #FFFFFF;
+    display: block;
+    padding: 5px;
+    font-size: 12px;
+    position: absolute;
+    top: 10px;
+    left:-155px;
+    white-space: nowrap;
+}
+.bidButton {
+    position: relative;
+}
+    .auction-table tr td:nth-child(3) {
+        display: block;
+    }
+
+</style>
+
+
+<div class="container">
+	<div class="row">
+		<div class="col-md-12">
+            <div class="auction_details">
+                            <link rel="stylesheet" href="/css/af-auction-details.css?v=20261006-pages1"><details class="af-auction-info"><summary><span>Auction Details</span><i class="fa fa-chevron-down" aria-hidden="true"></i></summary><div class="af-auction-info__content"><section class="af-auction-info__logistics" aria-label="Auction logistics"><dl><div><dt>Hosting Division</dt><dd>Auction Factory Florida</dd></div><div><dt>Pickup Address</dt><dd>680 FARMERS MARKET RD, FORT PIERCE, FL 34982</dd></div><div><dt>Preview</dt><dd>By Appointment Call Mark 816-786-7878</dd></div><div><dt>Pickup &amp; Removal</dt><dd>BY APPOINTMENT CALL MARK</dd></div><div><dt>Shipping</dt><dd>Shipping and delivery available</dd></div><div><dt>Contact</dt><dd>816-786-7878</dd></div></dl></section><section class="af-auction-info__section"><h3>Auction Overview</h3><div class="af-auction-info__copy"><p>LAVINA L16E ELECTRIC FLOOR GRINDER,RIDGID SEE SNAKE REEL L100C COUNTER 35186,RIDGID NAVITRACK SCOUT 512HZ PLUMBING RECEIVER.</p></div></section><p class="af-auction-info__reminder">Review the item condition ratings and <a href="archive_auction_terms.php?auction=4945">auction terms</a> before bidding.</p></div></details>				<p></p>
+
+
+
+                                                
+            </div>
+		</div>
+	</div>
+</div>
+<div class="lightBG">
+	<div class="container">
+		<div class="row">
+			<div class="col-md-12"> 
+				<form id="form1" name="form1" method="post" action="submitMultiBids.php">
+					<div class="pagination">
+																		                                                            <a class="active" href="/archive_auction_details.php?pageNum_items=0&totalRows_items=100&auction=4945">1</a>
+                                                                                                                        <a href="/archive_auction_details.php?pageNum_items=1&totalRows_items=100&auction=4945">2</a>
+                                                            						                            <a href="/archive_auction_details.php?pageNum_items=1&totalRows_items=100&auction=4945">></a>
+                                                                            <a href="/archive_auction_details.php?pageNum_items=1&totalRows_items=100&auction=4945">>></a>
+                         
+															<div style="font-size:16px;">Items Per Page: 
+																			50 |
+																			<a href="/archive_auction_details.php?pageNum_items=0&totalRows_items=100&auction=4945&itemsPerPage=100">100</a> | 
+																		<a href="/archive_auction_details.php?pageNum_items=0&totalRows_items=100&auction=4945&itemsPerPage=200">200</a>
+																	</div>
+																
+						</div>
+						
+						<div class="row auctionItemList">
+							<div class="col-md-12">
+								                                <input name="allItems" type="hidden" id="allItems" value="381942|381943|381944|382448|" />
+                                <input name="auction" type="hidden" id="auction" value="4945" />
+                                <input name="page" type="hidden" id="page" value="/archive_auction_details.php?pageNum_items=0&totalRows_items=100&auction=4945" />
+																								                                                                                										                                                  									<div id="381942" class="row auctionItem">
+																				<div class="col-md-1 text-center">
+											<div class="itemNumber"><span class="desktop-span-hide">Item Number: </span>1</div>
+											
+										</div>
+										<div class="col-md-2 text-center">
+											<div class="itemImage"><a href="item_detail.php?item=381942&pageNum_items=0&totalRows_items=100&auction=4945&page="><img src="/uploaded_files63/DSC_0014_file_1790780371.JPG"  border="0" /></a></div>
+											<div class="timer">
+												<span style='color: black; font-weight: normal;'>ended</span><br /><br /><span style="color: green; font-weight: bold;">Sold! Call us today at 816-786-7878 to learn more about selling your items!</span>												
+                                                         
+                                                    															<br />
+															<br />
+															<span style="font-weight:bold; color: green; font-size: 13px;">Shipping and Delivery Available!!</span> 
+																										</div>
+										</div>
+										<div class="col-md-9">
+											<div class="itemName">												
+                                                <a href="item_detail.php?item=381942&pageNum_items=0&totalRows_items=100&auction=4945&page=">													
+																										PLANETARY FLOOR GRINDER</a>                                         
+											</div>
+																									<p>GRINDER DESIGNED FOR TIGHT SPACES LIKE HALLWAYS BATHROOMS AND SMALL PATIOS.WORKING WIDTH 16 INCHES WITH 3 7 INCH HEADS.2.45 HP MOTOR RUNNING ON 1 PHASE 115 VOLT AND 16 AMPS.WEIGHT 216LBS.GRINDING PRESSURE 147.7LBS WITH CAPACITY FOR UP TO TWO OPTIONAL 17.6/18.5LB HORSESHOE WEIGHTS.VARABLE SPEED RANGING FROM 300 TO 500 RPM.GOOD FOR GRINDING AND POLISHING CONCRETE STONE AND WOOD.</p>
+																									<div class="itemDims">
+												<strong>CONDITION: </strong>9 - Like New                                                   | <strong>MAKE: </strong>LAVINA                                                   | <strong>MODEL: </strong>L16E                                                                                                                                                                                                 | <strong>ORIGINAL PRICE NEW:</strong> $6235.00                                                           
+											</div>
+											<div class="row itemDetailsHeader">
+												<div class="col-md-2">
+													Current Bid
+												</div>
+												<div class="col-md-2">
+													High Bidder
+												</div>
+												<div class="col-md-2">
+													Next Bid
+												</div>
+												<div class="col-md-3">
+													Your Bid
+												</div>
+												<div class="col-md-3">
+													Max Bid
+												</div>
+											</div>
+											<div class="row itemDetails">
+												<div class="col-md-2">
+													<span class="desktop-span-hide">Current Bid: </span>
+													<strong>$1250.01</strong>
+													                                                                                                        												</div>
+												<div class="col-md-2 mobileDeets">
+																										<span class="desktop-span-hide">High Bidder: </span>
+													<span style="color:#000000"><strong>37789</strong></span>
+                                                    												</div>
+												<div class="col-md-2 mobileDeets">
+																											 <span class="desktop-span-hide">Next Bid: </span>
+                                                         <strong> $1300.01</strong>
+                                                          													
+												</div>
+												<div class="col-md-3 mobileDeets">
+														
+													    
+																									</div>
+												<div class="col-md-3 mobileDeets">
+																									</div>
+											</div>
+										</div>
+									</div>
+																			                                                  									<div id="381943" class="row auctionItem">
+																				<div class="col-md-1 text-center">
+											<div class="itemNumber"><span class="desktop-span-hide">Item Number: </span>2</div>
+											
+										</div>
+										<div class="col-md-2 text-center">
+											<div class="itemImage"><a href="item_detail.php?item=381943&pageNum_items=0&totalRows_items=100&auction=4945&page="><img src="/uploaded_files65/DSC_0001_file_1790781051.JPG"  border="0" /></a></div>
+											<div class="timer">
+												<span style='color: black; font-weight: normal;'>ended</span><br /><br /><span style="color: green; font-weight: bold;">Sold! Call us today at 816-786-7878 to learn more about selling your items!</span>												
+                                                         
+                                                    															<br />
+															<br />
+															<span style="font-weight:bold; color: green; font-size: 13px;">Shipping and Delivery Available!!</span> 
+																										</div>
+										</div>
+										<div class="col-md-9">
+											<div class="itemName">												
+                                                <a href="item_detail.php?item=381943&pageNum_items=0&totalRows_items=100&auction=4945&page=">													
+																										PROFESSIONAL PLUMBING AND SEWER PIPE INSPECTION CAMERA SYSTEM</a>                                         
+											</div>
+																									<p>A RIGID SEA SNAKE IS A PROFESSIONAL PLUMBING AND SEWER PIPE INSPECTION CAMERA SYSTEM.100 FT PUSH CABLE.MECHANICAL COUNTER REFERS TO THE BUILT IN DISTANCE COUNTER THAT DIGITALLY OR MECHANICALLY TRACKS HOW MANY FEET OF CABLE YOU HAVE PUSHED INTO A PIPE.</p>
+																									<div class="itemDims">
+												<strong>CONDITION: </strong>7 - Good                                                   | <strong>MAKE: </strong>RIDGID                                                   | <strong>MODEL: </strong>REEL L 100C COUNTER 35186                                                                                                                                                                                                 | <strong>ORIGINAL PRICE NEW:</strong> $4179.30                                                           
+											</div>
+											<div class="row itemDetailsHeader">
+												<div class="col-md-2">
+													Current Bid
+												</div>
+												<div class="col-md-2">
+													High Bidder
+												</div>
+												<div class="col-md-2">
+													Next Bid
+												</div>
+												<div class="col-md-3">
+													Your Bid
+												</div>
+												<div class="col-md-3">
+													Max Bid
+												</div>
+											</div>
+											<div class="row itemDetails">
+												<div class="col-md-2">
+													<span class="desktop-span-hide">Current Bid: </span>
+													<strong>$750.00</strong>
+													                                                                                                        												</div>
+												<div class="col-md-2 mobileDeets">
+																										<span class="desktop-span-hide">High Bidder: </span>
+													<span style="color:#000000"><strong>84729</strong></span>
+                                                    												</div>
+												<div class="col-md-2 mobileDeets">
+																											 <span class="desktop-span-hide">Next Bid: </span>
+                                                         <strong> $775.00</strong>
+                                                          													
+												</div>
+												<div class="col-md-3 mobileDeets">
+														
+													    
+																									</div>
+												<div class="col-md-3 mobileDeets">
+																									</div>
+											</div>
+										</div>
+									</div>
+																			                                                  									<div id="381944" class="row auctionItem">
+																				<div class="col-md-1 text-center">
+											<div class="itemNumber"><span class="desktop-span-hide">Item Number: </span>3</div>
+											
+										</div>
+										<div class="col-md-2 text-center">
+											<div class="itemImage"><a href="item_detail.php?item=381944&pageNum_items=0&totalRows_items=100&auction=4945&page="><img src="/uploaded_files68/DSC_0005_file_1790781843.JPG"  border="0" /></a></div>
+											<div class="timer">
+												<span style='color: black; font-weight: normal;'>ended</span><br /><br /><span style="color: green; font-weight: bold;">Sold! Call us today at 816-786-7878 to learn more about selling your items!</span>												
+                                                         
+                                                    															<br />
+															<br />
+															<span style="font-weight:bold; color: green; font-size: 13px;">Shipping and Delivery Available!!</span> 
+																										</div>
+										</div>
+										<div class="col-md-9">
+											<div class="itemName">												
+                                                <a href="item_detail.php?item=381944&pageNum_items=0&totalRows_items=100&auction=4945&page=">													
+																										RIDGID INLINE PRESS</a>                                         
+											</div>
+																									<p>COMPACT PRESS TOOL KIT WHICH INCLUDES THE RED AND BLACK INLINE PRESS TOOL A BATTERY CHARGER AND A MOLDED CARRYING CASE.THIS TOOL IS A CORDLESS ELECTRO HYDRAULIC POWER TOOL USED BY PLUMBERS AND CONTRACTORS TO QUICKLY JOIN METAL AND PLASTIC PIPES WITHOUT SOLDERING WELDING OR THREADING.</p>
+																									<div class="itemDims">
+												<strong>CONDITION: </strong>7 - Good                                                   | <strong>MAKE: </strong>RIDGID                                                   | <strong>MODEL: </strong>RP 241                                                                                                                                                                                                 | <strong>ORIGINAL PRICE NEW:</strong> $1997.60                                                           
+											</div>
+											<div class="row itemDetailsHeader">
+												<div class="col-md-2">
+													Current Bid
+												</div>
+												<div class="col-md-2">
+													High Bidder
+												</div>
+												<div class="col-md-2">
+													Next Bid
+												</div>
+												<div class="col-md-3">
+													Your Bid
+												</div>
+												<div class="col-md-3">
+													Max Bid
+												</div>
+											</div>
+											<div class="row itemDetails">
+												<div class="col-md-2">
+													<span class="desktop-span-hide">Current Bid: </span>
+													<strong>$225.01</strong>
+													                                                                                                        												</div>
+												<div class="col-md-2 mobileDeets">
+																										<span class="desktop-span-hide">High Bidder: </span>
+													<span style="color:#000000"><strong>84729</strong></span>
+                                                    												</div>
+												<div class="col-md-2 mobileDeets">
+																											 <span class="desktop-span-hide">Next Bid: </span>
+                                                         <strong> $235.01</strong>
+                                                          													
+												</div>
+												<div class="col-md-3 mobileDeets">
+														
+													    
+																									</div>
+												<div class="col-md-3 mobileDeets">
+																									</div>
+											</div>
+										</div>
+									</div>
+																			                                                  									<div id="382448" class="row auctionItem">
+																				<div class="col-md-1 text-center">
+											<div class="itemNumber"><span class="desktop-span-hide">Item Number: </span>4</div>
+											
+										</div>
+										<div class="col-md-2 text-center">
+											<div class="itemImage"><a href="item_detail.php?item=382448&pageNum_items=0&totalRows_items=100&auction=4945&page="><img src="/uploaded_files66/item_20261006150113_482713.jpg"  border="0" /></a></div>
+											<div class="timer">
+												<span style='color: black; font-weight: normal;'>ended</span><br /><br /><span style="color: green; font-weight: bold;">Sold! Call us today at 816-786-7878 to learn more about selling your items!</span>												
+                                                         
+                                                    															<br />
+															<br />
+															<span style="font-weight:bold; color: green; font-size: 13px;">Shipping and Delivery Available!!</span> 
+																										</div>
+										</div>
+										<div class="col-md-9">
+											<div class="itemName">												
+                                                <a href="item_detail.php?item=382448&pageNum_items=0&totalRows_items=100&auction=4945&page=">													
+																										NAVI TRACK SCOUT LOCATOR</a>                                         
+											</div>
+																									<p>A PORTABLE DIAGNOSTIC RECEIVER USED BY PLUMBERS CONTRACTORS AND UTILITY WORKERS TO LOCATE UNDERGROUND PIPES SEWER LINES AND BURIED UTILITIES.</p>
+																									<div class="itemDims">
+												<strong>CONDITION: </strong>7 - Good                                                   | <strong>MAKE: </strong>RIDGID                                                   | <strong>MODEL: </strong>NAVITRACK SCOUT 512HZ                                                                                                                                                                                                 | <strong>ORIGINAL PRICE NEW:</strong> $1624.44                                                           
+											</div>
+											<div class="row itemDetailsHeader">
+												<div class="col-md-2">
+													Current Bid
+												</div>
+												<div class="col-md-2">
+													High Bidder
+												</div>
+												<div class="col-md-2">
+													Next Bid
+												</div>
+												<div class="col-md-3">
+													Your Bid
+												</div>
+												<div class="col-md-3">
+													Max Bid
+												</div>
+											</div>
+											<div class="row itemDetails">
+												<div class="col-md-2">
+													<span class="desktop-span-hide">Current Bid: </span>
+													<strong>$405.00</strong>
+													                                                                                                        												</div>
+												<div class="col-md-2 mobileDeets">
+																										<span class="desktop-span-hide">High Bidder: </span>
+													<span style="color:#000000"><strong>84729</strong></span>
+                                                    												</div>
+												<div class="col-md-2 mobileDeets">
+																											 <span class="desktop-span-hide">Next Bid: </span>
+                                                         <strong> $430.00</strong>
+                                                          													
+												</div>
+												<div class="col-md-3 mobileDeets">
+														
+													    
+																									</div>
+												<div class="col-md-3 mobileDeets">
+																									</div>
+											</div>
+										</div>
+									</div>
+									 
+															</div>
+						</div>
+						
+						<div class="pagination">
+																		                                                            <a class="active" href="/archive_auction_details.php?pageNum_items=0&totalRows_items=100&auction=4945">1</a>
+                                                                                                                        <a href="/archive_auction_details.php?pageNum_items=1&totalRows_items=100&auction=4945">2</a>
+                                                            						                            <a href="/archive_auction_details.php?pageNum_items=1&totalRows_items=100&auction=4945">></a>
+                                                                            <a href="/archive_auction_details.php?pageNum_items=1&totalRows_items=100&auction=4945">>></a>
+                         
+						</div>
+					</form>
+			</div>
+		</div>
+	</div>
+</div>		
+<script>
+$(document).ready(function(){
+
+
+	
+$( ".bidTextLink" ).click(function() {
+nextPrice = $(this).attr('dataprice');
+formID = $(this).attr('dataid');
+//add the price to the input
+$( "input[name="+formID+"]" ).val(nextPrice);
+
+//submit the form
+$('#agree').attr('checked', true);
+//submit the form
+var submit = confirmation2();
+});
+
+
+
+});
+</script>
+
+
+        	<div class="container">
+        		<div class="row">        	
+					<div class="col-md-12">
+						
+					</div>					
+				</div>
+			</div>
+		</section>
+        <div class="prefooter">
+			<div class="container">
+				<div class="row">
+					<div class="col-md-2 text-center">
+						<i class="fa fa-envelope" aria-hidden="true"></i>
+					</div>
+					<div class="col-md-10">
+						<h3>Are you an Auction Factory Subscriber?</h3>
+						SIGN UP FOR OUR EMAIL LIST AND RECEIVE REGULAR UPDATES ON CURRENT AUCTIONS AS WELL AS EXCLUSIVE INFORMATION ON UPCOMING AUCTIONS AND ITEMS.
+						<div class="searchBar bottomSearch">
+							<form class="footerSubscribe__form relative" action="//auctionfactory.us16.list-manage.com/subscribe/post?u=b7f86962537225b046000a08b&amp;id=bd98321994" method="post" name="mc-embedded-subscribe-form" target="_blank" novalidate="">
+                				<input type="email" value="" name="EMAIL" id="mce-EMAIL" class="bg-white rounded-full border border-black-100 my-0 w-full px-20 h-10 text-18" placeholder="Enter Email Address Here...">
+                				<input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="btn btn--blue absolute">
+            				</form>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+        <!-- request -->
+        <footer id="footer">
+            <div class="footer-widget">
+                <div class="container">
+                    <div class="row">
+                        <div class="col-xs-12 col-sm-12 col-md-12 widget bottom-xs-pad-20">
+							<div class="text-center">
+								
+							</div>	
+                            <div class="widget-title">
+                                <!-- Title -->
+                                <h3 class="title">Auction Factory</h3>
+                                <div>
+<p>Auction Factory runs online auctions of restaurant, foodservice and commercial equipment from 12 locations across the U.S. Most auctions sell without reserve, with pickup at the listed location and shipping available. Selling equipment? <a href="../sell_with_us.php"><strong>Request a seller evaluation.</strong></a></p>
+<div class="footerlogos text-center" style="margin-top: 20px; margin-bottom: 20px; padding-top: 20px">
+<div class="row">
+<div class="col-md-3 col-sm-3 col-xs-3">
+<img src="https://www.assetauctionsgroup.com/graphics/Lets-Encrypt-Seal-SSL.png" alt="" />
+</div>
+<div class="col-md-3 col-sm-3 col-xs-3">
+<img src="../graphics/cc.jpg" alt="" />
+</div>
+<div class="col-md-3 col-sm-3 col-xs-3">
+<img src="../graphics/naa.jpg" alt="naa" />
+</div>
+<div class="col-md-3 col-sm-3 col-xs-3">
+<img src="https://verify.authorize.net/anetseal/images/secure90x72.gif" alt="Authorize.Net Merchant - Click to Verify" />
+</div>
+</div>
+<div class="row" style="padding-top: 30px">
+<div class="col-md-6 col-sm-6 col-xs-6" style="text-align: center">
+<a href="https://play.google.com/store/apps/details?id=com.auctions.auctionfactory&pli=1&pcampaignid=pcampaignidMKT-Other-global-all-co-prtnr-py-PartBadge-Mar2515-1"><img style="max-width: 200px" src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" /></a>
+</div>
+<div class="col-md-6 col-sm-6 col-xs-6" style="text-align: center">
+<a href="iosinstall.php"><img style="max-width: 200px" src="../appleapp.png" alt="Install on Apple iOS" /></a>
+</div>
+</div>
+</div>
+</div>
+
+
+                            </div>
+							<div class="text-center">
+								
+							</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+			<button onclick="topFunction()" id="myBtn" title="Go to top">Back to Top</button>
+            <!-- footer-top -->
+            <div class="copyright">
+                <div class="container">
+                    <div class="row">
+                        <!-- Copyrights -->
+                        <div class="col-xs-10 col-sm-6 col-md-6"> &copy; 2026 Auction Factory, LLC
+                        <br />
+                        <!-- Terms Link -->
+                         
+                        <a href="/terms_of_use.php">Terms of Use</a> / 
+                        <a href="/privacy_policy.php">Privacy Policy</a> / <a href="/catalog.php">Equipment & Service Directory</a> / <a href="/sitemap.php">Site Map</a></div>
+                        <div class="col-xs-2 col-sm-6 col-md-6 text-right page-scroll gray-bg icons-circle i-3x">
+                            <!-- Goto Top -->
+                            <a href="#page">
+                                <i class="glyphicon glyphicon-arrow-up"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- footer-bottom -->
+        </footer>
+        <!-- footer -->
+    </div>
+    <!-- page -->
+	<style data-af-mobile-nav-css="20261002">/* Critical footer styles are emitted with the shared server-rendered navigation. */
+@layer af-client-accessibility {
+  html body .fixedFooterNav.af-mobile-nav,
+  html body .af-mobile-nav-space {display:none!important;}
+  @media (max-width:767px) {
+    html body .fixedFooterNav.af-mobile-nav,
+    html body.web.af-luxury-system .fixedFooterNav.af-mobile-nav {
+      display:grid!important;grid-auto-flow:column!important;grid-auto-columns:minmax(0,1fr)!important;
+      position:fixed!important;inset:auto 0 0!important;width:100%!important;max-width:none!important;
+      height:auto!important;min-height:0!important;margin:0!important;gap:6px!important;
+      padding:6px max(10px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px))!important;
+      box-sizing:border-box!important;background:#fff!important;border:0!important;border-top:1px solid #d5dfe7!important;
+      border-radius:0!important;box-shadow:0 -3px 14px rgba(15,48,72,.10)!important;
+      opacity:1!important;backdrop-filter:none!important;transform:none!important;z-index:1000!important;
+    }
+    html body .fixedFooterNav.af-mobile-nav::before,
+    html body .fixedFooterNav.af-mobile-nav::after,
+    html body .fixedFooterNav.af-mobile-nav a::after {display:none!important;content:none!important;}
+    html body .fixedFooterNav.af-mobile-nav a,
+    html body.web.af-luxury-system .fixedFooterNav.af-mobile-nav a {
+      display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;
+      float:none!important;position:relative!important;width:100%!important;min-width:0!important;min-height:56px!important;
+      height:auto!important;margin:0!important;padding:6px 4px!important;gap:5px!important;box-sizing:border-box!important;
+      border:0!important;border-radius:8px!important;background:#fff!important;color:#244a67!important;
+      font:600 14px/18px 'Source Sans Pro',Arial,sans-serif!important;letter-spacing:0!important;
+      text-transform:none!important;text-decoration:none!important;text-shadow:none!important;white-space:nowrap!important;
+      -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+    }
+    html body .fixedFooterNav.af-mobile-nav a .fa,
+    html body.web.af-luxury-system .fixedFooterNav.af-mobile-nav a .fa {
+      display:block!important;width:28px!important;height:23px!important;margin:0!important;padding:0!important;
+      background:none!important;border:0!important;border-radius:0!important;color:inherit!important;
+      font-size:22px!important;line-height:23px!important;text-align:center!important;
+    }
+    html body .fixedFooterNav.af-mobile-nav a span {font:inherit!important;color:inherit!important;letter-spacing:0!important;}
+    html body .fixedFooterNav.af-mobile-nav a[data-af-active=true],
+    html body.web.af-luxury-system .fixedFooterNav.af-mobile-nav a[data-af-active=true] {background:#0b4192!important;color:#fff!important;}
+    html body .fixedFooterNav.af-mobile-nav a:active {background:#e5edf6!important;color:#07356a!important;}
+    html body .fixedFooterNav.af-mobile-nav a:focus-visible {outline:2px solid #237524!important;outline-offset:1px!important;}
+    html body .af-mobile-nav-space {display:block!important;height:calc(88px + env(safe-area-inset-bottom,0px))!important;clear:both!important;}
+  }
+}
+</style><nav class="fixedFooterNav af-mobile-nav" aria-label="Mobile navigation" data-af-mobile-nav="20261002"><a href="/" data-af-active="false"><i class="fa fa-home" aria-hidden="true"></i><span>Home</span></a><a href="/watch_list.php" data-af-active="false"><i class="fa fa-bookmark-o" aria-hidden="true"></i><span>Watchlist</span></a><a href="/Login.php" data-af-active="false"><i class="fa fa-sign-in" aria-hidden="true"></i><span>Login</span></a></nav><div class="af-mobile-nav-space" aria-hidden="true"></div>
+    <!-- Scripts -->
+   
+    <script type="text/javascript" src="/themes/theme01/js/bootstrap.min.js"></script> 
+    <!-- Menu jQuery plugin -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/hover-dropdown-menu.js"></script> 
+    <!-- Menu jQuery Bootstrap Addon --> 
+    <script type="text/javascript" src="/themes/theme01/js/jquery.hover-dropdown-menu-addon.js"></script> 
+    <!-- Scroll Top Menu -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/jquery.easing.1.3.js"></script> 
+    <!-- Sticky Menu --> 
+    <script type="text/javascript" src="/themes/theme01/js/jquery.sticky.js"></script> 
+    <!-- Bootstrap Validation -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/bootstrapValidator.min.js"></script> 
+    <!-- Revolution Slider -->
+     
+    <script type="text/javascript" src="/themes/theme01/rs-plugin/js/jquery.themepunch.tools.min.js"></script> 
+    <script type="text/javascript" src="/themes/theme01/rs-plugin/js/jquery.themepunch.revolution.min.js"></script> 
+    <script type="text/javascript" src="/themes/theme01/js/revolution-custom.js"></script> 
+    <!-- Portfolio Filter -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/jquery.mixitup.min.js"></script> 
+    <!-- Animations -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/jquery.appear.js"></script> 
+    <script type="text/javascript" src="/themes/theme01/js/effect.js"></script> 
+    <!-- Owl Carousel Slider -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/owl.carousel.min.js"></script> 
+    <!-- Pretty Photo Popup -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/jquery.prettyPhoto.js"></script> 
+    <!-- Parallax BG -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/jquery.parallax-1.1.3.js"></script> 
+    <!-- Fun Factor / Counter -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/jquery.countTo.js"></script> 
+
+    <!-- Background Video -->
+     
+    <script type="text/javascript" src="/themes/theme01/js/jquery.mb.YTPlayer.js"></script> 
+    <!-- Custom Js Code -->
+     
+    <script src="/themes/theme01/js/jquery.stickit.js?v=20261001-1"></script>
+    <script type="text/javascript" src="/themes/theme01/js/custom.js"></script> 
+    <script type="text/javascript" src="/js/jquery.cycle2.min.js"></script>
+        <script type="text/javascript" src="/js/jquery.cycle2.carousel.min.js"></script>
+        <script type="text/javascript" src="/js/jquery.cycle2.swipe.min.js"></script>
+        <script type="text/javascript" src="/js/jquery.cycle2.center.min.js"></script>
+     <script>
+//Get the button
+var mybutton = document.getElementById("myBtn");
+
+// When the user scrolls down 20px from the top of the document, show the button
+window.onscroll = function() {scrollFunction()};
+
+function scrollFunction() {
+  if (document.body.scrollTop > 100 || document.documentElement.scrollTop > 20) {
+    mybutton.style.display = "block";
+  } else {
+    mybutton.style.display = "none";
+  }
+}
+
+// When the user clicks on the button, scroll to the top of the document
+function topFunction() {
+  $("html, body").animate({ scrollTop: 0 }, "slow");
+  return false;
+}
+</script>
+<script>
+	jQuery(function ($) {
+	  $('.mobileMenuButton.openIt').click(function () {
+		  $('.mobileMenuButton.openIt').hide();
+		  $('.mobileMenuButton.closeIt').show();
+		  $('.mobileMenu').show('fast');
+	  });
+	  $('.mobileMenuButton.closeIt').click(function () {
+		  $('.mobileMenuButton.openIt').show();
+		  $('.mobileMenuButton.closeIt').hide();
+		  $('.mobileMenu').hide('fast');
+	  });
+        $('.mobileMenuButton.openItApp').click(function () {
+		  $('.mobileMenuButton.openItApp').hide();
+		  $('.mobileMenuButton.closeItApp').show();
+		  $('.mobileMenuApp').show('fast');
+	  });
+	  $('.mobileMenuButton.closeItApp').click(function () {
+		  $('.mobileMenuButton.openItApp').show();
+		  $('.mobileMenuButton.closeItApp').hide();
+		  $('.mobileMenuApp').hide('fast');
+	  });
+	  $('#mobileNav .hasChildren').click(function () {
+		  if ($(this).hasClass('active')) {
+			  $(this).removeClass('active');
+		  } else {
+			  $(this).addClass('active');
+		  }
+	  });
+	  $('.thumbnailNew').click(function () {
+		  var thumbnail = $(this).attr('datathumb');
+		  $('#mainimage').attr('src',thumbnail);
+	  });
+	});
+	</script>
+    <!-- Scripts --></body>
+</html>

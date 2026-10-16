@@ -1035,24 +1035,10 @@ export async function processStockImageJob(
     const currentRetail = Number(lot.estimated_retail_new) || 0;
     diag.webstaurantPrice = found?.price || 0;
 
-    // Research price (median of 3-5 samples, not max) + dimensions in one
-    // web_search call. The old max-of-samples strategy pulled wild
-    // outliers (one-off $12k Amazon listings when real retail was $2.5k)
-    // and the lotter trusted them. Chase: "retail prices are off
-    // dramatically — get them more accurate."
-    const facts = await researchItemFacts(
-      anthropic,
-      lot.brand || '',
-      lot.model || '',
-      lot.item_name || ''
-    );
-    diag.webSearchPrice = facts.priceMedian ?? 0;
-    diag.webSearchPriceSamples = facts.priceSamples;
-    diag.webSearchPriceSources = facts.sources;
-
-    // Also consult AF archive — if we've sold this exact brand+model
-    // 2+ times before, that median is the single most trustworthy
-    // retail number (real completed listings a human already verified).
+    // Query AF archive FIRST — cheap SELECT, zero API cost. If it has
+    // 2+ price samples for this brand+model, that median beats any
+    // web_search median (sold-item history > one-off retailer prices)
+    // and we skip the paid researchItemFacts call entirely.
     const archiveStats = await getAFArchiveMedianRetail(
       supabase,
       lot.brand || '',
@@ -1060,6 +1046,23 @@ export async function processStockImageJob(
     );
     diag.afArchiveMedianPrice = archiveStats?.median ?? null;
     diag.afArchiveMedianSampleCount = archiveStats?.sampleCount ?? 0;
+
+    // Only pay for Anthropic web_search when the archive is thin.
+    // Median-of-samples strategy for pricing + dimension extraction
+    // from manufacturer spec. Dimensions still come from the AI vision
+    // pass + extractDimensionsFromText(description) regardless.
+    const archiveIsSufficient = archiveStats != null && archiveStats.sampleCount >= 2;
+    const facts = archiveIsSufficient
+      ? { priceMedian: null, priceSamples: [], dimensions: { width: '', depth: '', height: '' }, sources: [] }
+      : await researchItemFacts(
+          anthropic,
+          lot.brand || '',
+          lot.model || '',
+          lot.item_name || ''
+        );
+    diag.webSearchPrice = facts.priceMedian ?? 0;
+    diag.webSearchPriceSamples = facts.priceSamples;
+    diag.webSearchPriceSources = facts.sources;
 
     const picked = pickBestRetail({
       aiEstimate: currentRetail,

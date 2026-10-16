@@ -26,8 +26,14 @@ async function updateLotPriceAndDimensions(
   const model = (lot.model || '').trim();
   if (!brand && !model) return;
 
-  const facts = await researchItemFacts(anthropic, brand, model, lot.item_name || '');
+  // Query AF archive FIRST (cheap SELECT). If it has 2+ price samples
+  // for this exact brand+model, skip the paid Anthropic web_search —
+  // the archive median is both more accurate and free.
   const archiveStats = await getAFArchiveMedianRetail(supabase, brand, model);
+  const archiveIsSufficient = archiveStats != null && archiveStats.sampleCount >= 2;
+  const facts = archiveIsSufficient
+    ? { priceMedian: null, priceSamples: [], dimensions: { width: '', depth: '', height: '' }, sources: [] }
+    : await researchItemFacts(anthropic, brand, model, lot.item_name || '');
 
   const capAt = currentRetail > 0 ? currentRetail * 5 : Infinity;
   let newRetail = currentRetail;
