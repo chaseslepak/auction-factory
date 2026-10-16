@@ -62,7 +62,7 @@ export default function BackfillPage() {
           </h2>
           <p className="text-xs text-gray-500 leading-snug">
             Lots pushed before af_item_id capture shipped still have a
-            fragile lot_number join. This walks every auction, pulls AF's
+            fragile lot_number join. This walks every auction, pulls AF&apos;s
             admin item list, and backfills af_item_id wherever the title
             matches unambiguously. Safe to re-run — only fills blanks on
             exact single matches. Ambiguous titles and unmatched lots are
