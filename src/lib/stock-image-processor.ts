@@ -30,7 +30,10 @@ export interface SearchDiagnostics {
   webSearchPriceSources: string[];
   afArchiveMedianPrice: number | null;
   afArchiveMedianSampleCount: number;
-  priceSourceChosen: 'af-archive-median' | 'web-median' | 'ai-estimate' | 'webstaurant-single' | 'kept-current' | null;
+  afArchiveSoldMedian: number | null;
+  afArchiveSoldSampleCount: number;
+  soldCeilingApplied: boolean;
+  priceSourceChosen: 'af-archive-median' | 'web-median' | 'ai-estimate' | 'webstaurant-single' | 'kept-current' | 'sold-clamped' | null;
   dimensionsBackfilled: boolean;
   webstaurantPrice: number;
   vision:
@@ -87,6 +90,9 @@ export function emptyDiag(): SearchDiagnostics {
     webSearchPriceSources: [],
     afArchiveMedianPrice: null,
     afArchiveMedianSampleCount: 0,
+    afArchiveSoldMedian: null,
+    afArchiveSoldSampleCount: 0,
+    soldCeilingApplied: false,
     priceSourceChosen: null,
     dimensionsBackfilled: false,
     webstaurantPrice: 0,
@@ -385,33 +391,42 @@ function pickBestRetail(args: {
   webMedian: number | null;
   afArchiveMedian: number | null;
   afArchiveSampleCount: number;
-}): { retail: number; source: 'af-archive-median' | 'web-median' | 'ai-estimate' | 'webstaurant-single' | 'kept-current' } {
+  afArchiveSoldMedian: number | null;
+  afArchiveSoldSampleCount: number;
+}): { retail: number; source: 'af-archive-median' | 'web-median' | 'ai-estimate' | 'webstaurant-single' | 'kept-current' | 'sold-clamped'; soldClampApplied?: boolean } {
   const ai = args.aiEstimate > 0 ? args.aiEstimate : null;
 
+  let chosen: { retail: number; source: 'af-archive-median' | 'web-median' | 'ai-estimate' | 'webstaurant-single' | 'kept-current' };
+
   // Hard preference: AF archive median with 2+ samples.
-  if (args.afArchiveMedian != null && args.afArchiveSampleCount >= 2) {
-    // Even AF archive gets a sanity check vs AI if present — a stale
-    // historical outlier shouldn't dominate.
-    if (ai == null || args.afArchiveMedian <= ai * 5) {
-      return { retail: args.afArchiveMedian, source: 'af-archive-median' };
+  if (args.afArchiveMedian != null && args.afArchiveSampleCount >= 2 &&
+      (ai == null || args.afArchiveMedian <= ai * 5)) {
+    chosen = { retail: args.afArchiveMedian, source: 'af-archive-median' };
+  } else if (args.webMedian != null && args.webMedian > 0 &&
+             (ai == null || ai === 0 || args.webMedian <= ai * 5)) {
+    chosen = { retail: args.webMedian, source: 'web-median' };
+  } else if (args.webstaurantPrice > 0 && (ai == null || args.webstaurantPrice <= ai * 5)) {
+    chosen = { retail: args.webstaurantPrice, source: 'webstaurant-single' };
+  } else if (ai != null && ai > 0) {
+    chosen = { retail: ai, source: 'ai-estimate' };
+  } else {
+    chosen = { retail: args.aiEstimate, source: 'kept-current' };
+  }
+
+  // Sold-aware ceiling. When 3+ prior copies actually hammered on AF and
+  // the sold median is far below our chosen retail (<40% of retail), the
+  // chosen retail is unrealistic — Chase will overprice next time too.
+  // Clamp to 2.5x sold median: that lets listed price (= retail × 1.10)
+  // land around ~2.75x hammer, which still leaves fat above typical
+  // closing bids while pulling obvious overpricing back toward reality.
+  if (args.afArchiveSoldMedian != null && args.afArchiveSoldSampleCount >= 3 && chosen.retail > 0) {
+    const soldCeiling = Math.round(args.afArchiveSoldMedian * 2.5);
+    if (soldCeiling > 0 && args.afArchiveSoldMedian < chosen.retail * 0.4 && soldCeiling < chosen.retail) {
+      return { retail: soldCeiling, source: 'sold-clamped', soldClampApplied: true };
     }
   }
 
-  // Web median next, but only trust 2+ samples unless AI estimate is
-  // way off (null/zero).
-  if (args.webMedian != null && args.webMedian > 0) {
-    const trustSingle = ai == null || ai === 0;
-    if (trustSingle || args.webMedian <= ai * 5) {
-      return { retail: args.webMedian, source: 'web-median' };
-    }
-  }
-
-  if (args.webstaurantPrice > 0 && (ai == null || args.webstaurantPrice <= ai * 5)) {
-    return { retail: args.webstaurantPrice, source: 'webstaurant-single' };
-  }
-
-  if (ai != null && ai > 0) return { retail: ai, source: 'ai-estimate' };
-  return { retail: args.aiEstimate, source: 'kept-current' };
+  return chosen;
 }
 
 function toInchesString(n: unknown): string {
@@ -447,6 +462,39 @@ export async function getAFArchiveMedianRetail(
       .map((r: any) => Number(r.retail_new))
       .filter((n: number) => Number.isFinite(n) && n > 0 && n < 100_000);
     if (nums.length < 2) return null;
+    return { median: Math.round(median(nums)), sampleCount: nums.length };
+  } catch {
+    return null;
+  }
+}
+
+// Compute the median hammer (sold) price for a brand+model from the AF
+// archive. Returns null unless 3+ prior copies actually sold with a
+// known hammer price. Fewer samples are too noisy for a feedback signal.
+// Consumed by pickBestRetail as a ceiling: chronic overpricing self-
+// corrects as sold data accumulates on /admin/pricing-feedback.
+export async function getAFArchiveSoldMedian(
+  supabase: SupabaseClient,
+  brand: string,
+  model: string
+): Promise<{ median: number; sampleCount: number } | null> {
+  const b = (brand || '').trim();
+  const m = (model || '').trim();
+  if (!b || !m) return null;
+  try {
+    const { data, error } = await supabase
+      .from('af_archive_items')
+      .select('sold_price')
+      .ilike('brand', b)
+      .ilike('model', m)
+      .not('sold_price', 'is', null)
+      .gt('sold_price', 0)
+      .limit(50);
+    if (error || !data || data.length < 3) return null;
+    const nums = data
+      .map((r: any) => Number(r.sold_price))
+      .filter((n: number) => Number.isFinite(n) && n > 0 && n < 100_000);
+    if (nums.length < 3) return null;
     return { median: Math.round(median(nums)), sampleCount: nums.length };
   } catch {
     return null;
@@ -1039,13 +1087,14 @@ export async function processStockImageJob(
     // 2+ price samples for this brand+model, that median beats any
     // web_search median (sold-item history > one-off retailer prices)
     // and we skip the paid researchItemFacts call entirely.
-    const archiveStats = await getAFArchiveMedianRetail(
-      supabase,
-      lot.brand || '',
-      lot.model || ''
-    );
+    const [archiveStats, soldStats] = await Promise.all([
+      getAFArchiveMedianRetail(supabase, lot.brand || '', lot.model || ''),
+      getAFArchiveSoldMedian(supabase, lot.brand || '', lot.model || ''),
+    ]);
     diag.afArchiveMedianPrice = archiveStats?.median ?? null;
     diag.afArchiveMedianSampleCount = archiveStats?.sampleCount ?? 0;
+    diag.afArchiveSoldMedian = soldStats?.median ?? null;
+    diag.afArchiveSoldSampleCount = soldStats?.sampleCount ?? 0;
 
     // Only pay for Anthropic web_search when the archive is thin.
     // Median-of-samples strategy for pricing + dimension extraction
@@ -1070,8 +1119,11 @@ export async function processStockImageJob(
       webMedian: facts.priceMedian,
       afArchiveMedian: archiveStats?.median ?? null,
       afArchiveSampleCount: archiveStats?.sampleCount ?? 0,
+      afArchiveSoldMedian: soldStats?.median ?? null,
+      afArchiveSoldSampleCount: soldStats?.sampleCount ?? 0,
     });
     diag.priceSourceChosen = picked.source;
+    diag.soldCeilingApplied = picked.soldClampApplied === true;
 
     const dimParsed = {
       width: facts.dimensions.width || '',

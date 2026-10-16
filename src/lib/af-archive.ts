@@ -23,6 +23,12 @@ export interface ScrapedLot {
   model: string | null;
   condition_rating: string | null;
   retail_new: number | null;
+  // Hammer price — "Current Bid: $X" on the public archive page for a
+  // closed auction. Null during a live auction or when the lot didn't
+  // sell. Combined with retail_new over many lots this feeds the
+  // pricing feedback loop: brands where sold/listed < 50% signal that
+  // our listed prices are chronically too high.
+  sold_price: number | null;
   image_url: string | null;
   lot_href: string;
 }
@@ -145,6 +151,15 @@ export function parseAuctionLotsHtml(
     const retailRaw = extractField(dims, 'ORIGINAL PRICE NEW');
     const retail_new = parsePrice(retailRaw);
 
+    // Hammer price. AF renders "Current Bid: $NNN.NN" inside the lot's
+    // detail block. On live auctions this is the current bid; on
+    // archived (closed) auctions it's the final hammer. We capture
+    // regardless and let the caller decide what to do — the archive
+    // crawler only visits closed auctions so values stored here are
+    // real hammer prices.
+    const soldMatch = block.match(/Current\s*Bid\s*:?\s*(?:<[^>]*>)*\s*\$?([\d,]+(?:\.\d+)?)/i);
+    const sold_price = soldMatch ? parsePrice(soldMatch[1]) : null;
+
     const lot_href = `${AF_ORIGIN}/item_detail.php?item=${af_item_id}&auction=${af_auction_id}`;
 
     lots.push({
@@ -155,6 +170,7 @@ export function parseAuctionLotsHtml(
       model,
       condition_rating,
       retail_new,
+      sold_price,
       image_url,
       lot_href,
     });

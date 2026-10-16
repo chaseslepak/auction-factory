@@ -10,6 +10,7 @@ const sections = [
   { href: '/admin/sop', title: 'SOP / Manual', desc: 'How to use the Auction Factory Official Lotter — step by step guide' },
   { href: '/admin/jobs', title: 'Jobs', desc: 'View background job status, errors, retry failed' },
   { href: '/admin/upload-telemetry', title: 'Upload Telemetry', desc: 'Per-attempt diagnostics for HQ Push — error histogram, success rate, cookie rotations' },
+  { href: '/admin/pricing-feedback', title: 'Pricing Feedback', desc: 'Listed vs sold hammer prices from AF archive — flags chronic over/underpricing' },
   { href: '/admin/af-archive', title: 'AF Archive Index', desc: 'Prior-auction photo index — the first place stock-image search looks' },
   { href: '/admin/trash', title: 'Trash', desc: 'Restore or permanently delete removed lots' },
   { href: '/admin/storage', title: 'Storage Cleanup', desc: 'Purge photos from archived auctions to reclaim Supabase storage' },
