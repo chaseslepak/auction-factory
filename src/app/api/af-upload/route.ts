@@ -254,9 +254,46 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  if (candidates.length === 0) {
+  // PRE-FLIGHT PHOTO VALIDATION: AF rejects lots with zero photos as
+  // "Photo upload needs attention". Catch that locally so Chase sees
+  // "no photos" instead of a confusing AF-side error. Marks the lot
+  // 'failed' with an actionable message and skips the upload entirely.
+  const noPhotos: typeof candidates = [];
+  const pushable: typeof candidates = [];
+  for (const c of candidates) {
+    const hasPhoto = Array.isArray(c.lot_photos) && c.lot_photos.length > 0;
+    if (hasPhoto) {
+      pushable.push(c);
+    } else {
+      noPhotos.push(c);
+    }
+  }
+  if (noPhotos.length > 0) {
+    await supabase
+      .from('lots')
+      .update({
+        af_upload_status: 'failed',
+        af_upload_error:
+          'NO_PHOTOS: lot has zero photos — AF will reject. Add a photo (or run Find Stock Images) and retry.',
+      })
+      .in('id', noPhotos.map((l: any) => l.id));
+    for (const n of noPhotos) {
+      results.push({
+        lot_id: n.id,
+        lot_number: n.lot_number,
+        success: false,
+        skipped: true,
+        error: 'NO_PHOTOS: lot has zero photos — AF will reject. Add a photo (or run Find Stock Images) and retry.',
+      });
+    }
+  }
+
+  if (pushable.length === 0) {
     return NextResponse.json({ results });
   }
+  // From here on, treat `candidates` as the photo-passing subset.
+  candidates.length = 0;
+  candidates.push(...pushable);
 
   // Reclaim stuck 'uploading' lots: if a prior client-side batch died
   // mid-run (tab closed, laptop sleep, network drop), the server set

@@ -374,6 +374,48 @@ function median(nums: number[]): number {
   return sorted[mid];
 }
 
+// Classify an image as a real product photo vs a placeholder graphic
+// ("IMAGE COMING SOON", "no image available", generic silhouettes). One
+// Haiku call per image, ~$0.0004. Returns true if it looks like a
+// placeholder — the caller should refuse to save it. Fails open (returns
+// false) on error so a transient Anthropic blip doesn't block valid
+// photos.
+export async function classifyImageAsPlaceholder(
+  anthropic: Anthropic,
+  imageB64: string,
+): Promise<boolean> {
+  try {
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 10000));
+    const apiPromise = anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 10,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/jpeg', data: imageB64 },
+            },
+            {
+              type: 'text',
+              text:
+                'Is this image a real product photograph, OR a placeholder / no-image graphic / "coming soon" graphic / generic silhouette? Reply with exactly one word: PRODUCT or PLACEHOLDER.',
+            },
+          ],
+        },
+      ],
+    });
+    const response: any = await Promise.race([apiPromise, timeoutPromise]);
+    if (!response) return false;
+    const block = response.content?.[0];
+    const text = (block && 'text' in block ? block.text : '').toUpperCase();
+    return /PLACEHOLDER/.test(text);
+  } catch {
+    return false;
+  }
+}
+
 // Decide which retail price to trust. Priority order:
 //   1. AF archive median (2+ prior listings): most trustworthy — Chase's
 //      team has already set and verified these on past listings.
@@ -1167,6 +1209,24 @@ export async function processStockImageJob(
         if (imgRes.ok) {
           const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
           diag.imageDownloaded = true;
+
+          // Reject vendor "IMAGE COMING SOON" / "no image available"
+          // placeholders at source. Vendors (Libbey, WebstaurantStore,
+          // etc.) sometimes serve a generic stock graphic when a product
+          // isn't in their catalog yet. AF's photo validator rejects
+          // those as "Photo upload needs attention" — causing silent
+          // whole-lot failures. One Haiku classification per image is
+          // ~$0.0004 and worth the cost.
+          const isPlaceholder = await classifyImageAsPlaceholder(
+            anthropic,
+            Buffer.from(imgBytes).toString('base64'),
+          );
+          if (isPlaceholder) {
+            diag.imageDownloadError =
+              'Vendor returned IMAGE COMING SOON placeholder — not saving';
+            diag.finalOutcome = 'image-download-failed';
+            return { success: false, found: false, diag };
+          }
 
           // Check if a stock image already exists for this lot
           const existingStock = (lot.lot_photos || []).find((p: any) => p.storage_path.includes('/stock_'));
