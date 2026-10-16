@@ -426,6 +426,63 @@ export default function AuctionDetailPage() {
       setUploadMsg({ type: 'error', text: 'All lots already uploaded.' });
       return;
     }
+
+    // Pre-flight: duplicate-title check. If AI generated identical
+    // normalized item_names for two different lots (different brand +
+    // model), the relot-sync title matcher pairs them in the wrong
+    // order on subsequent audits. Easier to fix now than untangle
+    // later. Normalize = lowercase + collapse whitespace.
+    const norm = (s: string | null) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const titleGroups = new Map<string, Array<typeof unuploaded[number]>>();
+    for (const l of unuploaded) {
+      const key = norm(l.item_name);
+      if (!key) continue;
+      const g = titleGroups.get(key) || [];
+      g.push(l);
+      titleGroups.set(key, g);
+    }
+    const conflicting: string[] = [];
+    titleGroups.forEach((group) => {
+      if (group.length < 2) return;
+      const brandModels = new Set(group.map((l: any) => `${norm(l.brand)}|${norm(l.model)}`));
+      if (brandModels.size > 1) {
+        conflicting.push(
+          `"${group[0].item_name}" — lots ${group.map((l) => `#${l.lot_number}`).join(', ')} share this title but differ in brand/model`
+        );
+      }
+    });
+    if (conflicting.length > 0) {
+      const dialog =
+        `Found ${conflicting.length} title collision${conflicting.length > 1 ? 's' : ''}:\n\n` +
+        conflicting.slice(0, 5).join('\n') +
+        (conflicting.length > 5 ? `\n…and ${conflicting.length - 5} more` : '') +
+        `\n\nThese will cause audit mismatches later. Edit the item_name on one of each conflicting pair, then try again. ` +
+        `Click OK to proceed anyway (not recommended).`;
+      if (!confirm(dialog)) return;
+    }
+
+    // Pre-flight: AF session cookie health. The daily keepalive at
+    // 06:00 UTC is thin coverage. A push at 22:00 UTC rides a 16-hour
+    // cookie that MAY be stale. If stale, the first lot of the batch
+    // fails and the whole thing cascades. Catch it before the first
+    // POST so no bad state lands on AF.
+    setUploadMsg({ type: 'success', text: 'Checking AF session…' });
+    try {
+      const pre = await fetch('/api/af-keepalive', { method: 'GET' });
+      const preData = await pre.json().catch(() => ({}));
+      if (!preData?.alive) {
+        setUploadMsg({
+          type: 'error',
+          text: 'AF session expired — reconnect in Settings before pushing. (Pre-flight check caught this before any lot was uploaded.)',
+        });
+        return;
+      }
+    } catch {
+      // Keepalive endpoint unreachable — not fatal, let the actual
+      // upload surface the error. Don't block the push on a flaky
+      // health check.
+    }
+
     if (!confirm(`Upload ${unuploaded.length} lot(s) to Auction Factory?`)) return;
 
     setUploading(true);

@@ -23,6 +23,14 @@ export interface ScrapedAFAuction {
   af_url: string;
   af_name: string;
   items: ScrapedAFItem[];
+  // Which splitter was used for the first page. The audit route shows
+  // 'fallback' as a scraper_warning so Chase knows primary markup has
+  // changed and the parser is running in a degraded mode.
+  parse_source?: 'primary' | 'fallback' | 'empty';
+  // Blocks we failed to extract an af_item_id from (either side of
+  // pagination). Used to surface a scraper_warning when the error
+  // rate is high.
+  parse_errors?: number;
 }
 
 async function fetchPage(url: string): Promise<string> {
@@ -53,22 +61,30 @@ function parseAuctionName(html: string): string {
 }
 
 // Parse all items from the auction listing page.
-// NOTE: falling back to the loop index for lot_number is a bug — it makes
-// page 2's items collide with page 1's (the classic "+200 offset" the
-// audit page hit). Instead: leave lot_number null when we can't parse it
-// and let the caller decide. Also make the regex tolerant of whitespace,
-// nbsp, and comma-thousands separators seen on some AF pages.
-function parseAuctionItems(html: string): ScrapedAFItem[] {
-  const items: ScrapedAFItem[] = [];
+// Returns items + parse diagnostics so the caller can detect a silent
+// regression (0 items parsed from a real auction page).
+export interface ParseAuctionItemsResult {
+  items: ScrapedAFItem[];
+  // Which splitter yielded the items. 'primary' = the <div
+  // class="itemNumber"> wrapper AF uses today. 'fallback' = an
+  // item_detail.php?item= link-based parse used when primary returns 0.
+  parse_source: 'primary' | 'fallback' | 'empty';
+  // Blocks the primary splitter saw where we couldn't extract an
+  // af_item_id. Used by the audit route to show a scraper_warning if
+  // more than N% of blocks parse_errored.
+  parse_errors: number;
+}
 
-  // Split on the structural <div class="itemNumber"> wrapper. AF changed
-  // their live-auction markup: it used to render visible "Item Number: N"
-  // text (what the old splitter grepped for); the new markup is just
-  // `<div class="itemNumber"><span>Lot </span>N</div>`. Archive pages
-  // still show "Item Number: " BUT inside a hidden desktop-span, inside
-  // the same `<div class="itemNumber">` wrapper. Splitting on the wrapper
-  // works on BOTH page shapes.
+function parseAuctionItemsWithDiag(html: string): ParseAuctionItemsResult {
+  const primaryItems: ScrapedAFItem[] = [];
+
+  // Primary splitter: structural <div class="itemNumber"> wrapper. AF
+  // used to emit visible "Item Number: N" text (old grep); the new
+  // markup is `<div class="itemNumber"><span>Lot </span>N</div>`.
+  // Archive pages still include "Item Number: " inside a hidden
+  // desktop-span, but inside the same wrapper, so this works for both.
   const itemBlocks = html.split(/<div\s+class="itemNumber"[^>]*>/i);
+  let primaryParseErrors = 0;
 
   for (let i = 1; i < itemBlocks.length; i++) {
     const block = itemBlocks[i];
@@ -149,9 +165,14 @@ function parseAuctionItems(html: string): ScrapedAFItem[] {
     const current_bid = bidMatch ? `$${bidMatch[1]}` : '';
 
     // Skip empty items
-    if (!title && !af_item_id) continue;
+    if (!title && !af_item_id) {
+      // A block that yielded neither title nor id but IS inside the
+      // itemNumber-split result is a parse miss we want to count.
+      if (block.length > 50) primaryParseErrors++;
+      continue;
+    }
 
-    items.push({
+    primaryItems.push({
       lot_number,
       title: title || `Item ${lot_number}`,
       af_item_url,
@@ -166,6 +187,63 @@ function parseAuctionItems(html: string): ScrapedAFItem[] {
     });
   }
 
+  // Fallback splitter — if the primary returned nothing BUT the page is
+  // clearly an auction detail page (contains item_detail.php?item= refs),
+  // parse by linking from item_detail.php?item= anchors. This catches
+  // the "AF changed the itemNumber wrapper class" regression we lived
+  // through on `afad567`.
+  if (primaryItems.length === 0) {
+    const fallbackItems = parseByItemDetailLinks(html);
+    if (fallbackItems.length > 0) {
+      return {
+        items: fallbackItems,
+        parse_source: 'fallback',
+        parse_errors: primaryParseErrors,
+      };
+    }
+  }
+
+  return {
+    items: primaryItems,
+    parse_source: primaryItems.length > 0 ? 'primary' : 'empty',
+    parse_errors: primaryParseErrors,
+  };
+}
+
+// Thin back-compat wrapper for callers that just want items (nothing
+// in the codebase today uses the diag fields except scrapeAuction).
+function parseAuctionItems(html: string): ScrapedAFItem[] {
+  return parseAuctionItemsWithDiag(html).items;
+}
+
+// Fallback parser: build items by walking every item_detail.php?item=
+// anchor on the page. Weaker than the primary parser (lot_number is
+// usually not inferable this way) but at least surfaces the fact that
+// AF items EXIST so the audit doesn't declare them all missing.
+function parseByItemDetailLinks(html: string): ScrapedAFItem[] {
+  const items: ScrapedAFItem[] = [];
+  const seen = new Set<string>();
+  const anchorRe = /<a[^>]+href=["'][^"']*item_detail\.php\?item=(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = anchorRe.exec(html)) !== null) {
+    const af_item_id = m[1];
+    if (seen.has(af_item_id)) continue;
+    seen.add(af_item_id);
+    const title = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    items.push({
+      lot_number: null,
+      title: title || `Item ${af_item_id}`,
+      af_item_url: `${AF_BASE}/item_detail.php?item=${af_item_id}`,
+      af_item_id,
+      description: '',
+      photos: [],
+      condition: '',
+      current_bid: '',
+      brand: '',
+      model: '',
+      dimensions: '',
+    });
+  }
   return items;
 }
 
@@ -286,7 +364,26 @@ export async function scrapeAuction(
   const fetchUrl = new URL(url);
   const html = await fetchPage(fetchUrl.toString());
   const af_name = parseAuctionName(html);
-  let items = parseAuctionItems(html);
+  const firstDiag = parseAuctionItemsWithDiag(html);
+
+  // Sanity assertion: if the first page returned 0 items BUT the page
+  // is clearly an auction detail page (contains `item_detail.php?item=`
+  // link references), the markup changed and the audit must NOT trust
+  // the result as "AF really has 0 items." Throw instead so the audit
+  // route surfaces a 502 and Chase sees a scraper-regression error
+  // rather than a silent "wipe everything" sync.
+  if (firstDiag.items.length === 0 && /item_detail\.php\?item=\d+/.test(html)) {
+    throw new Error(
+      'AF_SCRAPER_MARKUP_CHANGED: parsed 0 items but page contains item_detail.php refs. ' +
+      'The auction has items but the scraper could not extract them — likely AF changed the ' +
+      '<div class="itemNumber"> wrapper markup. Report with the first-page HTML.'
+    );
+  }
+  let items = firstDiag.items;
+  // Track parse source + errors so the audit route can surface
+  // scraper_warning in its response.
+  const parseSource = firstDiag.parse_source;
+  let totalParseErrors = firstDiag.parse_errors;
 
   // Walk subsequent pages until the server returns nothing new or we
   // hit the safety cap (50 pages × ~18 lots = 900 lots, covers Chase's
@@ -306,10 +403,11 @@ export async function scrapeAuction(
     } catch {
       break;
     }
-    const pageItems = parseAuctionItems(pageHtml);
-    if (pageItems.length === 0) break;
+    const pageDiag = parseAuctionItemsWithDiag(pageHtml);
+    totalParseErrors += pageDiag.parse_errors;
+    if (pageDiag.items.length === 0) break;
     let addedThisPage = 0;
-    for (const it of pageItems) {
+    for (const it of pageDiag.items) {
       if (it.af_item_id && seenItemIds.has(it.af_item_id)) continue;
       if (it.af_item_id) seenItemIds.add(it.af_item_id);
       items.push(it);
@@ -352,6 +450,8 @@ export async function scrapeAuction(
     af_url: auctionUrl,
     af_name,
     items,
+    parse_source: parseSource,
+    parse_errors: totalParseErrors,
   };
 }
 
