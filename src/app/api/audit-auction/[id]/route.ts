@@ -146,6 +146,9 @@ export async function GET(
   }
 
   type LotterRow = NonNullable<typeof lots>[number];
+  const normTitle = (s: string | null | undefined) =>
+    (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
   const lotterByNumber = new Map<number, LotterRow>();
   // af_item_id is the durable key: when the lotter captured one on a
   // successful upload, we trust it over lot_number. Audit uses this to
@@ -153,16 +156,29 @@ export async function GET(
   // its lot_numbers (e.g. a human relotted on AF without going through
   // our relot-sync).
   const lotterByAfItemId = new Map<number, LotterRow>();
+  // Fallback title index: when neither af_item_id nor lot_number
+  // matches (e.g. Chase re-numbered a lot in the lotter after push, and
+  // af_item_id was never captured), a unique title match should still
+  // link the two sides so audit doesn't false-positive flag items as
+  // orphaned on both sides.
+  const lotterByTitle = new Map<string, LotterRow[]>();
   (lots || []).forEach((l) => {
     lotterByNumber.set(l.lot_number, l);
     if ((l as any).af_item_id != null) {
       lotterByAfItemId.set(Number((l as any).af_item_id), l);
+    }
+    const key = normTitle(l.item_name);
+    if (key) {
+      const bucket = lotterByTitle.get(key) || [];
+      bucket.push(l);
+      lotterByTitle.set(key, bucket);
     }
   });
 
   // Group AF items by lot number to detect duplicates within AF itself
   const afByNumber = new Map<number, typeof scraped.items>();
   const afByItemId = new Map<number, (typeof scraped.items)[number]>();
+  const afByTitle = new Map<string, typeof scraped.items>();
   scraped.items.forEach((item) => {
     if (item.lot_number == null) return;
     const bucket = afByNumber.get(item.lot_number) || [];
@@ -172,15 +188,39 @@ export async function GET(
     if (Number.isFinite(idNum) && idNum > 0) {
       afByItemId.set(idNum, item);
     }
+    const key = normTitle(item.title);
+    if (key) {
+      const titleBucket = afByTitle.get(key) || [];
+      titleBucket.push(item);
+      afByTitle.set(key, titleBucket);
+    }
   });
 
   // Compute diffs. "Linked" = this lotter lot has an af_item_id that
   // AF confirms exists. Linked lots are NEVER flagged as only_in_lotter,
-  // regardless of lot_number drift.
-  const lotIsLinked = (l: LotterRow) =>
-    (l as any).af_item_id != null && afByItemId.has(Number((l as any).af_item_id));
-  const afItemIsLinked = (item: (typeof scraped.items)[number]) =>
-    lotterByAfItemId.has(Number(item.af_item_id));
+  // regardless of lot_number drift. Secondary link: unique title match
+  // when af_item_id is missing on both sides.
+  const lotIsLinked = (l: LotterRow): boolean => {
+    if ((l as any).af_item_id != null && afByItemId.has(Number((l as any).af_item_id))) return true;
+    // Title fallback: only when lotter lot has no af_item_id captured
+    // AND exactly one AF item shares its normalized title AND exactly
+    // one lotter lot shares it (so we don't collapse real duplicates).
+    if ((l as any).af_item_id != null) return false;
+    const key = normTitle(l.item_name);
+    if (!key) return false;
+    const afBucket = afByTitle.get(key) || [];
+    const lotterBucket = lotterByTitle.get(key) || [];
+    return afBucket.length === 1 && lotterBucket.length === 1;
+  };
+  const afItemIsLinked = (item: (typeof scraped.items)[number]): boolean => {
+    if (lotterByAfItemId.has(Number(item.af_item_id))) return true;
+    // Title fallback — unique match on both sides.
+    const key = normTitle(item.title);
+    if (!key) return false;
+    const lotterBucket = lotterByTitle.get(key) || [];
+    const afBucket = afByTitle.get(key) || [];
+    return lotterBucket.length === 1 && afBucket.length === 1;
+  };
 
   const onlyInLotter: Array<{
     lot_number: number;
