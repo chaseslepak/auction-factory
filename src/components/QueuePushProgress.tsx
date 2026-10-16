@@ -24,7 +24,9 @@ interface QueueStatus {
 export default function QueuePushProgress({ auctionId }: { auctionId: string }) {
   const [status, setStatus] = useState<QueueStatus | null>(null);
   const [visible, setVisible] = useState(false);
+  const [relotMsg, setRelotMsg] = useState<string | null>(null);
   const timer = useRef<any>(null);
+  const relotFiredFor = useRef<string | null>(null);
 
   async function fetchStatus() {
     try {
@@ -33,6 +35,33 @@ export default function QueuePushProgress({ auctionId }: { auctionId: string }) 
       const b: QueueStatus = await r.json();
       setStatus(b);
       if (b.total > 0) setVisible(true);
+      // Auto re-lot when a batch finishes: pending=0 AND processing=0
+      // AND at least one lot completed AND we haven't re-lotted for this
+      // batch yet. Keyed on the batch's earliest-created timestamp so a
+      // fresh push triggers it again. Fire-and-forget — AF reorders in
+      // the background and the user doesn't block on it.
+      const done =
+        b.counts.pending === 0 &&
+        b.counts.processing === 0 &&
+        b.counts.completed > 0;
+      const batchKey = b.earliest || '';
+      if (done && batchKey && relotFiredFor.current !== batchKey) {
+        relotFiredFor.current = batchKey;
+        setRelotMsg('Re-ordering AF auction to match lotter numbering…');
+        try {
+          const rr = await fetch(`/api/relot-sync/${auctionId}`, { method: 'POST' });
+          const body = await rr.json().catch(() => ({}));
+          if (rr.ok) {
+            setRelotMsg(
+              `AF reordered: ${body?.posted ?? body?.updated ?? body?.changed ?? 'done'}.`,
+            );
+          } else {
+            setRelotMsg(`Re-order failed: ${body?.error || `HTTP ${rr.status}`}`);
+          }
+        } catch (err: any) {
+          setRelotMsg(`Re-order failed: ${err?.message || 'network error'}`);
+        }
+      }
     } catch {}
   }
 
@@ -106,6 +135,10 @@ export default function QueuePushProgress({ auctionId }: { auctionId: string }) 
         </p>
       ) : null}
 
+      {relotMsg && (
+        <p className="text-[11px] text-gray-500 mt-2 italic">{relotMsg}</p>
+      )}
+
       {active > 0 && (
         <button
           onClick={() =>
@@ -114,6 +147,30 @@ export default function QueuePushProgress({ auctionId }: { auctionId: string }) 
           className="mt-3 w-full text-xs font-bold text-brand-blue border border-brand-blue/30 rounded py-1.5"
         >
           Kick worker
+        </button>
+      )}
+
+      {active === 0 && status.counts.completed > 0 && (
+        <button
+          onClick={async () => {
+            setRelotMsg('Re-ordering AF auction to match lotter numbering…');
+            try {
+              const rr = await fetch(`/api/relot-sync/${auctionId}`, { method: 'POST' });
+              const body = await rr.json().catch(() => ({}));
+              if (rr.ok) {
+                setRelotMsg(
+                  `AF reordered: ${body?.posted ?? body?.updated ?? body?.changed ?? 'done'}.`,
+                );
+              } else {
+                setRelotMsg(`Re-order failed: ${body?.error || `HTTP ${rr.status}`}`);
+              }
+            } catch (err: any) {
+              setRelotMsg(`Re-order failed: ${err?.message || 'network error'}`);
+            }
+          }}
+          className="mt-3 w-full text-xs font-bold text-brand-blue border border-brand-blue/30 rounded py-1.5"
+        >
+          Re-order AF auction manually
         </button>
       )}
     </div>
