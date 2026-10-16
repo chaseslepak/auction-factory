@@ -175,22 +175,6 @@ export async function POST(request: NextRequest) {
     const { decrypt } = await import('@/lib/crypto');
     cookieUsed = decrypt(cookieUsed);
   } catch {}
-  // AF now 302-redirects add_item_2new.php → add_item.php for everyone.
-  // Follow redirects so our check sees the real form, and look for the
-  // CSRF token / form markers on the final body.
-  const checkUrl = `${AF_BASE}/add_item_2new.php?auction=${mapping.af_auction_id}`;
-  const checkRes = await fetch(checkUrl, {
-    headers: { Cookie: cookieUsed },
-    redirect: 'follow',
-  });
-  const checkHtml = await checkRes.text();
-  // Session is dead if AF returns the login form.
-  const hasLogin =
-    /name=["']psEmail["']|name=["']psPassword["']/i.test(checkHtml);
-  // Form is present if we can find the hidden auction field OR any of
-  // the input names we're about to fill. Previously we grepped for the
-  // visible text "Item Name", which AF's UI has now dropped — the
-  // structural markers are stable across their UI changes.
   const FORM_MARKERS = [
     /name=["']auction["']/i,
     /name=["']title["']/i,
@@ -198,11 +182,47 @@ export async function POST(request: NextRequest) {
     /name=["']condition["']/i,
     /add_item_2new/i,
   ];
-  const hasForm = FORM_MARKERS.some((rx) => rx.test(checkHtml));
-  if (hasLogin || !hasForm) {
+  const checkUrl = `${AF_BASE}/add_item_2new.php?auction=${mapping.af_auction_id}`;
+
+  async function sessionCheck(ck: string) {
+    const r = await fetch(checkUrl, { headers: { Cookie: ck }, redirect: 'follow' });
+    const h = await r.text();
+    const login = /name=["']psEmail["']|name=["']psPassword["']/i.test(h);
+    const form = FORM_MARKERS.some((rx) => rx.test(h));
+    return { res: r, html: h, login, form };
+  }
+
+  let check = await sessionCheck(cookieUsed);
+
+  // Auto-renewal: if the stored cookie puts us on the login form AND
+  // AF_LOGIN_* env creds are present, try one re-login before giving
+  // up. Rate-limited by /api/af-session/renew itself (10-min minimum).
+  if ((check.login || !check.form) && process.env.AF_LOGIN_EMAIL && process.env.AF_LOGIN_PASSWORD) {
+    try {
+      const { renewAfSession } = await import('@/lib/af-session-renewer');
+      const { encrypt } = await import('@/lib/crypto');
+      const renew = await renewAfSession();
+      if (renew.success && renew.cookie) {
+        cookieUsed = renew.cookie;
+        let stored = renew.cookie;
+        try { stored = encrypt(renew.cookie); } catch {}
+        const nowIso = new Date().toISOString();
+        const telem = telemetryClient(supabase);
+        const first = await telem.from('af_session').upsert({
+          id: 1, session_cookie: stored, updated_at: nowIso, last_renewed_at: nowIso,
+        });
+        if (first.error && /last_renewed_at/.test(first.error.message || '')) {
+          await telem.from('af_session').upsert({ id: 1, session_cookie: stored, updated_at: nowIso });
+        }
+        check = await sessionCheck(cookieUsed);
+      }
+    } catch {}
+  }
+
+  if (check.login || !check.form) {
     return NextResponse.json(
       {
-        error: `AF session check failed. Cookie: ${cookieUsed.substring(0, 30)}..., URL: ${checkUrl}, Status: ${checkRes.status}, HasLogin: ${hasLogin}, HasForm: ${hasForm}, First500: ${checkHtml.substring(0, 500)}`
+        error: `AF session check failed. Cookie: ${cookieUsed.substring(0, 30)}..., URL: ${checkUrl}, Status: ${check.res.status}, HasLogin: ${check.login}, HasForm: ${check.form}, First500: ${check.html.substring(0, 500)}`
       },
       { status: 401 }
     );

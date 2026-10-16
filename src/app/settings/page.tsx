@@ -94,8 +94,32 @@ export default function SettingsPage() {
                 </p>
               )}
               <p className="text-xs text-gray-400 mt-2">
-                To refresh the session, paste a new cookie below.
+                To refresh the session, paste a new cookie below — or
+                click Auto-renew if AF_LOGIN_* env vars are set.
               </p>
+              <button
+                onClick={async () => {
+                  setLoading(true);
+                  setMessage(null);
+                  try {
+                    const r = await fetch('/api/af-session/renew', { method: 'POST' });
+                    const b = await r.json();
+                    if (r.ok && b.renewed) {
+                      setMessage({ type: 'success', text: 'Session renewed via env credentials.' });
+                      checkSession();
+                    } else {
+                      setMessage({ type: 'error', text: b.error || `HTTP ${r.status}` });
+                    }
+                  } catch (err: any) {
+                    setMessage({ type: 'error', text: err?.message || 'Renew failed' });
+                  }
+                  setLoading(false);
+                }}
+                disabled={loading}
+                className="mt-3 w-full text-xs font-bold text-brand-blue border border-brand-blue/30 rounded py-1.5 disabled:opacity-40"
+              >
+                {loading ? 'Working…' : 'Auto-renew session'}
+              </button>
             </div>
           ) : (
             <div className="flex items-center gap-2 mb-2">
