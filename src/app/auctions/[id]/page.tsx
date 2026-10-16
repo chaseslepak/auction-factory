@@ -12,7 +12,6 @@ import ProgressBar from '@/components/ProgressBar';
 import ToastStack, { useToasts } from '@/components/Toast';
 import AfSessionBadge from '@/components/AfSessionBadge';
 import { LotCardSkeleton } from '@/components/LoadingSkeleton';
-import QueuePushProgress from '@/components/QueuePushProgress';
 import FailedLotsPanel from '@/components/FailedLotsPanel';
 
 export default function AuctionDetailPage() {
@@ -890,10 +889,6 @@ export default function AuctionDetailPage() {
       </div>
 
       <div className="px-4">
-        <QueuePushProgress auctionId={id} />
-      </div>
-
-      <div className="px-4">
         <FailedLotsPanel auctionId={id} lots={lots} />
       </div>
 
@@ -1009,43 +1004,6 @@ export default function AuctionDetailPage() {
               >
                 {refreshing ? 'Searching for stock images...' : 'Find Stock Images'}
               </button>
-              <button
-                onClick={async () => {
-                  const eligible = lots.filter(
-                    (l: any) => l.af_upload_status !== 'uploaded' && l.af_upload_status !== 'uploading',
-                  );
-                  if (eligible.length === 0) {
-                    showToast({ message: 'No lots to push — all already uploaded.', tone: 'info' });
-                    return;
-                  }
-                  if (!confirm(`Queue ${eligible.length} lots for background push? You can close the tab — the worker keeps draining.`)) return;
-                  try {
-                    const res = await fetch('/api/af-upload/enqueue', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ auction_id: id, lot_ids: eligible.map((l: any) => l.id) }),
-                    });
-                    const body = await res.json();
-                    if (!res.ok) {
-                      showToast({ message: body?.error || `Enqueue failed (${res.status})`, tone: 'error' });
-                      return;
-                    }
-                    showToast({ message: body.message || `Queued ${body.enqueued} lots.`, tone: 'success' });
-                  } catch (err: any) {
-                    showToast({ message: err?.message || 'Enqueue failed', tone: 'error' });
-                  }
-                }}
-                disabled={uploading}
-                className="w-full py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
-              >
-                ⚡ Push via Queue (recommended)
-              </button>
-              <Link
-                href={`/auctions/${id}/browser-upload`}
-                className="w-full block text-center py-2 rounded-xl border-2 border-brand-green text-brand-green font-bold text-xs uppercase tracking-wide"
-              >
-                🌐 HQ Push via Browser (fallback)
-              </Link>
               <Link
                 href={`/auctions/${id}/audit`}
                 className="w-full block text-center py-2 rounded-xl border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide"
@@ -1055,9 +1013,9 @@ export default function AuctionDetailPage() {
               <button
                 onClick={handleUploadToAf}
                 disabled={uploading}
-                className="w-full py-3 rounded-xl bg-brand-navy text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
+                className="w-full py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
               >
-                {uploading ? 'Uploading...' : 'Server Upload (fallback)'}
+                {uploading ? 'Pushing to AF…' : 'HQ Push to AF'}
               </button>
               <button
                 onClick={async () => {
