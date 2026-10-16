@@ -255,35 +255,49 @@ export async function POST(request: NextRequest) {
   }
 
   // PRE-FLIGHT PHOTO VALIDATION: AF rejects lots with zero photos as
-  // "Photo upload needs attention". Catch that locally so Chase sees
-  // "no photos" instead of a confusing AF-side error. Marks the lot
-  // 'failed' with an actionable message and skips the upload entirely.
-  const noPhotos: typeof candidates = [];
+  // "Photo upload needs attention" / rejects without a title. Catch
+  // the fixable classes locally so Chase sees an actionable error
+  // (NO_PHOTOS, NO_TITLE, NO_LOT_NUMBER) instead of AF's cryptic
+  // responses. Marks each lot 'failed' with its specific reason and
+  // skips the upload entirely.
+  const preflightFail: Array<{ lot: any; reason: string }> = [];
   const pushable: typeof candidates = [];
   for (const c of candidates) {
     const hasPhoto = Array.isArray(c.lot_photos) && c.lot_photos.length > 0;
-    if (hasPhoto) {
-      pushable.push(c);
-    } else {
-      noPhotos.push(c);
-    }
+    const hasTitle = typeof c.item_name === 'string' && c.item_name.trim().length > 0;
+    const hasLotNumber = c.lot_number != null && Number.isFinite(Number(c.lot_number));
+
+    let reason: string | null = null;
+    if (!hasLotNumber) reason = 'NO_LOT_NUMBER: lot has no lot_number — set one in the lotter and retry.';
+    else if (!hasTitle) reason = 'NO_TITLE: lot has no item name — add one and retry.';
+    else if (!hasPhoto) reason = 'NO_PHOTOS: lot has zero photos — AF will reject. Add a photo (or run Find Stock Images) and retry.';
+
+    if (reason) preflightFail.push({ lot: c, reason });
+    else pushable.push(c);
   }
-  if (noPhotos.length > 0) {
-    await supabase
-      .from('lots')
-      .update({
-        af_upload_status: 'failed',
-        af_upload_error:
-          'NO_PHOTOS: lot has zero photos — AF will reject. Add a photo (or run Find Stock Images) and retry.',
-      })
-      .in('id', noPhotos.map((l: any) => l.id));
-    for (const n of noPhotos) {
+  if (preflightFail.length > 0) {
+    // Batch-update by reason so we send fewer DB roundtrips while
+    // still writing the specific error to each lot.
+    const byReason = new Map<string, string[]>();
+    for (const { lot, reason } of preflightFail) {
+      const arr = byReason.get(reason) || [];
+      arr.push(lot.id);
+      byReason.set(reason, arr);
+    }
+    const entries = Array.from(byReason.entries());
+    for (const [reason, ids] of entries) {
+      await supabase
+        .from('lots')
+        .update({ af_upload_status: 'failed', af_upload_error: reason })
+        .in('id', ids);
+    }
+    for (const { lot, reason } of preflightFail) {
       results.push({
-        lot_id: n.id,
-        lot_number: n.lot_number,
+        lot_id: lot.id,
+        lot_number: lot.lot_number,
         success: false,
         skipped: true,
-        error: 'NO_PHOTOS: lot has zero photos — AF will reject. Add a photo (or run Find Stock Images) and retry.',
+        error: reason,
       });
     }
   }
@@ -291,7 +305,7 @@ export async function POST(request: NextRequest) {
   if (pushable.length === 0) {
     return NextResponse.json({ results });
   }
-  // From here on, treat `candidates` as the photo-passing subset.
+  // From here on, treat `candidates` as the pre-flight-passing subset.
   candidates.length = 0;
   candidates.push(...pushable);
 
