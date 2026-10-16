@@ -13,6 +13,7 @@ import ToastStack, { useToasts } from '@/components/Toast';
 import AfSessionBadge from '@/components/AfSessionBadge';
 import { LotCardSkeleton } from '@/components/LoadingSkeleton';
 import QueuePushProgress from '@/components/QueuePushProgress';
+import FailedLotsPanel from '@/components/FailedLotsPanel';
 
 export default function AuctionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -890,6 +891,10 @@ export default function AuctionDetailPage() {
 
       <div className="px-4">
         <QueuePushProgress auctionId={id} />
+      </div>
+
+      <div className="px-4">
+        <FailedLotsPanel auctionId={id} lots={lots} />
       </div>
 
       {/* HQ Upload Handoff — locations mark auctions "ready", HQ pushes to AF */}
