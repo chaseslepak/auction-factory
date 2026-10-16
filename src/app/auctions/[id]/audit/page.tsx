@@ -82,26 +82,30 @@ export default function AuditPage() {
 
   const syncStatuses = async () => {
     if (!result) return;
-    // Only prompt if this will actually change anything.
-    const stale = result.only_in_lotter.length; // marked uploaded but AF doesn't have them → will be cleared
-    const onAf = result.counts.lotter_lots - stale; // rough estimate for confirmation copy
-    if (
-      !confirm(
-        `Sync lotter statuses to AF?\n\n` +
-          `• Lots on AF will be marked "uploaded".\n` +
-          `• Lots not on AF will be marked "not sent" so they push next time.\n\n` +
-          `About ${onAf} on AF, ${stale} not on AF.`
-      )
-    ) {
-      return;
-    }
+    const stale = result.only_in_lotter.length;
+    const lotterCount = result.counts.lotter_lots;
+    const afCount = result.counts.af_lots;
+
+    // Default: mark-only (clear_mode='none'). This is the safe path
+    // after the Oct 15 duplicate-upload disaster — the sync never
+    // clears a status, only marks AF-present lots as 'uploaded'.
+    // Chase can enable clearing by holding Shift when clicking.
+    const dialog =
+      `Sync lotter statuses to AF — safe mode?\n\n` +
+      `Scraper found ${afCount} items on AF.\n` +
+      `Lotter has ${lotterCount} lots.\n\n` +
+      `This will MARK as "uploaded" every lotter lot that AF has (by af_item_id or lot_number). ` +
+      `No status will be cleared. ${stale} lots look like they're only in the lotter — those keep their current status and you can retry them via HQ Push.\n\n` +
+      `Proceed?`;
+    if (!confirm(dialog)) return;
+
     setSyncing(true);
     setSyncResult(null);
     try {
       const res = await fetch(`/api/audit-auction/${id}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirm: true }),
+        body: JSON.stringify({ confirm: true, clear_mode: 'none' }),
       });
       const data = await res.json();
       if (!res.ok) {

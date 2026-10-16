@@ -4,6 +4,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { processStockImageJob } from '@/lib/stock-image-processor';
 import { processDeepRescanJob } from '@/lib/deep-rescan-processor';
+import { processAfPushJob, type AfPushContext } from '@/lib/af-push-processor';
 
 export const maxDuration = 60;
 
@@ -51,6 +52,13 @@ export async function POST(request: NextRequest) {
   let succeeded = 0;
   let failed = 0;
 
+  // Shared across af_push jobs in this invocation. AF rotates
+  // PHPSESSID on every POST; we forward-roll the cookie across sibling
+  // jobs within one worker invocation so each job uses the freshest
+  // value without re-reading af_session every time.
+  const { newAfPushContext } = await import('@/lib/af-push-processor');
+  const afPushCtx = newAfPushContext();
+
   try {
     // Also reset any stuck 'processing' jobs older than 2 minutes back to pending
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
@@ -67,7 +75,7 @@ export async function POST(request: NextRequest) {
         .from('jobs')
         .select('*')
         .eq('status', 'pending')
-        .in('type', ['refresh_stock_images', 'deep_rescan'])
+        .in('type', ['refresh_stock_images', 'deep_rescan', 'af_push'])
         .order('created_at', { ascending: true })
         .limit(1);
 
@@ -93,12 +101,17 @@ export async function POST(request: NextRequest) {
       try {
         // Pick processor based on job type
         const processor =
-          job.type === 'deep_rescan'
+          job.type === 'af_push'
+            ? processAfPushJob(supabase, job.lot_id, (job.payload || {}) as any, afPushCtx)
+            : job.type === 'deep_rescan'
             ? processDeepRescanJob(supabase, anthropic, job.lot_id)
             : processStockImageJob(supabase, anthropic, job.lot_id);
 
-        // Deep rescan gets a longer timeout (uses Opus)
-        const jobTimeout = job.type === 'deep_rescan' ? 55000 : PER_JOB_TIMEOUT_MS;
+        // Deep rescan gets a longer timeout (uses Opus).
+        // af_push: uploadLotToAF has its own 30s internal timeout; we
+        // give the job wrapper 50s so one retry can fit.
+        const jobTimeout =
+          job.type === 'deep_rescan' ? 55000 : job.type === 'af_push' ? 50000 : PER_JOB_TIMEOUT_MS;
 
         const result = await Promise.race([
           processor,
@@ -142,7 +155,7 @@ export async function POST(request: NextRequest) {
       .from('jobs')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending')
-      .in('type', ['refresh_stock_images', 'deep_rescan', 'generate_platform_content', 'post_fb_page']);
+      .in('type', ['refresh_stock_images', 'deep_rescan', 'af_push', 'generate_platform_content', 'post_fb_page']);
 
     // Self-invoke: await the fetch briefly to ensure it's dispatched
     // We don't wait for the full response, just long enough to guarantee

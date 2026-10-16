@@ -12,6 +12,7 @@ import ProgressBar from '@/components/ProgressBar';
 import ToastStack, { useToasts } from '@/components/Toast';
 import AfSessionBadge from '@/components/AfSessionBadge';
 import { LotCardSkeleton } from '@/components/LoadingSkeleton';
+import QueuePushProgress from '@/components/QueuePushProgress';
 
 export default function AuctionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -252,15 +253,27 @@ export default function AuctionDetailPage() {
 
   // Cap the poll loop so a stuck job (Anthropic outage, orphaned pending
   // row, etc.) can't burn tablet battery and rack up processor kicks
-  // forever. 60 polls * 3s = 3 minutes before we back off.
-  const MAX_POLLS = 60;
+  // forever. Scale the cap to how many lots we actually queued — each
+  // stock-image lookup can take 10–30 s, so a 300-lot batch legitimately
+  // runs 60+ min. Floor 3 min, ceiling 90 min; poll every 3 s.
+  const POLL_INTERVAL_MS = 3000;
+  const SECONDS_PER_LOT_ESTIMATE = 25;
+  const pollCapForLots = (lots: number) => {
+    const estSec = Math.max(180, Math.min(5400, lots * SECONDS_PER_LOT_ESTIMATE));
+    return Math.ceil(estSec * 1000 / POLL_INTERVAL_MS);
+  };
 
-  const pollJobStatus = async (lastDone = -1, stallCount = 0, attempts = 0) => {
-    if (attempts >= MAX_POLLS) {
+  const pollJobStatus = async (lastDone = -1, stallCount = 0, attempts = 0, cap: number | null = null) => {
+    // When the first poll fires we may not yet know how many lots were queued.
+    // The cap gets set below once we see `data.total`. Until then we use a
+    // generous default (10 min) so a slow queue-enqueue call doesn't trip us.
+    const effectiveCap = cap ?? 200;
+    if (attempts >= effectiveCap) {
       setRefreshing(false);
+      const minutes = Math.round((effectiveCap * POLL_INTERVAL_MS) / 60000);
       setUploadMsg({
         type: 'error',
-        text: 'Still running after 3 min — closed the poll. Check Admin → Jobs for status; reopen this auction to resume.',
+        text: `Browser stopped tracking after ${minutes} min — jobs are still running on the server. Check Admin → Jobs or reload this page to resume live tracking.`,
       });
       return;
     }
@@ -277,6 +290,11 @@ export default function AuctionDetailPage() {
 
       setRefreshProgress({ current: done, total });
 
+      // Lock in a lot-count-scaled cap as soon as we know `total`. Keeps a
+      // 368-lot batch from hitting a 3-min cap it legitimately needs 90+
+      // min to finish.
+      const nextCap = cap ?? (total > 0 ? pollCapForLots(total) : null);
+
       if (data.active) {
         // Detect stall: if nothing changed since last poll, kick the processor
         const isStalled = done === lastDone;
@@ -291,8 +309,8 @@ export default function AuctionDetailPage() {
           fetch('/api/jobs/process', { method: 'POST' }).catch(() => {});
         }
 
-        // Still processing, poll again in 3 seconds
-        setTimeout(() => pollJobStatus(done, newStallCount, attempts + 1), 3000);
+        // Still processing, poll again
+        setTimeout(() => pollJobStatus(done, newStallCount, attempts + 1, nextCap), POLL_INTERVAL_MS);
       } else {
         // All done
         setRefreshing(false);
@@ -409,6 +427,63 @@ export default function AuctionDetailPage() {
       setUploadMsg({ type: 'error', text: 'All lots already uploaded.' });
       return;
     }
+
+    // Pre-flight: duplicate-title check. If AI generated identical
+    // normalized item_names for two different lots (different brand +
+    // model), the relot-sync title matcher pairs them in the wrong
+    // order on subsequent audits. Easier to fix now than untangle
+    // later. Normalize = lowercase + collapse whitespace.
+    const norm = (s: string | null) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const titleGroups = new Map<string, Array<typeof unuploaded[number]>>();
+    for (const l of unuploaded) {
+      const key = norm(l.item_name);
+      if (!key) continue;
+      const g = titleGroups.get(key) || [];
+      g.push(l);
+      titleGroups.set(key, g);
+    }
+    const conflicting: string[] = [];
+    titleGroups.forEach((group) => {
+      if (group.length < 2) return;
+      const brandModels = new Set(group.map((l: any) => `${norm(l.brand)}|${norm(l.model)}`));
+      if (brandModels.size > 1) {
+        conflicting.push(
+          `"${group[0].item_name}" — lots ${group.map((l) => `#${l.lot_number}`).join(', ')} share this title but differ in brand/model`
+        );
+      }
+    });
+    if (conflicting.length > 0) {
+      const dialog =
+        `Found ${conflicting.length} title collision${conflicting.length > 1 ? 's' : ''}:\n\n` +
+        conflicting.slice(0, 5).join('\n') +
+        (conflicting.length > 5 ? `\n…and ${conflicting.length - 5} more` : '') +
+        `\n\nThese will cause audit mismatches later. Edit the item_name on one of each conflicting pair, then try again. ` +
+        `Click OK to proceed anyway (not recommended).`;
+      if (!confirm(dialog)) return;
+    }
+
+    // Pre-flight: AF session cookie health. The daily keepalive at
+    // 06:00 UTC is thin coverage. A push at 22:00 UTC rides a 16-hour
+    // cookie that MAY be stale. If stale, the first lot of the batch
+    // fails and the whole thing cascades. Catch it before the first
+    // POST so no bad state lands on AF.
+    setUploadMsg({ type: 'success', text: 'Checking AF session…' });
+    try {
+      const pre = await fetch('/api/af-keepalive', { method: 'GET' });
+      const preData = await pre.json().catch(() => ({}));
+      if (!preData?.alive) {
+        setUploadMsg({
+          type: 'error',
+          text: 'AF session expired — reconnect in Settings before pushing. (Pre-flight check caught this before any lot was uploaded.)',
+        });
+        return;
+      }
+    } catch {
+      // Keepalive endpoint unreachable — not fatal, let the actual
+      // upload surface the error. Don't block the push on a flaky
+      // health check.
+    }
+
     if (!confirm(`Upload ${unuploaded.length} lot(s) to Auction Factory?`)) return;
 
     setUploading(true);
@@ -477,6 +552,22 @@ export default function AuctionDetailPage() {
 
           setUploadProgress({ current: totalSucceeded + totalFailed, total: unuploaded.length });
           fetchData();
+
+          // Circuit breaker: once we've attempted enough lots to form a
+          // signal, abort the whole batch if the failure rate is above
+          // the threshold. Protects against sending 280 doomed requests
+          // when the first 20 reveal a global problem (dead cookie, AF
+          // outage, CSRF rotation we can't recover from).
+          const CIRCUIT_MIN_ATTEMPTS = 20;
+          const CIRCUIT_FAIL_RATE = 0.3;
+          const attempted = totalSucceeded + totalFailed;
+          if (
+            attempted >= CIRCUIT_MIN_ATTEMPTS &&
+            totalFailed / attempted > CIRCUIT_FAIL_RATE
+          ) {
+            lastError = `Circuit breaker tripped — ${totalFailed} of ${attempted} lots failed (${Math.round((totalFailed / attempted) * 100)}%). Aborting the batch to avoid wasted requests. Fix the root cause (session, CSRF, etc.) and click HQ Push again.`;
+            break;
+          }
         } catch (batchErr: any) {
           // Network error or other exception — mark batch as failed and continue
           lastError = batchErr.message || 'Batch error';
@@ -494,7 +585,53 @@ export default function AuctionDetailPage() {
         }
       }
 
-      const realFailed = totalFailed - totalSkipped;
+      let realFailed = totalFailed - totalSkipped;
+
+      // Automatic second pass. If the first batch left any lots in
+      // 'failed' state, give them one more full attempt before surfacing
+      // the error to Chase. Combined with the server's 3-retry window
+      // on transient errors (NETWORK_ERROR, FORBIDDEN_BY_AF: 403, 5xx,
+      // 429), each lot effectively gets up to 6 attempts before we give
+      // up. Chase: "I can't have failures."
+      if (realFailed > 0) {
+        setUploadMsg({
+          type: 'success',
+          text: `${totalSucceeded} uploaded, ${realFailed} failed — retrying the failed ones once…`,
+        });
+        // Pull a fresh list of ids that ARE still 'failed' on this
+        // auction, not just the ones we think failed above (handles
+        // mid-session race where another tab retried some).
+        const { data: stillFailed } = await supabase
+          .from('lots')
+          .select('id')
+          .eq('auction_id', id)
+          .eq('af_upload_status', 'failed')
+          .is('deleted_at', null);
+        const retryIds = (stillFailed || []).map((r: any) => r.id);
+        const retryBatches: string[][] = [];
+        for (let i = 0; i < retryIds.length; i += BATCH_SIZE) {
+          retryBatches.push(retryIds.slice(i, i + BATCH_SIZE));
+        }
+        let retrySucceeded = 0;
+        for (let i = 0; i < retryBatches.length; i++) {
+          try {
+            const res = await fetch('/api/af-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ auction_id: id, lot_ids: retryBatches[i] }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!data || data.error) continue;
+            retrySucceeded += (data.results || []).filter((r: any) => r.success).length;
+          } catch {
+            // Swallow — next batch keeps going.
+          }
+        }
+        totalSucceeded += retrySucceeded;
+        realFailed -= retrySucceeded;
+        setUploadProgress({ current: totalSucceeded + realFailed + totalSkipped, total: unuploaded.length });
+      }
+
       const skippedNote = totalSkipped > 0
         ? ` (${totalSkipped} already uploaded — skipped to avoid duplicates)`
         : '';
@@ -505,7 +642,7 @@ export default function AuctionDetailPage() {
           type: realFailed === 0 ? 'success' : 'error',
           text: realFailed === 0
             ? `${totalSucceeded} lot${totalSucceeded !== 1 ? 's' : ''} uploaded to AF${skippedNote}!`
-            : `${totalSucceeded} uploaded, ${realFailed} failed${skippedNote}${lastError ? `: ${lastError}` : ''}`,
+            : `${totalSucceeded} uploaded, ${realFailed} failed after retry${skippedNote}${lastError ? `. Last error: ${lastError}` : ''}. Click HQ Push again to try again, or open a failed lot to see its specific error.`,
         });
       }
       fetchData();
@@ -751,6 +888,10 @@ export default function AuctionDetailPage() {
         <AfSessionBadge />
       </div>
 
+      <div className="px-4">
+        <QueuePushProgress auctionId={id} />
+      </div>
+
       {/* HQ Upload Handoff — locations mark auctions "ready", HQ pushes to AF */}
       {lots.length > 0 && (
         <div className="px-4 mb-2">
@@ -863,11 +1004,42 @@ export default function AuctionDetailPage() {
               >
                 {refreshing ? 'Searching for stock images...' : 'Find Stock Images'}
               </button>
+              <button
+                onClick={async () => {
+                  const eligible = lots.filter(
+                    (l: any) => l.af_upload_status !== 'uploaded' && l.af_upload_status !== 'uploading',
+                  );
+                  if (eligible.length === 0) {
+                    showToast({ message: 'No lots to push — all already uploaded.', tone: 'info' });
+                    return;
+                  }
+                  if (!confirm(`Queue ${eligible.length} lots for background push? You can close the tab — the worker keeps draining.`)) return;
+                  try {
+                    const res = await fetch('/api/af-upload/enqueue', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ auction_id: id, lot_ids: eligible.map((l: any) => l.id) }),
+                    });
+                    const body = await res.json();
+                    if (!res.ok) {
+                      showToast({ message: body?.error || `Enqueue failed (${res.status})`, tone: 'error' });
+                      return;
+                    }
+                    showToast({ message: body.message || `Queued ${body.enqueued} lots.`, tone: 'success' });
+                  } catch (err: any) {
+                    showToast({ message: err?.message || 'Enqueue failed', tone: 'error' });
+                  }
+                }}
+                disabled={uploading}
+                className="w-full py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
+              >
+                ⚡ Push via Queue (recommended)
+              </button>
               <Link
                 href={`/auctions/${id}/browser-upload`}
-                className="w-full block text-center py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide"
+                className="w-full block text-center py-2 rounded-xl border-2 border-brand-green text-brand-green font-bold text-xs uppercase tracking-wide"
               >
-                🌐 HQ Push to AF (Browser Upload)
+                🌐 HQ Push via Browser (fallback)
               </Link>
               <Link
                 href={`/auctions/${id}/audit`}

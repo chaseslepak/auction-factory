@@ -113,13 +113,61 @@ export function mergeSetCookie(current: string, res: Response): string {
   return Array.from(jar, ([k, v]) => `${k}=${v}`).join('; ');
 }
 
+export interface UploadLotResult {
+  success: boolean;
+  error?: string;
+  debug?: string;
+  updated_cookie?: string;
+  // AF's assigned item id for this upload, parsed from the response's
+  // final URL or body. Null when we couldn't extract one (either the
+  // upload failed, or AF's response changed shape). When present, the
+  // caller persists it to lots.af_item_id so audit/relot/dedupe can
+  // join on a durable key instead of fragile lot_number arithmetic.
+  af_item_id?: number | null;
+  // Per-attempt telemetry fields. Written to af_upload_attempts by the
+  // caller so we can finally diagnose which transient failure class
+  // dominates in production (CSRF rotation vs PHPSESSID staleness vs
+  // AF mod_security vs AF 5xx).
+  http_status?: number;
+  elapsed_ms?: number;
+  csrf_present?: boolean;
+  cookie_rotated?: boolean;
+}
+
+// Extract AF's assigned item id from a response URL or body. AF
+// usually redirects to add_item.php?item=NNNN after a successful post,
+// so the final URL carries it. The body occasionally embeds
+// `item_detail.php?item=NNNN` instead. Returns the LARGEST id found
+// (the just-created one) so pre-existing links in the page don't
+// confuse us.
+export function extractAfItemIdFromResponse(url: string, html: string): number | null {
+  const ids: number[] = [];
+  const urlMatch = url.match(/[?&]item=(\d+)/);
+  if (urlMatch) ids.push(Number(urlMatch[1]));
+  // After add_item.php posts, AF commonly includes a "View / Edit item"
+  // link to the newly-created item. Scan for all item= refs and take
+  // the max.
+  const bodyRe = /\bitem=(\d+)\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = bodyRe.exec(html)) !== null) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n > 0) ids.push(n);
+  }
+  if (ids.length === 0) return null;
+  // The brand-new item generally has the largest id. If AF ever changes
+  // this (e.g. embeds older item ids after new ones), fall back to the
+  // first id in the URL match.
+  return Math.max(...ids);
+}
+
 export async function uploadLotToAF(
   lot: any,
   photos: { url: string; storage_path: string }[],
   afAuctionId: string,
   sessionCookie: string,
   saveAction: 'next' | 'exit'
-): Promise<{ success: boolean; error?: string; debug?: string; updated_cookie?: string }> {
+): Promise<UploadLotResult> {
+  const startedAt = Date.now();
   try {
     // AF's rebuilt backend 302-redirects /admin/add_item_2new.php to
     // /admin/add_item.php for everyone (not just logged-out users), so
@@ -137,12 +185,21 @@ export async function uploadLotToAF(
     });
     // Pick up any rotated PHPSESSID / new cookies AF set on the GET.
     let currentCookie = mergeSetCookie(sessionCookie, pageRes);
+    const cookieRotatedOnGet = currentCookie !== sessionCookie;
 
     const pageHtml = await pageRes.text();
     // Session-expiry check now runs on the final body — if AF bounced us
     // all the way to the login page, we'll see the login inputs here.
     if (/name=["']psEmail["']|name=["']psPassword["']/i.test(pageHtml)) {
-      return { success: false, error: 'AF session expired. Please re-login.', updated_cookie: currentCookie };
+      return {
+        success: false,
+        error: 'AF session expired. Please re-login.',
+        updated_cookie: currentCookie,
+        http_status: pageRes.status,
+        elapsed_ms: Date.now() - startedAt,
+        csrf_present: false,
+        cookie_rotated: cookieRotatedOnGet,
+      };
     }
 
     // After a 302 add_item_2new.php → add_item.php, the form POSTs back to
@@ -170,6 +227,10 @@ export async function uploadLotToAF(
       return {
         success: false,
         error: `Could not find auction hidden field. Page may not be the add_item form. First 200 chars: ${pageHtml.substring(0, 200)}`,
+        http_status: pageRes.status,
+        elapsed_ms: Date.now() - startedAt,
+        csrf_present: !!csrfToken,
+        cookie_rotated: cookieRotatedOnGet,
       };
     }
 
@@ -301,22 +362,49 @@ export async function uploadLotToAF(
     clearTimeout(postTimeoutId);
     // Capture any new PHPSESSID AF handed back after the POST so the
     // caller can roll it forward to the next lot.
+    const cookieBeforePost = currentCookie;
     currentCookie = mergeSetCookie(currentCookie, res);
+    const cookieRotatedOnPost = currentCookie !== cookieBeforePost;
 
     const html = await res.text();
     const status = res.status;
     const location = res.headers.get('location') || '';
     const debug = html.substring(0, 500);
+    const finalUrl = res.url || postUrl;
+    const telemetry = {
+      http_status: status,
+      elapsed_ms: Date.now() - startedAt,
+      csrf_present: !!csrfToken,
+      cookie_rotated: cookieRotatedOnGet || cookieRotatedOnPost,
+    };
 
+    // redirect: 'follow' is set above, so a 302 → login would have been
+    // resolved before we get here (the login markers scan at the end of
+    // the 200 branch catches it). The 302 branch is kept as defensive
+    // code for the case where follow didn't fire (e.g. CORS, redirect
+    // limit).
     if (status === 302) {
       if (
         location.includes('Login') ||
         location.includes('login') ||
         location.includes('index.php')
       ) {
-        return { success: false, error: 'AF session expired. Please re-login.', updated_cookie: currentCookie };
+        return {
+          success: false,
+          error: 'AF session expired. Please re-login.',
+          updated_cookie: currentCookie,
+          ...telemetry,
+        };
       }
-      return { success: true, debug: `302 -> ${location}`, updated_cookie: currentCookie };
+      // A 302 to a non-login URL is a successful upload — AF usually
+      // redirects to add_item.php?item=NNNN or similar.
+      return {
+        success: true,
+        debug: `302 -> ${location}`,
+        updated_cookie: currentCookie,
+        af_item_id: extractAfItemIdFromResponse(location || finalUrl, html),
+        ...telemetry,
+      };
     }
 
     if (
@@ -329,21 +417,61 @@ export async function uploadLotToAF(
         success: false,
         error: `FORBIDDEN_BY_AF: ${status} - item: ${itemName}`,
         updated_cookie: currentCookie,
+        ...telemetry,
       };
     }
 
     if (status === 200) {
       if (html.includes('psEmail') || html.includes('psPassword')) {
-        return { success: false, error: 'AF session expired. Please re-login.', updated_cookie: currentCookie };
+        return {
+          success: false,
+          error: 'AF session expired. Please re-login.',
+          updated_cookie: currentCookie,
+          ...telemetry,
+        };
       }
-      return { success: true, updated_cookie: currentCookie };
+      // False-positive-success guard: if the response body still shows
+      // the add_item form (title/make/model inputs), the POST probably
+      // didn't take. A real success either redirects to the lot's
+      // detail page or renders a "saved!" confirmation.
+      const stillOnForm = /name=["']title["'][^>]*>/i.test(html) &&
+        /name=["']original_price["']/i.test(html);
+      const sawServerError = /mod_security|forbidden|error_log|<title>\s*Error/i.test(html);
+      if (stillOnForm && sawServerError) {
+        return {
+          success: false,
+          error: `AF_REJECTED_SOFT: 200 but body shows error. Debug: ${debug.substring(0, 200)}`,
+          updated_cookie: currentCookie,
+          ...telemetry,
+        };
+      }
+      return {
+        success: true,
+        updated_cookie: currentCookie,
+        af_item_id: extractAfItemIdFromResponse(finalUrl, html),
+        ...telemetry,
+      };
     }
 
-    return { success: false, error: `HTTP ${status}. Debug: ${debug}`, updated_cookie: currentCookie };
+    return {
+      success: false,
+      error: `HTTP ${status}. Debug: ${debug}`,
+      updated_cookie: currentCookie,
+      ...telemetry,
+    };
   } catch (err: any) {
+    const elapsed_ms = Date.now() - startedAt;
     if (err.name === 'AbortError' || err.message?.includes('aborted')) {
-      return { success: false, error: 'TIMEOUT_UNCERTAIN: upload may have succeeded on AF' };
+      return {
+        success: false,
+        error: 'TIMEOUT_UNCERTAIN: upload may have succeeded on AF',
+        elapsed_ms,
+      };
     }
-    return { success: false, error: `NETWORK_ERROR: ${err.message}` };
+    return {
+      success: false,
+      error: `NETWORK_ERROR: ${err.message}`,
+      elapsed_ms,
+    };
   }
 }

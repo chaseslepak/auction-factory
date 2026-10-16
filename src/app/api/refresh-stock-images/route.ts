@@ -2,227 +2,72 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { computeListedPrice, syncRetailLine } from '@/lib/listing-price';
+import {
+  findAndVerifyStockImage,
+  researchItemFacts,
+  getAFArchiveMedianRetail,
+} from '@/lib/stock-image-processor';
+import { extractDimensionsFromText, fillBlankDimensions } from '@/lib/dimensions';
 
 export const maxDuration = 60;
 
-// Use Claude's web_search tool to find retail pricing across multiple sites
-async function researchRetailPrice(
+// Shared helper: pull web-search price median + dimensions + AF archive
+// median, pick the best retail with sanity gates, and backfill blank
+// dimensions on the lot. Used by both the stock-image-found and
+// no-image branches below so the pricing/dimension flow is identical.
+async function updateLotPriceAndDimensions(
+  supabase: any,
   anthropic: Anthropic,
-  brand: string,
-  model: string,
-  itemName: string
-): Promise<number> {
-  try {
-    // Timeout after 25 seconds to avoid blocking the whole request
-    const timeoutPromise = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), 25000)
-    );
+  lot: any,
+  currentRetail: number,
+  webstaurantPrice: number
+): Promise<void> {
+  const brand = (lot.brand || '').trim();
+  const model = (lot.model || '').trim();
+  if (!brand && !model) return;
 
-    const apiPromise = anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 512,
-      tools: [
-        {
-          type: 'web_search_20250305' as any,
-          name: 'web_search',
-          max_uses: 2,
-        },
-      ] as any,
-      messages: [
-        {
-          role: 'user',
-          content: `Search the web for the current retail price of: ${brand} ${model} ${itemName}
+  // Query AF archive FIRST (cheap SELECT). If it has 2+ price samples
+  // for this exact brand+model, skip the paid Anthropic web_search —
+  // the archive median is both more accurate and free.
+  const archiveStats = await getAFArchiveMedianRetail(supabase, brand, model);
+  const archiveIsSufficient = archiveStats != null && archiveStats.sampleCount >= 2;
+  const facts = archiveIsSufficient
+    ? { priceMedian: null, priceSamples: [], dimensions: { width: '', depth: '', height: '' }, sources: [] }
+    : await researchItemFacts(anthropic, brand, model, lot.item_name || '');
 
-Focus on US restaurant equipment retailers (WebstaurantStore, KaTom, Central Restaurant, CKitchen, etc).
+  const capAt = currentRetail > 0 ? currentRetail * 5 : Infinity;
+  let newRetail = currentRetail;
+  if (archiveStats && archiveStats.sampleCount >= 2 && archiveStats.median <= capAt) {
+    newRetail = archiveStats.median;
+  } else if (facts.priceMedian && facts.priceMedian > 0 && facts.priceMedian <= capAt) {
+    newRetail = facts.priceMedian;
+  } else if (webstaurantPrice > 0 && webstaurantPrice <= capAt) {
+    newRetail = webstaurantPrice;
+  }
 
-After searching, give me JUST the highest retail price you found as a single number with a dollar sign. For example: "$3,885" or "$1,234.50" — nothing else, no explanation.
+  const descDims = extractDimensionsFromText(lot.auction_description);
+  const dimsOut = fillBlankDimensions(lot, {
+    width: facts.dimensions.width || descDims.width,
+    depth: facts.dimensions.depth || descDims.depth,
+    height: facts.dimensions.height || descDims.height,
+  });
 
-If you can't find any real price, respond with just "$0".`,
-        },
-      ],
-    });
-
-    const response = await Promise.race([apiPromise, timeoutPromise]);
-    if (!response) {
-      console.log('Web search timeout for:', brand, model);
-      return 0;
-    }
-
-    // Extract all text from content blocks
-    let fullText = '';
-    for (const block of (response as any).content || []) {
-      if (block.type === 'text') {
-        fullText += ' ' + block.text;
+  const needsRetailUpdate = newRetail !== currentRetail && newRetail > 0;
+  if (needsRetailUpdate || dimsOut.changed) {
+    const updates: any = {};
+    if (needsRetailUpdate) {
+      updates.estimated_retail_new = newRetail;
+      updates.listed_price = computeListedPrice(newRetail);
+      if (lot.auction_description) {
+        updates.auction_description = syncRetailLine(lot.auction_description, updates.listed_price);
       }
     }
-
-    // Extract all dollar amounts from the text
-    const priceMatches = fullText.match(/\$[\d,]+(?:\.\d{2})?/g) || [];
-    let maxPrice = 0;
-    for (const match of priceMatches) {
-      const num = Number(match.replace(/[$,]/g, ''));
-      if (num > maxPrice && num < 100000) maxPrice = num;
+    if (dimsOut.changed) {
+      updates.width = dimsOut.width;
+      updates.depth = dimsOut.depth;
+      updates.height = dimsOut.height;
     }
-
-    return maxPrice;
-  } catch (err: any) {
-    console.error('Web search pricing failed:', err?.message || err);
-    return 0;
-  }
-}
-
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-interface StockCandidate {
-  imageUrl: string;
-  title: string;
-  price: number;
-}
-
-async function searchCandidates(query: string): Promise<StockCandidate[]> {
-  const candidates: StockCandidate[] = [];
-
-  try {
-    const url = `https://www.webstaurantstore.com/search/${encodeURIComponent(query)}.html`;
-    const res = await fetch(url, { headers: { 'User-Agent': UA } });
-    const html = await res.text();
-
-    // Parse embedded JSON from SearchPage hypernova script
-    const jsonMatch = html.match(/data-hypernova-key="SearchPage"[^>]*><!--([\s\S]*?)--><\/script>/);
-    if (jsonMatch) {
-      try {
-        const data = JSON.parse(jsonMatch[1]);
-        const products = data.products || [];
-        for (const product of products.slice(0, 8)) {
-          const price = Number(product.price?.price) || 0;
-          const title = product.description || product.alt || '';
-          const imagePath = product.primaryImagePath || '';
-          if (title && imagePath && price > 0) {
-            candidates.push({
-              title,
-              imageUrl: imagePath.startsWith('http')
-                ? imagePath
-                : `https://www.webstaurantstore.com${imagePath}`,
-              price,
-            });
-          }
-        }
-      } catch {}
-    }
-  } catch {}
-
-  return candidates;
-}
-
-async function findAndVerifyStockImage(
-  anthropic: Anthropic,
-  brand: string,
-  model: string,
-  itemName: string,
-  userPhotoUrls: string[]
-): Promise<{ imageUrl: string; price: number } | null> {
-  if (!brand && !model) return null;
-
-  const queries = [
-    `${brand} ${model}`.trim(),
-    model?.trim(),
-    `${brand} ${itemName}`.trim(),
-  ].filter((q) => q && q.length > 2);
-
-  let candidates: StockCandidate[] = [];
-  for (const q of queries) {
-    candidates = await searchCandidates(q);
-    if (candidates.length > 0) break;
-  }
-
-  if (candidates.length === 0) return null;
-
-  const modelNormalized = (model || '').replace(/[\s\-_]/g, '').toLowerCase();
-  const filtered = modelNormalized
-    ? candidates.filter((c) => c.title.replace(/[\s\-_]/g, '').toLowerCase().includes(modelNormalized))
-    : candidates;
-
-  const toVerify = filtered.length > 0 ? filtered : candidates;
-
-  if (filtered.length === 1) {
-    return { imageUrl: filtered[0].imageUrl, price: filtered[0].price };
-  }
-
-  // Download user's photos
-  const userImagesB64: string[] = [];
-  for (const photoUrl of userPhotoUrls.slice(0, 3)) {
-    try {
-      const res = await fetch(photoUrl);
-      if (res.ok) {
-        const buf = await res.arrayBuffer();
-        userImagesB64.push(Buffer.from(buf).toString('base64'));
-      }
-    } catch {}
-  }
-
-  if (userImagesB64.length === 0) {
-    return filtered.length > 0
-      ? { imageUrl: filtered[0].imageUrl, price: filtered[0].price }
-      : null;
-  }
-
-  // Download candidate images
-  const candidateData: { url: string; title: string; price: number; base64: string }[] = [];
-  for (const c of toVerify.slice(0, 4)) {
-    try {
-      const res = await fetch(c.imageUrl);
-      if (!res.ok) continue;
-      const buf = await res.arrayBuffer();
-      candidateData.push({
-        url: c.imageUrl,
-        title: c.title,
-        price: c.price,
-        base64: Buffer.from(buf).toString('base64'),
-      });
-    } catch {}
-  }
-
-  if (candidateData.length === 0) return null;
-
-  // Use Claude vision to pick the best match
-  try {
-    const content: any[] = [];
-    content.push({ type: 'text', text: `USER'S PHOTOS of the actual item (${itemName}):` });
-    for (const b64 of userImagesB64) {
-      content.push({
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: b64 },
-      });
-    }
-    content.push({
-      type: 'text',
-      text: `\nCANDIDATE STOCK IMAGES (numbered). Which one BEST matches the user's actual item? Respond with ONLY the number (1-${candidateData.length}) or "NONE" if none match:`,
-    });
-    for (let i = 0; i < candidateData.length; i++) {
-      content.push({ type: 'text', text: `\n${i + 1}. ${candidateData[i].title}` });
-      content.push({
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: candidateData[i].base64 },
-      });
-    }
-
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 20,
-      messages: [{ role: 'user', content }],
-    });
-
-    const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
-    const numMatch = text.match(/(\d+)/);
-    if (numMatch) {
-      const idx = parseInt(numMatch[1]) - 1;
-      if (idx >= 0 && idx < candidateData.length) {
-        return { imageUrl: candidateData[idx].url, price: candidateData[idx].price };
-      }
-    }
-    return null;
-  } catch {
-    return null;
+    await supabase.from('lots').update(updates).eq('id', lot.id);
   }
 }
 
@@ -332,7 +177,7 @@ async function processRefresh(request: NextRequest) {
       // Get public URLs for user's existing photos to use for verification
       const userPhotoUrls = (lot.lot_photos || [])
         .filter((p: any) => !p.storage_path.includes('/stock_'))
-        .slice(0, 3)
+        .slice(0, 5)
         .map((p: any) =>
           supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl
         );
@@ -342,7 +187,9 @@ async function processRefresh(request: NextRequest) {
         lot.brand || '',
         lot.model || '',
         lot.item_name || '',
-        userPhotoUrls
+        userPhotoUrls,
+        undefined,
+        supabase
       );
 
       if (found) {
@@ -390,31 +237,9 @@ async function processRefresh(request: NextRequest) {
             display_order: 0,
           });
 
-          // Find the highest retail price from multiple sources
           const currentRetail = Number(lot.estimated_retail_new) || 0;
           const webstaurantPrice = found.price || 0;
-
-          // Web search for prices across multiple retailers
-          const webSearchPrice = await researchRetailPrice(
-            anthropic,
-            lot.brand || '',
-            lot.model || '',
-            lot.item_name || ''
-          );
-
-          const maxPrice = Math.max(currentRetail, webstaurantPrice, webSearchPrice);
-          if (maxPrice > currentRetail) {
-            const newRetail = Math.round(maxPrice);
-            const newListed = computeListedPrice(newRetail);
-            const updates: any = {
-              estimated_retail_new: newRetail,
-              listed_price: newListed,
-            };
-            if (lot.auction_description) {
-              updates.auction_description = syncRetailLine(lot.auction_description, newListed);
-            }
-            await supabase.from('lots').update(updates).eq('id', lot.id);
-          }
+          await updateLotPriceAndDimensions(supabase, anthropic, lot, currentRetail, webstaurantPrice);
 
           updated++;
           results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: true });
@@ -422,26 +247,8 @@ async function processRefresh(request: NextRequest) {
           results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
         }
       } else {
-        // No stock image found, but still try web search for pricing
         const currentRetail = Number(lot.estimated_retail_new) || 0;
-        const webSearchPrice = await researchRetailPrice(
-          anthropic,
-          lot.brand || '',
-          lot.model || '',
-          lot.item_name || ''
-        );
-        if (webSearchPrice > currentRetail) {
-          const newRetail = Math.round(webSearchPrice);
-          const newListed = computeListedPrice(newRetail);
-          const updates: any = {
-            estimated_retail_new: newRetail,
-            listed_price: newListed,
-          };
-          if (lot.auction_description) {
-            updates.auction_description = syncRetailLine(lot.auction_description, newListed);
-          }
-          await supabase.from('lots').update(updates).eq('id', lot.id);
-        }
+        await updateLotPriceAndDimensions(supabase, anthropic, lot, currentRetail, 0);
         results.push({ lot_number: lot.lot_number, item_name: lot.item_name, found: false });
       }
     } catch (err: any) {

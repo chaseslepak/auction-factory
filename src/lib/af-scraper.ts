@@ -23,6 +23,14 @@ export interface ScrapedAFAuction {
   af_url: string;
   af_name: string;
   items: ScrapedAFItem[];
+  // Which splitter was used for the first page. The audit route shows
+  // 'fallback' as a scraper_warning so Chase knows primary markup has
+  // changed and the parser is running in a degraded mode.
+  parse_source?: 'primary' | 'fallback' | 'empty';
+  // Blocks we failed to extract an af_item_id from (either side of
+  // pagination). Used to surface a scraper_warning when the error
+  // rate is high.
+  parse_errors?: number;
 }
 
 async function fetchPage(url: string): Promise<string> {
@@ -53,24 +61,38 @@ function parseAuctionName(html: string): string {
 }
 
 // Parse all items from the auction listing page.
-// NOTE: falling back to the loop index for lot_number is a bug — it makes
-// page 2's items collide with page 1's (the classic "+200 offset" the
-// audit page hit). Instead: leave lot_number null when we can't parse it
-// and let the caller decide. Also make the regex tolerant of whitespace,
-// nbsp, and comma-thousands separators seen on some AF pages.
-function parseAuctionItems(html: string): ScrapedAFItem[] {
-  const items: ScrapedAFItem[] = [];
+// Returns items + parse diagnostics so the caller can detect a silent
+// regression (0 items parsed from a real auction page).
+export interface ParseAuctionItemsResult {
+  items: ScrapedAFItem[];
+  // Which splitter yielded the items. 'primary' = the <div
+  // class="itemNumber"> wrapper AF uses today. 'fallback' = an
+  // item_detail.php?item= link-based parse used when primary returns 0.
+  parse_source: 'primary' | 'fallback' | 'empty';
+  // Blocks the primary splitter saw where we couldn't extract an
+  // af_item_id. Used by the audit route to show a scraper_warning if
+  // more than N% of blocks parse_errored.
+  parse_errors: number;
+}
 
-  // Split the HTML by "Item Number:" markers to isolate each item block
-  const itemBlocks = html.split(/Item\s*Number:\s*/i);
+function parseAuctionItemsWithDiag(html: string): ParseAuctionItemsResult {
+  const primaryItems: ScrapedAFItem[] = [];
+
+  // Primary splitter: structural <div class="itemNumber"> wrapper. AF
+  // used to emit visible "Item Number: N" text (old grep); the new
+  // markup is `<div class="itemNumber"><span>Lot </span>N</div>`.
+  // Archive pages still include "Item Number: " inside a hidden
+  // desktop-span, but inside the same wrapper, so this works for both.
+  const itemBlocks = html.split(/<div\s+class="itemNumber"[^>]*>/i);
+  let primaryParseErrors = 0;
 
   for (let i = 1; i < itemBlocks.length; i++) {
     const block = itemBlocks[i];
 
-    // Strip HTML tags for lot-number extraction only, then grab the first
-    // run of digits (optionally with thousands commas / non-breaking space
-    // padding).
-    const lotHeader = block.slice(0, 200).replace(/<[^>]*>/g, '');
+    // The lot number is the first run of digits inside this block's
+    // header. Strip HTML (hidden spans like "Item Number: " on archive
+    // pages, visible "Lot " on live pages) and grab the first int.
+    const lotHeader = block.slice(0, 500).replace(/<[^>]*>/g, '');
     const lotMatch = lotHeader.match(/[\s ]*([\d,]+)/);
     let lot_number: number | null = null;
     if (lotMatch) {
@@ -143,9 +165,14 @@ function parseAuctionItems(html: string): ScrapedAFItem[] {
     const current_bid = bidMatch ? `$${bidMatch[1]}` : '';
 
     // Skip empty items
-    if (!title && !af_item_id) continue;
+    if (!title && !af_item_id) {
+      // A block that yielded neither title nor id but IS inside the
+      // itemNumber-split result is a parse miss we want to count.
+      if (block.length > 50) primaryParseErrors++;
+      continue;
+    }
 
-    items.push({
+    primaryItems.push({
       lot_number,
       title: title || `Item ${lot_number}`,
       af_item_url,
@@ -160,6 +187,63 @@ function parseAuctionItems(html: string): ScrapedAFItem[] {
     });
   }
 
+  // Fallback splitter — if the primary returned nothing BUT the page is
+  // clearly an auction detail page (contains item_detail.php?item= refs),
+  // parse by linking from item_detail.php?item= anchors. This catches
+  // the "AF changed the itemNumber wrapper class" regression we lived
+  // through on `afad567`.
+  if (primaryItems.length === 0) {
+    const fallbackItems = parseByItemDetailLinks(html);
+    if (fallbackItems.length > 0) {
+      return {
+        items: fallbackItems,
+        parse_source: 'fallback',
+        parse_errors: primaryParseErrors,
+      };
+    }
+  }
+
+  return {
+    items: primaryItems,
+    parse_source: primaryItems.length > 0 ? 'primary' : 'empty',
+    parse_errors: primaryParseErrors,
+  };
+}
+
+// Thin back-compat wrapper for callers that just want items (nothing
+// in the codebase today uses the diag fields except scrapeAuction).
+function parseAuctionItems(html: string): ScrapedAFItem[] {
+  return parseAuctionItemsWithDiag(html).items;
+}
+
+// Fallback parser: build items by walking every item_detail.php?item=
+// anchor on the page. Weaker than the primary parser (lot_number is
+// usually not inferable this way) but at least surfaces the fact that
+// AF items EXIST so the audit doesn't declare them all missing.
+function parseByItemDetailLinks(html: string): ScrapedAFItem[] {
+  const items: ScrapedAFItem[] = [];
+  const seen = new Set<string>();
+  const anchorRe = /<a[^>]+href=["'][^"']*item_detail\.php\?item=(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = anchorRe.exec(html)) !== null) {
+    const af_item_id = m[1];
+    if (seen.has(af_item_id)) continue;
+    seen.add(af_item_id);
+    const title = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    items.push({
+      lot_number: null,
+      title: title || `Item ${af_item_id}`,
+      af_item_url: `${AF_BASE}/item_detail.php?item=${af_item_id}`,
+      af_item_id,
+      description: '',
+      photos: [],
+      condition: '',
+      current_bid: '',
+      brand: '',
+      model: '',
+      dimensions: '',
+    });
+  }
   return items;
 }
 
@@ -272,38 +356,64 @@ export async function scrapeAuction(
     );
   }
 
-  // Add itemsPerPage=200 to get all items at once
+  // Fetch the first page. The server ignores `itemsPerPage` entirely —
+  // historically we tried `itemsPerPage=200` and the pagination gate
+  // below expected `items.length >= 200`, so pagination never fired and
+  // audit silently missed every lot past page 1. Instead: always
+  // paginate with `pageNum_items` until a page returns zero NEW lots.
   const fetchUrl = new URL(url);
-  fetchUrl.searchParams.set('itemsPerPage', '200');
-
-  // Fetch the auction listing page
   const html = await fetchPage(fetchUrl.toString());
   const af_name = parseAuctionName(html);
-  let items = parseAuctionItems(html);
+  const firstDiag = parseAuctionItemsWithDiag(html);
 
-  // Check for additional pages if items count suggests pagination
-  const totalMatch = html.match(/totalRows_items=(\d+)/);
-  const totalRows = totalMatch ? parseInt(totalMatch[1]) : items.length;
+  // Sanity assertion: if the first page returned 0 items BUT the page
+  // is clearly an auction detail page (contains `item_detail.php?item=`
+  // link references), the markup changed and the audit must NOT trust
+  // the result as "AF really has 0 items." Throw instead so the audit
+  // route surfaces a 502 and Chase sees a scraper-regression error
+  // rather than a silent "wipe everything" sync.
+  if (firstDiag.items.length === 0 && /item_detail\.php\?item=\d+/.test(html)) {
+    throw new Error(
+      'AF_SCRAPER_MARKUP_CHANGED: parsed 0 items but page contains item_detail.php refs. ' +
+      'The auction has items but the scraper could not extract them — likely AF changed the ' +
+      '<div class="itemNumber"> wrapper markup. Report with the first-page HTML.'
+    );
+  }
+  let items = firstDiag.items;
+  // Track parse source + errors so the audit route can surface
+  // scraper_warning in its response.
+  const parseSource = firstDiag.parse_source;
+  let totalParseErrors = firstDiag.parse_errors;
 
-  if (totalRows > 200 && items.length >= 200) {
-    // Fetch additional pages
-    let pageNum = 1;
-    while (items.length < totalRows) {
-      const pageUrl = new URL(url);
-      pageUrl.searchParams.set('itemsPerPage', '200');
-      pageUrl.searchParams.set('pageNum_items', String(pageNum));
-      pageUrl.searchParams.set('totalRows_items', String(totalRows));
-
-      const pageHtml = await fetchPage(pageUrl.toString());
-      const pageItems = parseAuctionItems(pageHtml);
-      if (pageItems.length === 0) break;
-
-      items = items.concat(pageItems);
-      pageNum++;
-
-      // Safety limit
-      if (pageNum > 10) break;
+  // Walk subsequent pages until the server returns nothing new or we
+  // hit the safety cap (50 pages × ~18 lots = 900 lots, covers Chase's
+  // largest batches with headroom). Dedupe by af_item_id — if the
+  // server loops back to page 0 content when asked past the end, the
+  // dedupe stops us immediately.
+  const seenItemIds = new Set<string>(
+    items.map((it) => it.af_item_id).filter(Boolean)
+  );
+  const MAX_PAGES = 50;
+  for (let pageNum = 1; pageNum < MAX_PAGES; pageNum++) {
+    const pageUrl = new URL(url);
+    pageUrl.searchParams.set('pageNum_items', String(pageNum));
+    let pageHtml: string;
+    try {
+      pageHtml = await fetchPage(pageUrl.toString());
+    } catch {
+      break;
     }
+    const pageDiag = parseAuctionItemsWithDiag(pageHtml);
+    totalParseErrors += pageDiag.parse_errors;
+    if (pageDiag.items.length === 0) break;
+    let addedThisPage = 0;
+    for (const it of pageDiag.items) {
+      if (it.af_item_id && seenItemIds.has(it.af_item_id)) continue;
+      if (it.af_item_id) seenItemIds.add(it.af_item_id);
+      items.push(it);
+      addedThisPage++;
+    }
+    if (addedThisPage === 0) break;
   }
 
   // Optionally fetch individual item details for full descriptions + all photos
@@ -340,6 +450,8 @@ export async function scrapeAuction(
     af_url: auctionUrl,
     af_name,
     items,
+    parse_source: parseSource,
+    parse_errors: totalParseErrors,
   };
 }
 

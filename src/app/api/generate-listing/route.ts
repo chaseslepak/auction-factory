@@ -3,226 +3,12 @@ import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { logApiUsage } from '@/lib/api-usage';
 import { computeListedPrice, syncRetailLine, formatLotTitle } from '@/lib/listing-price';
-
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-interface StockCandidate {
-  imageUrl: string;
-  title: string;
-  price: number;
-  source: 'webstaurant';
-}
-
-// Extract WebstaurantStore product data from their embedded JSON
-async function searchStockImages(
-  brand: string,
-  model: string
-): Promise<StockCandidate[]> {
-  const candidates: StockCandidate[] = [];
-  const query = `${brand} ${model}`.trim();
-
-  try {
-    const url = `https://www.webstaurantstore.com/search/${encodeURIComponent(query)}.html`;
-    const res = await fetch(url, { headers: { 'User-Agent': UA } });
-    const html = await res.text();
-
-    // WebstaurantStore embeds search results as JSON in a script tag
-    const jsonMatch = html.match(/data-hypernova-key="SearchPage"[^>]*><!--([\s\S]*?)--><\/script>/);
-    if (jsonMatch) {
-      try {
-        const data = JSON.parse(jsonMatch[1]);
-        const products = data.products || [];
-        for (const product of products.slice(0, 8)) {
-          const price = Number(product.price?.price) || 0;
-          const title = product.description || product.alt || '';
-          const imagePath = product.primaryImagePath || '';
-          if (title && imagePath && price > 0) {
-            candidates.push({
-              title,
-              imageUrl: imagePath.startsWith('http')
-                ? imagePath
-                : `https://www.webstaurantstore.com${imagePath}`,
-              price,
-              source: 'webstaurant',
-            });
-          }
-        }
-      } catch {}
-    }
-
-    // Fallback: regex extraction if JSON parsing fails
-    if (candidates.length === 0) {
-      const cardRegex = /<img[^>]+alt="([^"]+)"[^>]+src="(\/images\/products\/[^"]+\.(jpg|png|webp))"/gi;
-      let match;
-      while ((match = cardRegex.exec(html)) !== null && candidates.length < 6) {
-        candidates.push({
-          title: match[1],
-          imageUrl: `https://www.webstaurantstore.com${match[2]}`,
-          price: 0,
-          source: 'webstaurant',
-        });
-      }
-    }
-  } catch {}
-
-  return candidates;
-}
-
-// Use Claude vision to verify which candidate matches the user's photos
-async function findAndVerifyStockImage(
-  anthropic: Anthropic,
-  brand: string,
-  model: string,
-  itemName: string,
-  userImages: string[]
-): Promise<{ imageUrl: string; price: number } | null> {
-  // Step 1: Search for candidates
-  const candidates = await searchStockImages(brand, model);
-  if (candidates.length === 0) return null;
-
-  // Step 2: Pre-filter by model number in title (strip spaces/dashes)
-  const modelNormalized = model.replace(/[\s\-_]/g, '').toLowerCase();
-  const filtered = candidates.filter((c) => {
-    const titleNormalized = c.title.replace(/[\s\-_]/g, '').toLowerCase();
-    return titleNormalized.includes(modelNormalized);
-  });
-
-  const toVerify = filtered.length > 0 ? filtered : candidates;
-
-  // Step 3: If only 1 exact match, use it directly
-  if (filtered.length === 1) {
-    return { imageUrl: filtered[0].imageUrl, price: filtered[0].price };
-  }
-
-  if (toVerify.length === 0) return null;
-
-  try {
-    // Download candidate images
-    const candidateData: { url: string; title: string; price: number; base64: string }[] = [];
-    for (const c of toVerify.slice(0, 4)) {
-      try {
-        const res = await fetch(c.imageUrl);
-        if (!res.ok) continue;
-        const buf = await res.arrayBuffer();
-        const base64 = Buffer.from(buf).toString('base64');
-        candidateData.push({ url: c.imageUrl, title: c.title, price: c.price, base64 });
-      } catch {}
-    }
-
-    if (candidateData.length === 0) return null;
-    if (candidateData.length === 1) {
-      return { imageUrl: candidateData[0].url, price: candidateData[0].price };
-    }
-
-    // Use Claude vision to pick the best match
-    const content: any[] = [];
-    content.push({ type: 'text', text: `USER'S PHOTOS of the actual item (${itemName}):` });
-    for (const img of userImages.slice(0, 3)) {
-      content.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
-          data: img.replace(/^data:image\/\w+;base64,/, ''),
-        },
-      });
-    }
-
-    content.push({
-      type: 'text',
-      text: `\nCANDIDATE STOCK IMAGES (numbered). Which one BEST matches the user's actual item? Respond with ONLY the number (1-${candidateData.length}) or "NONE" if none match:`,
-    });
-    for (let i = 0; i < candidateData.length; i++) {
-      content.push({ type: 'text', text: `\n${i + 1}. ${candidateData[i].title}` });
-      content.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
-          data: candidateData[i].base64,
-        },
-      });
-    }
-
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 20,
-      messages: [{ role: 'user', content }],
-    });
-
-    const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
-    const numMatch = text.match(/(\d+)/);
-    if (numMatch) {
-      const idx = parseInt(numMatch[1]) - 1;
-      if (idx >= 0 && idx < candidateData.length) {
-        return { imageUrl: candidateData[idx].url, price: candidateData[idx].price };
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// Use Claude's native web_search tool to research retail pricing across multiple sites
-async function researchRetailPrice(
-  anthropic: Anthropic,
-  brand: string,
-  model: string,
-  itemName: string
-): Promise<number> {
-  try {
-    const timeoutPromise = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), 25000)
-    );
-
-    const apiPromise = anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 512,
-      tools: [
-        {
-          type: 'web_search_20250305' as any,
-          name: 'web_search',
-          max_uses: 2,
-        },
-      ] as any,
-      messages: [
-        {
-          role: 'user',
-          content: `Search the web for the current retail price of: ${brand} ${model} ${itemName}
-
-Focus on US restaurant equipment retailers (WebstaurantStore, KaTom, Central Restaurant, CKitchen, etc).
-
-After searching, give me JUST the highest retail price you found as a single number with a dollar sign. For example: "$3,885" or "$1,234.50" — nothing else, no explanation.
-
-If you can't find any real price, respond with just "$0".`,
-        },
-      ],
-    });
-
-    const response = await Promise.race([apiPromise, timeoutPromise]);
-    if (!response) return 0;
-
-    let fullText = '';
-    for (const block of (response as any).content || []) {
-      if (block.type === 'text') {
-        fullText += ' ' + block.text;
-      }
-    }
-
-    const priceMatches = fullText.match(/\$[\d,]+(?:\.\d{2})?/g) || [];
-    let maxPrice = 0;
-    for (const match of priceMatches) {
-      const num = Number(match.replace(/[$,]/g, ''));
-      if (num > maxPrice && num < 100000) maxPrice = num;
-    }
-
-    return maxPrice;
-  } catch (err: any) {
-    console.error('Web search pricing failed:', err?.message || err);
-    return 0;
-  }
-}
+import {
+  findAndVerifyStockImageFromB64,
+  researchItemFacts,
+  getAFArchiveMedianRetail,
+} from '@/lib/stock-image-processor';
+import { extractDimensionsFromText, fillBlankDimensions } from '@/lib/dimensions';
 
 const SYSTEM_PROMPT = `You are a restaurant equipment identification expert for Auction Factory Ohio in Cleveland, OH.
 
@@ -466,12 +252,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (!reusedSibling && hasBrand && hasModel && isNewInBox) {
-      const found = await findAndVerifyStockImage(
+      const found = await findAndVerifyStockImageFromB64(
         anthropic,
         listing.brand,
         listing.model,
         listing.item_name,
-        images
+        images,
+        undefined,
+        supabase
       );
       if (found) {
         listing.stock_image_url = found.imageUrl;
@@ -479,22 +267,67 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Use Claude web search to find prices across the internet (5+ sites).
-    // Skip when we reused a sibling's known-good retail — the whole point
-    // of the shortcut is to avoid this call for duplicate items.
-    let webSearchMaxPrice = 0;
-    if (!reusedSibling && hasBrand && hasModel) {
+    // Research price + dimensions via Anthropic web_search. We ask for
+    // the MEDIAN across 3-5 reputable retailers rather than the max —
+    // the old max-biased strategy produced wild outliers (a one-off
+    // $12k Amazon listing when real retail was $2.5k) and the lotter
+    // trusted them. Chase: "retail prices are off dramatically."
+    //
+    // Query order (API-efficiency pass):
+    //   1. Sibling-dedupe short-circuits everything else.
+    //   2. AF archive median (cheap Supabase SELECT, zero API cost).
+    //   3. Only hit Anthropic web_search if the archive doesn't have
+    //      2+ samples. The archive median is MORE accurate than a web
+    //      search median (it's actual sold-item history), so when it
+    //      exists we skip the paid call entirely. On a 300-lot auction
+    //      with 50% archive coverage this saves ~150 Anthropic
+    //      web_search calls per push.
+    let afArchiveMedian: { median: number; sampleCount: number } | null = null;
+    if (!reusedSibling && hasBrand && hasModel && auction_id) {
       try {
-        const maxFound = await researchRetailPrice(anthropic, listing.brand, listing.model, listing.item_name);
-        if (maxFound > 0) webSearchMaxPrice = maxFound;
+        afArchiveMedian = await getAFArchiveMedianRetail(
+          supabase,
+          listing.brand,
+          listing.model
+        );
+      } catch (e) {
+        console.error('AF archive median lookup failed:', e);
+      }
+    }
+
+    let webMedianPrice: number | null = null;
+    let factsDims = { width: '', depth: '', height: '' };
+    const archiveIsSufficient = afArchiveMedian != null && afArchiveMedian.sampleCount >= 2;
+    if (!reusedSibling && hasBrand && hasModel && !archiveIsSufficient) {
+      try {
+        const facts = await researchItemFacts(
+          anthropic,
+          listing.brand,
+          listing.model,
+          listing.item_name
+        );
+        webMedianPrice = facts.priceMedian;
+        factsDims = facts.dimensions;
       } catch (e) {
         console.error('Price research error:', e);
       }
     }
 
-    // Take the highest of: AI estimate, WebstaurantStore price, web search max
     const aiEstimate = Number(listing.estimated_retail_new) || 0;
-    listing.estimated_retail_new = Math.max(aiEstimate, webstaurantPrice, webSearchMaxPrice);
+
+    // Priority: AF archive median (2+ samples) > web median > WebstaurantStore
+    // single hit > AI estimate. Each candidate is sanity-capped at 5x the AI
+    // estimate so an outlier can never drive the final number.
+    const capAt = aiEstimate > 0 ? aiEstimate * 5 : Infinity;
+    let finalRetail = aiEstimate;
+    if (afArchiveMedian && afArchiveMedian.sampleCount >= 2 && afArchiveMedian.median <= capAt) {
+      finalRetail = afArchiveMedian.median;
+    } else if (webMedianPrice && webMedianPrice > 0 && webMedianPrice <= capAt) {
+      finalRetail = webMedianPrice;
+    } else if (webstaurantPrice > 0 && webstaurantPrice <= capAt) {
+      finalRetail = webstaurantPrice;
+    }
+    listing.estimated_retail_new = finalRetail;
 
     // Compute listed price (retail + markup). Lives in @/lib/listing-price.
     listing.listed_price = computeListedPrice(listing.estimated_retail_new);
@@ -524,6 +357,21 @@ export async function POST(request: NextRequest) {
         listing.listed_price
       );
     }
+
+    // Backfill width/depth/height from (a) the web_search spec-sheet
+    // lookup, falling back to (b) parsing dimensions out of the
+    // auction_description text the AI generated. Only fills blanks —
+    // never overwrites values the AI's vision pass of the user's actual
+    // photos extracted.
+    const descDims = extractDimensionsFromText(listing.auction_description);
+    const dimsOut = fillBlankDimensions(listing as any, {
+      width: factsDims.width || descDims.width,
+      depth: factsDims.depth || descDims.depth,
+      height: factsDims.height || descDims.height,
+    });
+    listing.width = dimsOut.width;
+    listing.depth = dimsOut.depth;
+    listing.height = dimsOut.height;
 
     // Ensure stock_image_url exists in response
     if (!listing.stock_image_url) {

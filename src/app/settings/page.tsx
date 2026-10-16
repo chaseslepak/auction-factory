@@ -94,7 +94,8 @@ export default function SettingsPage() {
                 </p>
               )}
               <p className="text-xs text-gray-400 mt-2">
-                To refresh the session, paste a new cookie below.
+                To refresh the session, paste a new cookie below — or
+                click Auto-renew if AF_LOGIN_* env vars are set.
               </p>
             </div>
           ) : (
@@ -102,6 +103,39 @@ export default function SettingsPage() {
               <div className="w-3 h-3 rounded-full bg-red-400" />
               <span className="text-red-400 font-bold text-sm">Not Connected</span>
             </div>
+          )}
+
+          <button
+            onClick={async () => {
+              setLoading(true);
+              setMessage(null);
+              try {
+                const r = await fetch('/api/af-session/renew', { method: 'POST' });
+                const b = await r.json();
+                if (r.ok && b.renewed) {
+                  setMessage({ type: 'success', text: 'Session renewed via env credentials.' });
+                  checkSession();
+                } else {
+                  setMessage({ type: 'error', text: b.error || `HTTP ${r.status}` });
+                }
+              } catch (err: any) {
+                setMessage({ type: 'error', text: err?.message || 'Renew failed' });
+              }
+              setLoading(false);
+            }}
+            disabled={loading || checking}
+            className={`mt-3 w-full font-bold rounded py-2 disabled:opacity-40 ${
+              connected
+                ? 'text-xs text-brand-blue border border-brand-blue/30'
+                : 'text-sm text-white bg-brand-blue'
+            }`}
+          >
+            {loading ? 'Working…' : connected ? 'Auto-renew session' : 'Auto-renew session (log in via env credentials)'}
+          </button>
+          {message && (
+            <p className={`text-xs mt-2 ${message.type === 'success' ? 'text-brand-green' : 'text-red-500'}`}>
+              {message.text}
+            </p>
           )}
         </div>
 

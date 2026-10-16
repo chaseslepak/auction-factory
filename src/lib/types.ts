@@ -54,6 +54,9 @@ export interface LotPhoto {
   lot_id: string;
   storage_path: string;
   display_order: number;
+  source_url?: string | null;
+  source_type?: string | null;
+  vision_confidence?: number | null;
 }
 
 export interface LotWithPhotos extends Lot {
