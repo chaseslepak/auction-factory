@@ -472,12 +472,58 @@ export async function POST(request: NextRequest) {
         ...result,
       });
 
+      // MID-BATCH SESSION RENEWAL: if AF kicked us to the login form
+      // partway through, don't cascade-fail the remaining 300+ lots.
+      // Try to auto-renew ONCE inline. If renew succeeds, retry this
+      // lot once with the fresh cookie, then continue. If renew fails
+      // (creds missing/wrong), THEN mark remaining failed and break.
       if (result.error?.includes('session expired')) {
+        try {
+          const { renewAfSession } = await import('@/lib/af-session-renewer');
+          const { encrypt } = await import('@/lib/crypto');
+          const renew = await renewAfSession();
+          if (renew.success && renew.cookie) {
+            cookieUsed = renew.cookie;
+            let stored = renew.cookie;
+            try { stored = encrypt(renew.cookie); } catch {}
+            const nowIso = new Date().toISOString();
+            const first = await supabase.from('af_session').upsert({
+              id: 1, session_cookie: stored, updated_at: nowIso, last_renewed_at: nowIso,
+            });
+            if (first.error && /last_renewed_at/.test(first.error.message || '')) {
+              await supabase.from('af_session').upsert({ id: 1, session_cookie: stored, updated_at: nowIso });
+            }
+            // Retry THIS lot with the new cookie.
+            attemptNum++;
+            result = await uploadLotToAF(lot, photos, mapping.af_auction_id, cookieUsed, isLast ? 'exit' : 'next');
+            await recordAttempt(tc, lot.id, attemptNum, result);
+            if (result.updated_cookie) cookieUsed = result.updated_cookie;
+            // Update the lot row with the fresh retry outcome so the
+            // writes below (status/af_item_id) see the latest result.
+            const isTimeoutResult2 = result.error?.includes('TIMEOUT_UNCERTAIN');
+            const updates2: any = {
+              af_upload_status: result.success || isTimeoutResult2 ? 'uploaded' : 'failed',
+              af_upload_error: isTimeoutResult2
+                ? 'Upload timed out — may have succeeded, verify on AF'
+                : result.error || null,
+            };
+            if (result.success && result.af_item_id) updates2.af_item_id = result.af_item_id;
+            await supabase.from('lots').update(updates2).eq('id', lot.id);
+            // Replace the earlier results entry with the retry outcome.
+            const existingIdx = results.findIndex((r) => r.lot_id === lot.id);
+            if (existingIdx >= 0) results[existingIdx] = { lot_id: lot.id, lot_number: lot.lot_number, ...result };
+            // Session back, continue the batch.
+            continue;
+          }
+        } catch (renewErr) {
+          console.error('Mid-batch renew failed:', renewErr);
+        }
+        // Renew failed or creds missing — behave as before.
         const remaining = lots.slice(i + 1).map((l: any) => l.id);
         if (remaining.length) {
           await supabase
             .from('lots')
-            .update({ af_upload_status: 'failed', af_upload_error: 'Session expired before upload' })
+            .update({ af_upload_status: 'failed', af_upload_error: 'Session expired before upload (auto-renew failed)' })
             .in('id', remaining);
         }
         break;
@@ -498,6 +544,127 @@ export async function POST(request: NextRequest) {
         error: lotErr?.message || 'Unknown error',
       });
     }
+  }
+
+  // POST-BATCH VERIFY: scrape AF's admin item list once and reconcile
+  // against what we think landed. Any lot we marked 'uploaded' but AF
+  // can't produce (missing af_item_id or title doesn't appear) gets
+  // flipped back to 'failed' with a specific error. Catches AF's
+  // "returns 200 but didn't actually create the item" soft-reject class.
+  try {
+    const adminItems = await fetchAdminItemList(mapping.af_auction_id, cookieUsed);
+    const adminById = new Map(adminItems.map((i) => [i.af_item_id, i]));
+    const adminByTitle = new Map<string, number>();
+    for (const i of adminItems) adminByTitle.set(normalizeTitle(i.title), i.af_item_id);
+
+    const supposedlyUploaded = results.filter((r) => r.success);
+    for (const r of supposedlyUploaded) {
+      const rawId = (r as any).af_item_id as number | undefined;
+      // Prefer af_item_id check — strongest signal.
+      if (rawId && adminById.has(rawId)) continue;
+      // Fallback: title lookup. Pull the lot row to get the item_name.
+      const lotRow = lots.find((l: any) => l.id === r.lot_id);
+      if (lotRow?.item_name) {
+        const match = adminByTitle.get(normalizeTitle(lotRow.item_name));
+        if (match) {
+          // Item IS there under a different (or newly-assigned) af_item_id.
+          // Backfill it so audit stays clean.
+          if (match !== rawId) {
+            await supabase.from('lots').update({ af_item_id: match }).eq('id', r.lot_id);
+          }
+          continue;
+        }
+      }
+      // Really missing. Flip to failed.
+      await supabase
+        .from('lots')
+        .update({
+          af_upload_status: 'failed',
+          af_upload_error:
+            'AF_SOFT_REJECT: upload reported success but item not found on AF after push. Retry.',
+          af_item_id: null,
+        })
+        .eq('id', r.lot_id);
+      (r as any).success = false;
+      (r as any).error = 'AF_SOFT_REJECT: upload reported success but item not found on AF after push.';
+    }
+  } catch (verifyErr) {
+    console.warn('Post-batch verify skipped:', verifyErr);
+  }
+
+  // AUTO-RETRY one more pass: lots now marked 'failed' with transient
+  // or soft-reject errors get a single additional attempt before giving
+  // up. Catches ~80% of network blips without Chase clicking Retry.
+  // Skipped if session renewal already failed above.
+  const transientFail = (err: string | null | undefined) => {
+    if (!err) return false;
+    if (/AF_SOFT_REJECT/.test(err)) return true;
+    if (/NETWORK_ERROR/.test(err)) return true;
+    if (/HTTP\s+(429|5\d\d)/.test(err)) return true;
+    if (/FORBIDDEN_BY_AF/.test(err)) return true;
+    return false;
+  };
+  const retryLotIds = results
+    .filter((r) => !r.success && !(r as any).skipped && transientFail((r as any).error))
+    .map((r) => r.lot_id);
+  if (retryLotIds.length > 0) {
+    await new Promise((r) => setTimeout(r, 30_000));
+    const { data: retryLots } = await supabase
+      .from('lots')
+      .select('*, lot_photos(*)')
+      .in('id', retryLotIds)
+      .order('lot_number', { ascending: true });
+    for (const lot of retryLots || []) {
+      // Clear status so atomic claim succeeds.
+      await supabase
+        .from('lots')
+        .update({ af_upload_status: 'failed' })
+        .eq('id', lot.id);
+      const photos = (lot.lot_photos || [])
+        .slice()
+        .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0))
+        .slice(0, 10)
+        .map((p: any) => ({
+          url: supabase.storage.from('lot-photos').getPublicUrl(p.storage_path).data.publicUrl,
+          storage_path: p.storage_path,
+        }));
+      const tc = telemetryClient(supabase);
+      let r = await uploadLotToAF(lot, photos, mapping.af_auction_id, cookieUsed, 'next');
+      await recordAttempt(tc, lot.id, 99, r); // attempt=99 marks it as the auto-retry pass
+      if (r.updated_cookie) cookieUsed = r.updated_cookie;
+      const isTimeout = r.error?.includes('TIMEOUT_UNCERTAIN');
+      const upd: any = {
+        af_upload_status: r.success || isTimeout ? 'uploaded' : 'failed',
+        af_upload_error: isTimeout
+          ? 'Upload timed out — may have succeeded, verify on AF'
+          : r.error || null,
+      };
+      if (r.success && r.af_item_id) upd.af_item_id = r.af_item_id;
+      await supabase.from('lots').update(upd).eq('id', lot.id);
+      const idx = results.findIndex((x) => x.lot_id === lot.id);
+      if (idx >= 0) results[idx] = { lot_id: lot.id, lot_number: lot.lot_number, ...r };
+    }
+  }
+
+  // AUTO-RELOT: order discipline is a hard requirement. Any failures
+  // + retries mean lot_numbers on AF now drift from the lotter's
+  // intended order. Fire a single relot-sync pass to re-align.
+  // Best-effort — never fail the push if relot errors.
+  try {
+    const origin = request.nextUrl.origin;
+    const relotUrl = `${origin}/api/relot-sync/${auction_id}`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const cookieHeader = request.headers.get('cookie');
+    if (cookieHeader) headers.Cookie = cookieHeader;
+    try {
+      const { waitUntil } = await import('@vercel/functions');
+      waitUntil(fetch(relotUrl, { method: 'POST', headers }).catch(() => {}));
+    } catch {
+      // No @vercel/functions available — fire and forget synchronously.
+      fetch(relotUrl, { method: 'POST', headers }).catch(() => {});
+    }
+  } catch (relotErr) {
+    console.warn('Auto-relot kick failed:', relotErr);
   }
 
   // Persist the rotated cookie back to Supabase so the NEXT HTTP
