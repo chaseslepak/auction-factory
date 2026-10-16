@@ -78,12 +78,14 @@ export async function POST(request: NextRequest) {
   let totalMatched = 0;
 
   for (const a of auctions || []) {
-    // Pull the lotter-side rows that still need af_item_id.
+    // Pull the lotter-side rows that still need af_item_id. The push
+    // state lives on af_upload_status (not status) — only 'uploaded'
+    // lots actually have an AF counterpart to match.
     const { data: lots } = await supabase
       .from('lots')
-      .select('id, item_name, lot_number, af_item_id, status')
+      .select('id, item_name, lot_number, af_item_id, af_upload_status')
       .eq('auction_id', a.id)
-      .in('status', ['uploaded', 'queued'])
+      .eq('af_upload_status', 'uploaded')
       .is('af_item_id', null);
     if (!lots || lots.length === 0) {
       perAuction.push({
