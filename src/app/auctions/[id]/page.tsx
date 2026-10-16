@@ -511,7 +511,53 @@ export default function AuctionDetailPage() {
         }
       }
 
-      const realFailed = totalFailed - totalSkipped;
+      let realFailed = totalFailed - totalSkipped;
+
+      // Automatic second pass. If the first batch left any lots in
+      // 'failed' state, give them one more full attempt before surfacing
+      // the error to Chase. Combined with the server's 3-retry window
+      // on transient errors (NETWORK_ERROR, FORBIDDEN_BY_AF: 403, 5xx,
+      // 429), each lot effectively gets up to 6 attempts before we give
+      // up. Chase: "I can't have failures."
+      if (realFailed > 0) {
+        setUploadMsg({
+          type: 'success',
+          text: `${totalSucceeded} uploaded, ${realFailed} failed — retrying the failed ones once…`,
+        });
+        // Pull a fresh list of ids that ARE still 'failed' on this
+        // auction, not just the ones we think failed above (handles
+        // mid-session race where another tab retried some).
+        const { data: stillFailed } = await supabase
+          .from('lots')
+          .select('id')
+          .eq('auction_id', id)
+          .eq('af_upload_status', 'failed')
+          .is('deleted_at', null);
+        const retryIds = (stillFailed || []).map((r: any) => r.id);
+        const retryBatches: string[][] = [];
+        for (let i = 0; i < retryIds.length; i += BATCH_SIZE) {
+          retryBatches.push(retryIds.slice(i, i + BATCH_SIZE));
+        }
+        let retrySucceeded = 0;
+        for (let i = 0; i < retryBatches.length; i++) {
+          try {
+            const res = await fetch('/api/af-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ auction_id: id, lot_ids: retryBatches[i] }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!data || data.error) continue;
+            retrySucceeded += (data.results || []).filter((r: any) => r.success).length;
+          } catch {
+            // Swallow — next batch keeps going.
+          }
+        }
+        totalSucceeded += retrySucceeded;
+        realFailed -= retrySucceeded;
+        setUploadProgress({ current: totalSucceeded + realFailed + totalSkipped, total: unuploaded.length });
+      }
+
       const skippedNote = totalSkipped > 0
         ? ` (${totalSkipped} already uploaded — skipped to avoid duplicates)`
         : '';
@@ -522,7 +568,7 @@ export default function AuctionDetailPage() {
           type: realFailed === 0 ? 'success' : 'error',
           text: realFailed === 0
             ? `${totalSucceeded} lot${totalSucceeded !== 1 ? 's' : ''} uploaded to AF${skippedNote}!`
-            : `${totalSucceeded} uploaded, ${realFailed} failed${skippedNote}${lastError ? `: ${lastError}` : ''}`,
+            : `${totalSucceeded} uploaded, ${realFailed} failed after retry${skippedNote}${lastError ? `. Last error: ${lastError}` : ''}. Click HQ Push again to try again, or open a failed lot to see its specific error.`,
         });
       }
       fetchData();

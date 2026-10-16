@@ -191,9 +191,31 @@ export async function POST(request: NextRequest) {
       // us to the login page mid-batch.
       if (result.updated_cookie) cookieUsed = result.updated_cookie;
 
+      // Retry transient failures. Previously we only retried
+      // NETWORK_ERROR, which left Chase with ~20 of 300 lots stuck on
+      // flakes he couldn't afford. Also retry FORBIDDEN_BY_AF (AF's
+      // CSRF token can rotate mid-batch; next attempt refetches a fresh
+      // one), HTTP 5xx, and HTTP 429. Up to 3 retries with backoff.
+      // Never retry session-expired or TIMEOUT_UNCERTAIN — those have
+      // different semantics (first already handled by the early-abort
+      // below; second may have ACTUALLY uploaded on AF).
+      const isTransient = (err?: string): boolean => {
+        if (!err) return false;
+        if (err.startsWith('NETWORK_ERROR:')) return true;
+        if (/^FORBIDDEN_BY_AF:\s*403\b/.test(err)) return true;
+        const m = err.match(/^HTTP\s+(\d+)/);
+        if (m) {
+          const code = Number(m[1]);
+          if (code === 429 || (code >= 500 && code < 600)) return true;
+        }
+        return false;
+      };
       let retryCount = 0;
-      while (!result.success && retryCount < 2 && result.error?.startsWith('NETWORK_ERROR:')) {
-        await new Promise((r) => setTimeout(r, 1000 * (retryCount + 1)));
+      while (!result.success && retryCount < 3 && isTransient(result.error)) {
+        // Backoff: 1s, 2s, 4s. 429s get an extra second to let AF's
+        // rate-limit window reset.
+        const base = result.error?.includes('429') ? 2000 : 1000;
+        await new Promise((r) => setTimeout(r, base * Math.pow(2, retryCount)));
         result = await uploadLotToAF(
           lot,
           photos,
