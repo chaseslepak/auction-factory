@@ -607,6 +607,17 @@ export default function LotReviewPage() {
       // click no longer blocks on 30-180 min of work.
       const lotIdsNeedingStockImage: string[] = [];
 
+      // "Created together" marker. Range-mode creates N identical lots
+      // sharing a single uuid; single-lot create leaves it null. Photo
+      // add/delete propagation keys on this so edits only mirror across
+      // lots the user explicitly batched.
+      const lotGroupId =
+        lotsToCreate > 1
+          ? (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? (crypto as any).randomUUID()
+              : null)
+          : null;
+
       for (let i = 0; i < lotsToCreate; i++) {
         const lotNumber = nextLotNumber + i;
 
@@ -640,6 +651,7 @@ export default function LotReviewPage() {
             key_features: listing.key_features,
             auction_description: listing.auction_description,
             notes,
+            lot_group_id: lotGroupId,
           })
           .select()
           .single();
@@ -829,28 +841,27 @@ export default function LotReviewPage() {
       body: JSON.stringify({ photo_id: photoId }),
     });
 
-    // SIBLING PROPAGATION: if other lots in the same auction share the
-    // same brand+model AND have this exact photo (same storage_path),
-    // offer to delete it from them too so identical items stay in sync.
-    if (storagePath && existingLot?.brand && existingLot?.model) {
+    // SIBLING PROPAGATION: if this lot was created in a batch (shares a
+    // lot_group_id with others), and those siblings have the same photo
+    // (same storage_path), offer to delete it from them too. The group
+    // is set at creation time only when Chase picks "create N lots"
+    // (range mode), so single-lot creates never auto-propagate.
+    const groupId = (existingLot as any)?.lot_group_id;
+    if (storagePath && groupId && existingLot) {
       try {
         const { data: siblingPhotos } = await supabase
           .from('lot_photos')
-          .select('id, lot_id, lots!inner(auction_id, brand, model, deleted_at)')
+          .select('id, lot_id, lots!inner(lot_group_id, deleted_at)')
           .eq('storage_path', storagePath)
           .neq('lot_id', existingLot.id);
         const matching = (siblingPhotos || []).filter((p: any) => {
           const l = p.lots;
           if (!l || l.deleted_at) return false;
-          return (
-            l.auction_id === existingLot.auction_id &&
-            (l.brand || '').toLowerCase() === (existingLot.brand || '').toLowerCase() &&
-            (l.model || '').toLowerCase() === (existingLot.model || '').toLowerCase()
-          );
+          return l.lot_group_id === groupId;
         });
         if (matching.length > 0) {
           const confirmed = confirm(
-            `This photo is also on ${matching.length} identical lot${matching.length === 1 ? '' : 's'} (same brand+model). Delete from them too?`,
+            `This photo is also on ${matching.length} lot${matching.length === 1 ? '' : 's'} created together with this one. Delete from them too?`,
           );
           if (confirmed) {
             for (const sp of matching) {
@@ -984,24 +995,24 @@ export default function LotReviewPage() {
       msg: `${succeeded}/${fileList.length} uploaded — refreshing…`,
     });
 
-    // SIBLING PROPAGATION: if other lots in this auction share the
-    // same brand+model, offer to mirror the just-added photos onto
-    // them. We insert additional lot_photos rows pointing at the SAME
-    // storage_path — no file copy, just DB rows. Same photo displayed
-    // across all identical lots stays in sync.
-    if (addedStoragePaths.length > 0 && existingLot?.brand && existingLot?.model) {
+    // SIBLING PROPAGATION: if this lot was created in a batch (shares a
+    // lot_group_id with others — set only when Chase picks "create N
+    // lots" in range mode), offer to mirror the just-added photos onto
+    // them. Insert additional lot_photos rows pointing at the SAME
+    // storage_path — no file copy, just DB rows. Single-lot creates
+    // never auto-propagate because they have no group id.
+    const groupId = (existingLot as any)?.lot_group_id;
+    if (addedStoragePaths.length > 0 && groupId) {
       try {
         const { data: siblings } = await supabase
           .from('lots')
           .select('id, lot_photos(display_order)')
-          .eq('auction_id', existingLot.auction_id)
-          .ilike('brand', existingLot.brand)
-          .ilike('model', existingLot.model)
+          .eq('lot_group_id', groupId)
           .is('deleted_at', null)
           .neq('id', existingLot.id);
         if (siblings && siblings.length > 0) {
           const confirmed = confirm(
-            `Also add ${addedStoragePaths.length === 1 ? 'this photo' : `these ${addedStoragePaths.length} photos`} to ${siblings.length} identical lot${siblings.length === 1 ? '' : 's'} (same brand+model) in this auction?`,
+            `Also add ${addedStoragePaths.length === 1 ? 'this photo' : `these ${addedStoragePaths.length} photos`} to ${siblings.length} lot${siblings.length === 1 ? '' : 's'} created together with this one?`,
           );
           if (confirmed) {
             for (const sib of siblings as any[]) {

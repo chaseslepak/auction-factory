@@ -45,8 +45,10 @@ export interface Lot {
   notes: string | null;
   created_by: string;
   created_at: string;
-  af_upload_status: 'queued' | 'uploading' | 'uploaded' | 'failed' | null;
+  af_upload_status: 'queued' | 'uploading' | 'uploaded' | 'failed' | 'placeholder' | null;
   af_upload_error: string | null;
+  af_item_id?: number | null;
+  lot_group_id?: string | null;
 }
 
 export interface LotPhoto {
