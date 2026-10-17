@@ -518,3 +518,61 @@ export async function uploadLotToAF(
     };
   }
 }
+
+// Generate a "Coming Soon" placeholder JPEG. SVG → sharp → JPEG so we
+// don't need to bundle a prebuilt image. 500x500 at mozjpeg q85 lands
+// around 8KB — safely above AF's photo-size thresholds.
+export async function generatePlaceholderImage(lotNumber: number): Promise<Buffer> {
+  const sharp = (await import('sharp')).default;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <rect width="500" height="500" fill="#f3f4f6"/>
+  <rect x="40" y="40" width="420" height="420" fill="none" stroke="#9ca3af" stroke-width="4" stroke-dasharray="10,10"/>
+  <text x="250" y="220" font-family="Helvetica, Arial, sans-serif" font-size="48" font-weight="bold" fill="#6b7280" text-anchor="middle">COMING SOON</text>
+  <text x="250" y="280" font-family="Helvetica, Arial, sans-serif" font-size="32" fill="#9ca3af" text-anchor="middle">LOT ${lotNumber}</text>
+  <text x="250" y="340" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="#9ca3af" text-anchor="middle">Full listing being prepared</text>
+</svg>`;
+  return await sharp(Buffer.from(svg)).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+}
+
+// Push a minimal "placeholder" item to AF to reserve this lot's
+// position in the auction when the real lot can't be uploaded (missing
+// data, photo rejection, etc). The real lot stays in the lotter marked
+// 'placeholder' with the placeholder item's af_item_id; the next HQ
+// Push detects that status and overwrites the placeholder with real
+// content (via the edit flow when available, or create-and-relot
+// otherwise).
+//
+// Returns the same UploadLotResult shape as uploadLotToAF so the
+// caller can treat the two paths uniformly.
+export async function createPlaceholderOnAF(
+  realLot: any,
+  afAuctionId: string,
+  sessionCookie: string,
+  saveAction: 'next' | 'exit',
+): Promise<UploadLotResult> {
+  const lotNumber = Number(realLot.lot_number) || 0;
+  const stubLot = {
+    item_name: `Coming Soon — Lot ${lotNumber}`,
+    auction_description:
+      'Placeholder item. The full listing for this lot is being prepared and will be posted shortly.',
+    brand: '',
+    model: '',
+    quantity: 1,
+    condition_rating: 10,
+    estimated_retail_new: 0,
+    starting_bid: 1,
+    width: '',
+    depth: '',
+    height: '',
+    lot_number: lotNumber,
+  };
+
+  const placeholderBuf = await generatePlaceholderImage(lotNumber);
+  // Hand the uploader a synthetic in-memory photo. Rather than invent a
+  // storage path, we embed the buffer directly as a data: URL that the
+  // existing fetch(photos[i].url) path will decode.
+  const dataUrl = `data:image/jpeg;base64,${placeholderBuf.toString('base64')}`;
+  const photos = [{ url: dataUrl, storage_path: `__placeholder/lot_${lotNumber}.jpg` }];
+
+  return await uploadLotToAF(stubLot, photos, afAuctionId, sessionCookie, saveAction);
+}

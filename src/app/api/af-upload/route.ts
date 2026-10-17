@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
-import { uploadLotToAF, UploadLotResult } from '@/lib/af-upload-lib';
+import { uploadLotToAF, UploadLotResult, createPlaceholderOnAF } from '@/lib/af-upload-lib';
 import { fetchAdminItemList, normalizeTitle } from '@/lib/af-admin-scraper';
 
 // Increase Vercel function timeout (max 60s on Hobby plan)
@@ -276,29 +276,69 @@ export async function POST(request: NextRequest) {
     else pushable.push(c);
   }
   if (preflightFail.length > 0) {
-    // Batch-update by reason so we send fewer DB roundtrips while
-    // still writing the specific error to each lot.
-    const byReason = new Map<string, string[]>();
-    for (const { lot, reason } of preflightFail) {
-      const arr = byReason.get(reason) || [];
-      arr.push(lot.id);
-      byReason.set(reason, arr);
-    }
-    const entries = Array.from(byReason.entries());
-    for (const [reason, ids] of entries) {
-      await supabase
-        .from('lots')
-        .update({ af_upload_status: 'failed', af_upload_error: reason })
-        .in('id', ids);
-    }
-    for (const { lot, reason } of preflightFail) {
-      results.push({
-        lot_id: lot.id,
-        lot_number: lot.lot_number,
-        success: false,
-        skipped: true,
-        error: reason,
-      });
+    // Push a placeholder stub to AF for each pre-flight-failed lot IN
+    // ORDER so AF's sequential numbering stays aligned with the
+    // lotter's lot_number. The real lot stays in the lotter marked
+    // 'placeholder' with the stub's af_item_id — next HQ Push detects
+    // that status and re-pushes the real content (currently as a new
+    // item + relot; future PR: in-place edit via edit_item_3.php).
+    const sortedFails = [...preflightFail].sort(
+      (a, b) => (a.lot.lot_number ?? 0) - (b.lot.lot_number ?? 0),
+    );
+    for (const { lot, reason } of sortedFails) {
+      try {
+        const stubResult = await createPlaceholderOnAF(
+          lot,
+          mapping.af_auction_id,
+          cookieUsed,
+          'next',
+        );
+        if (stubResult.updated_cookie) cookieUsed = stubResult.updated_cookie;
+        if (stubResult.success && stubResult.af_item_id) {
+          await supabase
+            .from('lots')
+            .update({
+              af_upload_status: 'placeholder',
+              af_item_id: stubResult.af_item_id,
+              af_upload_error: `PLACEHOLDER (${reason.split(':')[0]}): position reserved on AF, fix the lot and re-push to replace with real content.`,
+            })
+            .eq('id', lot.id);
+          results.push({
+            lot_id: lot.id,
+            lot_number: lot.lot_number,
+            success: false,
+            skipped: true,
+            error: `PLACEHOLDER inserted at position ${lot.lot_number} (reason: ${reason})`,
+          });
+        } else {
+          // Even the placeholder failed. Mark failed as before.
+          await supabase
+            .from('lots')
+            .update({ af_upload_status: 'failed', af_upload_error: reason })
+            .eq('id', lot.id);
+          results.push({
+            lot_id: lot.id,
+            lot_number: lot.lot_number,
+            success: false,
+            skipped: true,
+            error: reason,
+          });
+        }
+      } catch (phErr: any) {
+        await supabase
+          .from('lots')
+          .update({ af_upload_status: 'failed', af_upload_error: reason })
+          .eq('id', lot.id);
+        results.push({
+          lot_id: lot.id,
+          lot_number: lot.lot_number,
+          success: false,
+          skipped: true,
+          error: reason,
+        });
+      }
+      // Small delay between placeholder uploads to avoid hammering AF.
+      await new Promise((r) => setTimeout(r, 1000));
     }
   }
 
