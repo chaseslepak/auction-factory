@@ -39,15 +39,18 @@ export async function POST(request: NextRequest) {
   }
   const supabase = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey);
 
-  // Rate-limit: look at the most recent renewal timestamp.
+  // Rate-limit: look at the most recent renewal timestamp. Deliberately
+  // DO NOT fall back to updated_at — that gets bumped on every PHPSESSID
+  // rotation during a push, which would falsely block a legitimate
+  // manual renewal attempt made right after a push. Null here means
+  // "never renewed" → treat as renewable.
   const { data: existing } = await supabase
     .from('af_session')
-    .select('last_renewed_at, updated_at')
+    .select('last_renewed_at')
     .eq('id', 1)
     .maybeSingle();
 
-  const lastRenewalIso =
-    (existing as any)?.last_renewed_at || existing?.updated_at || null;
+  const lastRenewalIso = (existing as any)?.last_renewed_at || null;
   if (lastRenewalIso) {
     const age = Date.now() - new Date(lastRenewalIso).getTime();
     if (age < MIN_INTERVAL_MS) {

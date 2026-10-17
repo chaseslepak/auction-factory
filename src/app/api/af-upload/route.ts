@@ -81,7 +81,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { auction_id, lot_ids } = await request.json();
+  const body = await request.json();
+  const { auction_id, lot_ids } = body;
 
   if (!auction_id || !lot_ids?.length) {
     return NextResponse.json({ error: 'auction_id and lot_ids required' }, { status: 400 });
@@ -98,25 +99,33 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Per-auction push lock. Prevents two concurrent HQ Pushes on the
-  // same auction from racing each other's atomic claims. We refresh
-  // (not just acquire) the lock on every call so a long batch loop
-  // can hold it across many requests. Stale locks (older than 15 min)
-  // are reclaimable — covers the case where the last client died
-  // without releasing.
+  // Per-auction push lock with per-invocation NONCE. Previously the
+  // same-user check used only email, so two of Chase's own tabs could
+  // bypass the lock and race the push. Now the client sends a nonce
+  // per push session (unique per browser tab via sessionStorage), and
+  // the server refuses same-user-different-nonce when the lock is
+  // still fresh. Same-user-same-nonce re-acquires normally for the
+  // sequential batch loop. Stale locks (>15 min) are always reclaimable.
   const lockClient = telemetryClient(supabase);
   const lockHolder = user.email || user.id;
+  const pushNonce =
+    (body?.push_nonce && typeof body.push_nonce === 'string' && body.push_nonce.length <= 64
+      ? body.push_nonce
+      : null);
   const nowIso = new Date().toISOString();
   const expiresIso = new Date(Date.now() + 15 * 60 * 1000).toISOString();
   try {
     const { data: existingLock } = await lockClient
       .from('auction_push_locks')
-      .select('locked_by, locked_at, expires_at')
+      .select('locked_by, locked_at, expires_at, nonce')
       .eq('auction_id', auction_id)
       .maybeSingle();
     if (existingLock) {
       const expired = new Date((existingLock as any).expires_at).getTime() < Date.now();
       const sameHolder = (existingLock as any).locked_by === lockHolder;
+      const existingNonce = (existingLock as any).nonce;
+      const sameNonce =
+        pushNonce && existingNonce && pushNonce === existingNonce;
       if (!expired && !sameHolder) {
         return NextResponse.json(
           {
@@ -125,16 +134,35 @@ export async function POST(request: NextRequest) {
           { status: 409 }
         );
       }
+      // Same holder, different nonce, fresh lock → two tabs. Refuse.
+      // (If pushNonce is null — older client — fall through for back-compat.)
+      if (!expired && sameHolder && pushNonce && existingNonce && !sameNonce) {
+        return NextResponse.json(
+          {
+            error: `Another browser tab from this account is already pushing this auction (lock started ${(existingLock as any).locked_at}). Close the other tab and retry. If that's not it, wait 15 min for the lock to expire.`,
+          },
+          { status: 409 }
+        );
+      }
     }
-    await lockClient.from('auction_push_locks').upsert(
-      {
-        auction_id,
-        locked_by: lockHolder,
-        locked_at: nowIso,
-        expires_at: expiresIso,
-      },
+    const upsertRow: any = {
+      auction_id,
+      locked_by: lockHolder,
+      locked_at: nowIso,
+      expires_at: expiresIso,
+    };
+    if (pushNonce) upsertRow.nonce = pushNonce;
+    const upsertRes = await lockClient.from('auction_push_locks').upsert(
+      upsertRow,
       { onConflict: 'auction_id' }
     );
+    if (upsertRes.error && /nonce/i.test(upsertRes.error.message || '')) {
+      // Phase 21 migration not run — nonce column missing. Retry
+      // without it so the lock still works (nonce check becomes a
+      // no-op until phase 21 ships).
+      delete upsertRow.nonce;
+      await lockClient.from('auction_push_locks').upsert(upsertRow, { onConflict: 'auction_id' });
+    }
   } catch (err) {
     // Lock failure is non-fatal — the atomic claim at the row level is
     // the backstop. Log for diagnosis and continue.
@@ -756,26 +784,40 @@ export async function POST(request: NextRequest) {
       // Rule 1: strongest signal.
       if (rawId && adminById.has(rawId)) continue;
       if (rawId) {
-        // Rule 2: AF handed us this id. Trust it, confirm via direct fetch.
+        // Rule 2: AF handed us this id. Confirm via direct fetch,
+        // requiring a POSITIVE marker (not just absence of error
+        // strings). Include the admin cookie in case AF ever gates
+        // item view behind login — without it we could read a generic
+        // login page and false-positive-confirm.
         try {
           const detailUrl = `https://auctionfactory.com/item_detail.php?item=${rawId}`;
           const dr = await fetch(detailUrl, {
             headers: {
               'User-Agent':
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              Cookie: cookieUsed,
             },
             redirect: 'follow',
           });
           if (dr.ok) {
             const html = await dr.text();
-            // Non-empty public item page = item exists on AF. The
-            // string "Item not found" or similar would appear on error.
-            if (
-              html.length > 1000 &&
-              !/item not found|does not exist|has been removed/i.test(html)
-            ) {
-              // Confirmed via public page. Admin list scrape was just
-              // incomplete; the item is legitimately on AF.
+            // Positive-marker check: the final response URL still
+            // carries the correct item id in its query string, AND the
+            // page contains at least one commerce-page marker. Either
+            // signal alone could be faked by a redirect to a stale
+            // page; both together confirm this is the right item page.
+            const urlOk =
+              dr.url.includes(`item=${rawId}`) || detailUrl.includes(`item=${rawId}`);
+            const commerceMarkers = [
+              /Current\s*Bid/i,
+              /Add\s*to\s*Watchlist/i,
+              /Place\s*Bid/i,
+              /Buy\s*It\s*Now/i,
+              /Lot\s*#\s*\d+/i,
+              new RegExp(`item=${rawId}\\b`),
+            ];
+            const hasMarker = commerceMarkers.some((rx) => rx.test(html));
+            if (urlOk && hasMarker) {
               continue;
             }
           }
@@ -883,12 +925,22 @@ export async function POST(request: NextRequest) {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const cookieHeader = request.headers.get('cookie');
     if (cookieHeader) headers.Cookie = cookieHeader;
+    // Fire-and-forget but LOG failure (don't fully swallow). If relot
+    // 500s or auth-fails, we lose ordering silently otherwise.
+    const relotFetch = () =>
+      fetch(relotUrl, { method: 'POST', headers }).then(async (r) => {
+        if (!r.ok) {
+          const t = await r.text().catch(() => '');
+          console.error(`Auto-relot kick failed: HTTP ${r.status}: ${t.substring(0, 200)}`);
+        }
+      }).catch((err) => {
+        console.error('Auto-relot kick fetch error:', err?.message || err);
+      });
     try {
       const { waitUntil } = await import('@vercel/functions');
-      waitUntil(fetch(relotUrl, { method: 'POST', headers }).catch(() => {}));
+      waitUntil(relotFetch());
     } catch {
-      // No @vercel/functions available — fire and forget synchronously.
-      fetch(relotUrl, { method: 'POST', headers }).catch(() => {});
+      relotFetch();
     }
   } catch (relotErr) {
     console.warn('Auto-relot kick failed:', relotErr);

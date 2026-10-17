@@ -326,19 +326,20 @@ export async function uploadLotToAF(
       data: Buffer;
       contentType: string;
     }[] = [];
+    let droppedPhotos = 0;
     for (let i = 0; i < photos.length; i++) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
         const photoRes = await fetch(photos[i].url, { signal: controller.signal });
         clearTimeout(timeoutId);
-        if (!photoRes.ok) continue;
+        if (!photoRes.ok) {
+          droppedPhotos++;
+          continue;
+        }
         const arrayBuf = await photoRes.arrayBuffer();
         // Normalize every photo to AF spec right before upload: upscale
-        // if below AF_MIN_DIMENSION, re-encode as JPEG. Stock images
-        // that would otherwise be rejected for being too small now meet
-        // AF's validator every time. User photos are already fine, this
-        // just re-encodes them which is harmless.
+        // if below AF_MIN_DIMENSION, re-encode as JPEG.
         const normalized = await normalizeImageForAF(Buffer.from(arrayBuf));
         photoParts.push({
           name: 'file[]',
@@ -346,7 +347,26 @@ export async function uploadLotToAF(
           data: normalized,
           contentType: 'image/jpeg',
         });
-      } catch {}
+      } catch {
+        droppedPhotos++;
+      }
+    }
+    // If >50% of expected photos failed to fetch, treat as BAD_PHOTOS
+    // rather than quietly sending a reduced set to AF. The user needs
+    // to know their lot is shipping with only partial photos.
+    if (
+      photos && photos.length >= 2 &&
+      droppedPhotos > 0 &&
+      droppedPhotos > photos.length / 2
+    ) {
+      return {
+        success: false,
+        error: `BAD_PHOTOS: ${droppedPhotos} of ${photos.length} photos failed to fetch at upload time. Check photo storage paths on this lot.`,
+        http_status: 0,
+        elapsed_ms: Date.now() - startedAt,
+        csrf_present: !!csrfToken,
+        cookie_rotated: cookieRotatedOnGet,
+      };
     }
 
     const textEncoder = new TextEncoder();

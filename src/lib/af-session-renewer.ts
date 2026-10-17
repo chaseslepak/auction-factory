@@ -34,6 +34,15 @@ export interface RenewResult {
   diagnostic?: Record<string, any>;
 }
 
+// Module-level rate-limit guard. Lib callers (mid-batch auto-renew,
+// pre-flight renew in /api/af-upload) can call renewAfSession()
+// directly, bypassing the DB-level 10-min check in /api/af-session/renew.
+// Without this guard, consecutive session-expired responses could
+// trigger renew→retry→renew→retry rapidly — risks tripping AF's
+// account-lockout. All callers share one timestamp so no path escapes.
+const LIB_MIN_INTERVAL_MS = 10 * 60 * 1000;
+let lastRenewAttemptMs = 0;
+
 // Build a Cookie header string from a Set-Cookie list. Accepts the
 // current cookie as a starting point so AF's incremental Set-Cookie
 // responses layer correctly.
@@ -94,6 +103,17 @@ export async function renewAfSession(): Promise<RenewResult> {
         'AF_LOGIN_EMAIL / AF_LOGIN_PASSWORD not set in Vercel env — auto-renewal disabled.',
     };
   }
+
+  // Module-level rate limit — see comment on lastRenewAttemptMs.
+  const sinceLast = Date.now() - lastRenewAttemptMs;
+  if (sinceLast < LIB_MIN_INTERVAL_MS) {
+    const waitSec = Math.ceil((LIB_MIN_INTERVAL_MS - sinceLast) / 1000);
+    return {
+      success: false,
+      error: `Lib rate limit: last renew attempt was ${Math.round(sinceLast / 1000)}s ago. Wait ${waitSec}s.`,
+    };
+  }
+  lastRenewAttemptMs = Date.now();
 
   // Step 1: GET the login page to seed PHPSESSID + find the form action.
   let loginPageRes;
