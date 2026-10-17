@@ -89,7 +89,6 @@ export default function AuditPage() {
     // Default: mark-only (clear_mode='none'). This is the safe path
     // after the Oct 15 duplicate-upload disaster — the sync never
     // clears a status, only marks AF-present lots as 'uploaded'.
-    // Chase can enable clearing by holding Shift when clicking.
     const dialog =
       `Sync lotter statuses to AF — safe mode?\n\n` +
       `Scraper found ${afCount} items on AF.\n` +
@@ -106,6 +105,61 @@ export default function AuditPage() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirm: true, clear_mode: 'none' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+      } else {
+        setSyncResult({
+          marked_uploaded: data.marked_uploaded ?? 0,
+          cleared: data.cleared ?? 0,
+        });
+        await runAudit();
+      }
+    } catch (err: any) {
+      setError(err?.message || String(err));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Destructive sync — clears 'uploaded' status for lots AF doesn't
+  // have. Use case: Chase deleted lots on AF directly, or the auction
+  // was reset. Previously the only safe-mode sync wouldn't clear
+  // anything, so the lotter kept showing those lots as uploaded even
+  // after AF emptied. Legacy mode + force=true bypasses the safety
+  // gate that normally refuses to clear on wide gaps (the gate exists
+  // because of the Oct 15 scraper-regression disaster, but here we
+  // explicitly accept the trade).
+  const syncStatusesDestructive = async () => {
+    if (!result) return;
+    const stale = result.only_in_lotter.length;
+    const lotterCount = result.counts.lotter_lots;
+    const afCount = result.counts.af_lots;
+    const toClear = Math.max(lotterCount - afCount, stale);
+
+    const dialog =
+      `⚠ DESTRUCTIVE sync — clear statuses for lots not on AF?\n\n` +
+      `Scraper found ${afCount} items on AF.\n` +
+      `Lotter has ${lotterCount} lots.\n` +
+      `About ${toClear} lots will have their 'uploaded' status CLEARED (reset to null) because AF doesn't have them.\n\n` +
+      `Only do this if you intentionally deleted those lots on AF (or the auction was reset). ` +
+      `Clearing wrong statuses can lead to duplicate uploads on the next push.\n\n` +
+      `Type the number ${toClear} to confirm:`;
+    const answer = prompt(dialog);
+    if (answer === null) return;
+    if (String(answer).trim() !== String(toClear)) {
+      alert(`Confirmation mismatch — expected "${toClear}", got "${answer}". Not clearing.`);
+      return;
+    }
+
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`/api/audit-auction/${id}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: true, clear_mode: 'legacy', force: true }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -162,13 +216,23 @@ export default function AuditPage() {
             {loading ? 'Auditing…' : 'Re-run audit'}
           </GradientButton>
           {result && (
-            <button
-              onClick={syncStatuses}
-              disabled={syncing}
-              className="w-full py-2.5 rounded-full border-2 border-yellow-500 text-yellow-700 font-black text-xs uppercase tracking-wide disabled:opacity-50"
-            >
-              {syncing ? 'Syncing…' : 'Sync lotter statuses to AF'}
-            </button>
+            <>
+              <button
+                onClick={syncStatuses}
+                disabled={syncing}
+                className="w-full py-2.5 rounded-full border-2 border-yellow-500 text-yellow-700 font-black text-xs uppercase tracking-wide disabled:opacity-50"
+              >
+                {syncing ? 'Syncing…' : 'Sync lotter statuses to AF'}
+              </button>
+              <button
+                onClick={syncStatusesDestructive}
+                disabled={syncing}
+                className="w-full py-2 rounded-full border-2 border-red-500 text-red-600 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                title="Clears 'uploaded' status for lots AF doesn't have. Use when you've deleted lots on AF directly or the auction was reset."
+              >
+                ⚠ Clear statuses for lots not on AF (destructive)
+              </button>
+            </>
           )}
           {syncResult && (
             <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-2">
