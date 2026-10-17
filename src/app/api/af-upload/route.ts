@@ -364,6 +364,55 @@ export async function POST(request: NextRequest) {
     .eq('af_upload_status', 'uploading')
     .lt('updated_at', stuckCutoff);
 
+  // IDEMPOTENCY GUARD: scan AF's admin item list ONCE before the batch
+  // starts and skip any candidate whose normalized title already exists
+  // on AF. Prevents duplicates when: lot_status got cleared and the
+  // item is still on AF; the previous push's post-batch verify was
+  // mistaken; or an earlier batch created the item and we lost the
+  // af_item_id. Mark as 'uploaded' with the found af_item_id so audit
+  // sync stays consistent. Fails open if the admin list scrape errors.
+  try {
+    const adminItems = await fetchAdminItemList(mapping.af_auction_id, cookieUsed);
+    const titleToId = new Map<string, number>();
+    for (const i of adminItems) titleToId.set(normalizeTitle(i.title), i.af_item_id);
+    const alreadyOnAf: Array<{ id: string; af_item_id: number }> = [];
+    for (const c of candidates) {
+      if (!c.item_name) continue;
+      const found = titleToId.get(normalizeTitle(c.item_name));
+      if (found) alreadyOnAf.push({ id: c.id, af_item_id: found });
+    }
+    if (alreadyOnAf.length > 0) {
+      for (const row of alreadyOnAf) {
+        await supabase
+          .from('lots')
+          .update({
+            af_upload_status: 'uploaded',
+            af_item_id: row.af_item_id,
+            af_upload_error: null,
+          })
+          .eq('id', row.id);
+        results.push({
+          lot_id: row.id,
+          lot_number: candidates.find((c: any) => c.id === row.id)?.lot_number ?? 0,
+          success: true,
+          skipped: true,
+          error: `Already on AF (idempotency guard — skipped to prevent duplicate; linked af_item_id ${row.af_item_id})`,
+        } as any);
+      }
+      const skippedIds = new Set(alreadyOnAf.map((a) => a.id));
+      candidates.length = 0;
+      candidates.push(
+        ...pushable.filter((c: any) => !skippedIds.has(c.id)),
+      );
+    }
+  } catch (idemErr) {
+    console.warn('Idempotency pre-check failed, proceeding:', idemErr);
+  }
+
+  if (candidates.length === 0) {
+    return NextResponse.json({ results });
+  }
+
   // Atomic claim to prevent two runs double-uploading the same lot.
   const { data: claimed } = await supabase
     .from('lots')
@@ -633,15 +682,22 @@ export async function POST(request: NextRequest) {
   }
 
   // AUTO-RETRY one more pass: lots now marked 'failed' with transient
-  // or soft-reject errors get a single additional attempt before giving
-  // up. Catches ~80% of network blips without Chase clicking Retry.
-  // Skipped if session renewal already failed above.
+  // errors get a single additional attempt before giving up. Catches
+  // ~80% of network blips without Chase clicking Retry.
+  //
+  // AF_SOFT_REJECT is DELIBERATELY EXCLUDED. When a 400+ auction push
+  // comes back through post-batch verify, the admin item list scrape
+  // sometimes returns an incomplete page (pagination or truncation on
+  // AF's side), so legitimately-uploaded lots look missing. Auto-
+  // retrying those creates duplicates on AF — exactly what caused the
+  // 369→462 jump. If verify flags a soft-reject, it stays as 'failed'
+  // in Failed Lots for Chase to inspect manually; no automatic retry.
   const transientFail = (err: string | null | undefined) => {
     if (!err) return false;
-    if (/AF_SOFT_REJECT/.test(err)) return true;
     if (/NETWORK_ERROR/.test(err)) return true;
     if (/HTTP\s+(429|5\d\d)/.test(err)) return true;
     if (/FORBIDDEN_BY_AF/.test(err)) return true;
+    // AF_SOFT_REJECT intentionally omitted — see comment above.
     return false;
   };
   const retryLotIds = results
