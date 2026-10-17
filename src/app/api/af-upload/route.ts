@@ -915,36 +915,16 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // AUTO-RELOT: order discipline is a hard requirement. Any failures
-  // + retries mean lot_numbers on AF now drift from the lotter's
-  // intended order. Fire a single relot-sync pass to re-align.
-  // Best-effort — never fail the push if relot errors.
-  try {
-    const origin = request.nextUrl.origin;
-    const relotUrl = `${origin}/api/relot-sync/${auction_id}`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const cookieHeader = request.headers.get('cookie');
-    if (cookieHeader) headers.Cookie = cookieHeader;
-    // Fire-and-forget but LOG failure (don't fully swallow). If relot
-    // 500s or auth-fails, we lose ordering silently otherwise.
-    const relotFetch = () =>
-      fetch(relotUrl, { method: 'POST', headers }).then(async (r) => {
-        if (!r.ok) {
-          const t = await r.text().catch(() => '');
-          console.error(`Auto-relot kick failed: HTTP ${r.status}: ${t.substring(0, 200)}`);
-        }
-      }).catch((err) => {
-        console.error('Auto-relot kick fetch error:', err?.message || err);
-      });
-    try {
-      const { waitUntil } = await import('@vercel/functions');
-      waitUntil(relotFetch());
-    } catch {
-      relotFetch();
-    }
-  } catch (relotErr) {
-    console.warn('Auto-relot kick failed:', relotErr);
-  }
+  // Relot-sync is NOT fired here anymore. On a client-batched push
+  // (BATCH_SIZE=1), this endpoint runs once per lot — firing a relot
+  // kick per batch meant 300 overlapping relot POSTs stomping on AF's
+  // relot form, which is almost certainly what caused the "out of
+  // order" + "failed lots" symptoms Chase hit on 2026-10-17: concurrent
+  // relot POSTs can interleave writes, and AF 429s the whole burst,
+  // cascading into main-push lot failures too. The client now fires
+  // relot-sync ONCE after the whole upload loop + retry pass completes
+  // (see handleUploadToAf in /auctions/[id]/page.tsx). If the client
+  // dies before firing it, Chase can click "Fix AF Order" from audit.
 
   // Persist the rotated cookie back to Supabase so the NEXT HTTP
   // invocation (next batch, next page refresh, next audit) starts with
