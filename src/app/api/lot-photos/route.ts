@@ -29,11 +29,22 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
   }
 
-  // Delete from storage
-  await supabase.storage.from('lot-photos').remove([photo.storage_path]);
-
-  // Delete the photo record
+  // Delete the DB row first (removes the current reference).
   await supabase.from('lot_photos').delete().eq('id', photo_id);
+
+  // Reference-count the storage file: only purge from storage when NO
+  // other lot_photos row still points at this storage_path. Sibling
+  // photo propagation (same photo shared across lots created together)
+  // creates multiple rows pointing at one file — removing the file
+  // too early would leave sibling rows broken, triggering BAD_PHOTOS
+  // on the next push.
+  const { count } = await supabase
+    .from('lot_photos')
+    .select('id', { count: 'exact', head: true })
+    .eq('storage_path', photo.storage_path);
+  if (!count || count === 0) {
+    await supabase.storage.from('lot-photos').remove([photo.storage_path]);
+  }
 
   return NextResponse.json({ success: true });
 }

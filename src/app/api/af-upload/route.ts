@@ -323,7 +323,13 @@ export async function POST(request: NextRequest) {
         );
         if (stubResult.updated_cookie) cookieUsed = stubResult.updated_cookie;
         if (stubResult.success && stubResult.af_item_id) {
-          await supabase
+          // Try to write status='placeholder'. If phase19 migration
+          // never ran, the check constraint rejects the whole UPDATE
+          // and af_item_id stays null — recreating the 93-duplicate
+          // failure shape. INSPECT the error and fall back to a legal
+          // status + af_item_id in a second UPDATE so the stub info is
+          // never lost.
+          const { error: updErr } = await supabase
             .from('lots')
             .update({
               af_upload_status: 'placeholder',
@@ -331,6 +337,22 @@ export async function POST(request: NextRequest) {
               af_upload_error: `PLACEHOLDER (${reason.split(':')[0]}): position reserved on AF, fix the lot and re-push to replace with real content.`,
             })
             .eq('id', lot.id);
+          if (updErr) {
+            // Most likely: phase19 check constraint not widened.
+            // Fallback: use 'uploaded' with a prominent error message
+            // so the stub's af_item_id is still captured. Chase sees
+            // the lot as uploaded (because AF has the stub) and the
+            // error text tells him it's a placeholder needing fix.
+            console.error('placeholder status UPDATE failed, falling back to uploaded:', updErr);
+            await supabase
+              .from('lots')
+              .update({
+                af_upload_status: 'uploaded',
+                af_item_id: stubResult.af_item_id,
+                af_upload_error: `PLACEHOLDER STUB on AF — real content missing (${reason.split(':')[0]}). Phase 19 migration not run, so 'placeholder' status unavailable; falling back to 'uploaded'. Fix the lot's data and manually re-push.`,
+              })
+              .eq('id', lot.id);
+          }
           results.push({
             lot_id: lot.id,
             lot_number: lot.lot_number,
@@ -401,13 +423,35 @@ export async function POST(request: NextRequest) {
   // sync stays consistent. Fails open if the admin list scrape errors.
   try {
     const adminItems = await fetchAdminItemList(mapping.af_auction_id, cookieUsed);
-    const titleToId = new Map<string, number>();
-    for (const i of adminItems) titleToId.set(normalizeTitle(i.title), i.af_item_id);
+    // Track AF items per normalized title as a queue of remaining
+    // af_item_ids. When Chase has qty=2 of the same item in the lotter
+    // but AF only has one copy, only the FIRST candidate skips (links
+    // to the existing AF item); the second still pushes (creates the
+    // missing copy). Prevents silent qty loss on duplicate titles.
+    const titleQueue = new Map<string, number[]>();
+    for (const i of adminItems) {
+      const k = normalizeTitle(i.title);
+      if (!k) continue;
+      const q = titleQueue.get(k) || [];
+      q.push(i.af_item_id);
+      titleQueue.set(k, q);
+    }
     const alreadyOnAf: Array<{ id: string; af_item_id: number }> = [];
-    for (const c of candidates) {
+    // Preserve lot_number order so we skip the lower-numbered duplicate
+    // first (feels intuitive for debugging audits later).
+    const orderedCandidates = [...candidates].sort(
+      (a: any, b: any) => (a.lot_number ?? 0) - (b.lot_number ?? 0),
+    );
+    for (const c of orderedCandidates) {
       if (!c.item_name) continue;
-      const found = titleToId.get(normalizeTitle(c.item_name));
-      if (found) alreadyOnAf.push({ id: c.id, af_item_id: found });
+      const k = normalizeTitle(c.item_name);
+      const q = titleQueue.get(k);
+      if (q && q.length > 0) {
+        const takenId = q.shift()!;
+        alreadyOnAf.push({ id: c.id, af_item_id: takenId });
+      }
+      // q now has one fewer id. Next candidate with the same title
+      // only skips if there's still an AF item left to consume.
     }
     if (alreadyOnAf.length > 0) {
       for (const row of alreadyOnAf) {
@@ -442,12 +486,16 @@ export async function POST(request: NextRequest) {
   }
 
   // Atomic claim to prevent two runs double-uploading the same lot.
+  // 'placeholder' MUST be in this OR clause — otherwise lots that got
+  // a stub inserted earlier (pre-flight fail → placeholder) silently
+  // drop out of every subsequent push, and the real content never
+  // replaces the stub.
   const { data: claimed } = await supabase
     .from('lots')
     .update({ af_upload_status: 'uploading', af_upload_error: null })
     .in('id', candidates.map((l: any) => l.id))
     .is('deleted_at', null)
-    .or('af_upload_status.is.null,af_upload_status.eq.queued,af_upload_status.eq.failed')
+    .or('af_upload_status.is.null,af_upload_status.eq.queued,af_upload_status.eq.failed,af_upload_status.eq.placeholder')
     .select('id');
 
   const claimedIds = new Set((claimed || []).map((r: any) => r.id));
