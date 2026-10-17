@@ -818,11 +818,55 @@ export default function LotReviewPage() {
 
   const handleDeletePhoto = async (photoId: string) => {
     if (!confirm('Delete this photo?')) return;
+    // Capture the storage_path BEFORE delete so we can find siblings
+    // that reference the same file (added via "apply to identical lots").
+    const photo = (existingLot?.lot_photos || []).find((p: any) => p.id === photoId) as any;
+    const storagePath = photo?.storage_path;
+
     await fetch('/api/lot-photos', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ photo_id: photoId }),
     });
+
+    // SIBLING PROPAGATION: if other lots in the same auction share the
+    // same brand+model AND have this exact photo (same storage_path),
+    // offer to delete it from them too so identical items stay in sync.
+    if (storagePath && existingLot?.brand && existingLot?.model) {
+      try {
+        const { data: siblingPhotos } = await supabase
+          .from('lot_photos')
+          .select('id, lot_id, lots!inner(auction_id, brand, model, deleted_at)')
+          .eq('storage_path', storagePath)
+          .neq('lot_id', existingLot.id);
+        const matching = (siblingPhotos || []).filter((p: any) => {
+          const l = p.lots;
+          if (!l || l.deleted_at) return false;
+          return (
+            l.auction_id === existingLot.auction_id &&
+            (l.brand || '').toLowerCase() === (existingLot.brand || '').toLowerCase() &&
+            (l.model || '').toLowerCase() === (existingLot.model || '').toLowerCase()
+          );
+        });
+        if (matching.length > 0) {
+          const confirmed = confirm(
+            `This photo is also on ${matching.length} identical lot${matching.length === 1 ? '' : 's'} (same brand+model). Delete from them too?`,
+          );
+          if (confirmed) {
+            for (const sp of matching) {
+              await fetch('/api/lot-photos', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ photo_id: (sp as any).id }),
+              });
+            }
+          }
+        }
+      } catch (siblingErr) {
+        console.warn('Sibling delete propagation failed:', siblingErr);
+      }
+    }
+
     // Refresh
     const { data } = await supabase
       .from('lots')
@@ -890,6 +934,9 @@ export default function LotReviewPage() {
 
     const failures: string[] = [];
     let succeeded = 0;
+    // Collect storage_paths we successfully added so we can offer to
+    // mirror them to sibling lots (same brand+model in this auction).
+    const addedStoragePaths: string[] = [];
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
       const label = `Photo ${i + 1}/${fileList.length}`;
@@ -924,6 +971,7 @@ export default function LotReviewPage() {
         });
         if (insErr) throw new Error(`db: ${insErr.message}`);
         succeeded++;
+        addedStoragePaths.push(storagePath);
       } catch (err: any) {
         const msg = err?.message || String(err);
         console.error(`Failed to add photo ${i} (${file.name}):`, err);
@@ -935,6 +983,45 @@ export default function LotReviewPage() {
       kind: 'info',
       msg: `${succeeded}/${fileList.length} uploaded — refreshing…`,
     });
+
+    // SIBLING PROPAGATION: if other lots in this auction share the
+    // same brand+model, offer to mirror the just-added photos onto
+    // them. We insert additional lot_photos rows pointing at the SAME
+    // storage_path — no file copy, just DB rows. Same photo displayed
+    // across all identical lots stays in sync.
+    if (addedStoragePaths.length > 0 && existingLot?.brand && existingLot?.model) {
+      try {
+        const { data: siblings } = await supabase
+          .from('lots')
+          .select('id, lot_photos(display_order)')
+          .eq('auction_id', existingLot.auction_id)
+          .ilike('brand', existingLot.brand)
+          .ilike('model', existingLot.model)
+          .is('deleted_at', null)
+          .neq('id', existingLot.id);
+        if (siblings && siblings.length > 0) {
+          const confirmed = confirm(
+            `Also add ${addedStoragePaths.length === 1 ? 'this photo' : `these ${addedStoragePaths.length} photos`} to ${siblings.length} identical lot${siblings.length === 1 ? '' : 's'} (same brand+model) in this auction?`,
+          );
+          if (confirmed) {
+            for (const sib of siblings as any[]) {
+              const sibOrders = (sib.lot_photos || []).map(
+                (p: any) => p.display_order ?? 0,
+              );
+              const sibMax = sibOrders.length ? Math.max(...sibOrders) : -1;
+              const rows = addedStoragePaths.map((sp, i) => ({
+                lot_id: sib.id,
+                storage_path: sp,
+                display_order: sibMax + 1 + i,
+              }));
+              await supabase.from('lot_photos').insert(rows);
+            }
+          }
+        }
+      } catch (siblingErr) {
+        console.warn('Sibling photo propagation failed:', siblingErr);
+      }
+    }
 
     const { data, error: refetchErr } = await supabase
       .from('lots')
