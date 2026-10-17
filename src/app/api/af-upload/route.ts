@@ -635,11 +635,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // POST-BATCH VERIFY: scrape AF's admin item list once and reconcile
-  // against what we think landed. Any lot we marked 'uploaded' but AF
-  // can't produce (missing af_item_id or title doesn't appear) gets
-  // flipped back to 'failed' with a specific error. Catches AF's
-  // "returns 200 but didn't actually create the item" soft-reject class.
+  // POST-BATCH VERIFY: scrape AF's admin item list and reconcile.
+  //
+  // Rule set:
+  //   1. Lot has af_item_id captured from AF's upload response AND the
+  //      admin item list contains that id → confirmed uploaded.
+  //   2. Lot has af_item_id captured but admin list is missing it → AF
+  //      gave us the id, so AF created the item. The admin list scrape
+  //      is just incomplete (pagination/truncation on large auctions —
+  //      the previous cause of the 93 false AF_SOFT_REJECT duplicates).
+  //      TRUST the captured id. Try one direct item_detail.php fetch to
+  //      confirm; if that too says missing, THEN flip to failed.
+  //   3. No af_item_id captured → fall back to title lookup; if title
+  //      found, backfill the id; if not found anywhere, soft-reject.
+  //
+  // Net: lots we got a solid af_item_id for during upload are no longer
+  // false-positive flagged just because the admin list scrape missed
+  // them.
   try {
     const adminItems = await fetchAdminItemList(mapping.af_auction_id, cookieUsed);
     const adminById = new Map(adminItems.map((i) => [i.af_item_id, i]));
@@ -649,15 +661,42 @@ export async function POST(request: NextRequest) {
     const supposedlyUploaded = results.filter((r) => r.success);
     for (const r of supposedlyUploaded) {
       const rawId = (r as any).af_item_id as number | undefined;
-      // Prefer af_item_id check — strongest signal.
+      // Rule 1: strongest signal.
       if (rawId && adminById.has(rawId)) continue;
-      // Fallback: title lookup. Pull the lot row to get the item_name.
+      if (rawId) {
+        // Rule 2: AF handed us this id. Trust it, confirm via direct fetch.
+        try {
+          const detailUrl = `https://auctionfactory.com/item_detail.php?item=${rawId}`;
+          const dr = await fetch(detailUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+            redirect: 'follow',
+          });
+          if (dr.ok) {
+            const html = await dr.text();
+            // Non-empty public item page = item exists on AF. The
+            // string "Item not found" or similar would appear on error.
+            if (
+              html.length > 1000 &&
+              !/item not found|does not exist|has been removed/i.test(html)
+            ) {
+              // Confirmed via public page. Admin list scrape was just
+              // incomplete; the item is legitimately on AF.
+              continue;
+            }
+          }
+        } catch {
+          // Public fetch error — don't guess. Fall through to flip only
+          // if title lookup also fails below.
+        }
+      }
+      // Rule 3: fall back to title lookup.
       const lotRow = lots.find((l: any) => l.id === r.lot_id);
       if (lotRow?.item_name) {
         const match = adminByTitle.get(normalizeTitle(lotRow.item_name));
         if (match) {
-          // Item IS there under a different (or newly-assigned) af_item_id.
-          // Backfill it so audit stays clean.
           if (match !== rawId) {
             await supabase.from('lots').update({ af_item_id: match }).eq('id', r.lot_id);
           }
