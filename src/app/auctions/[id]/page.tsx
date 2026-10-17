@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -35,6 +35,28 @@ export default function AuctionDetailPage() {
   const [bulkMode, setBulkMode] = useState(false);
   const [afAuctions, setAfAuctions] = useState<{ id: string; name: string }[]>([]);
   const supabase = createClient();
+
+  // Per-tab push nonce. The push lock on /api/af-upload uses this to
+  // detect two-tabs-same-user race conditions: all batches within one
+  // push session share this nonce (allowed to re-acquire the lock);
+  // a second tab generates a different nonce and gets refused.
+  // sessionStorage is per-tab so this stays unique even in the same
+  // browser profile.
+  const pushNonce = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const existing = window.sessionStorage.getItem('af_push_nonce');
+      if (existing) return existing;
+      const fresh =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? (crypto as any).randomUUID()
+          : `n_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      window.sessionStorage.setItem('af_push_nonce', fresh);
+      return fresh;
+    } catch {
+      return `n_${Date.now()}`;
+    }
+  }, []);
 
   const fetchData = async () => {
     const [auctionRes, lotsRes, afMapRes] = await Promise.all([
@@ -158,6 +180,7 @@ export default function AuctionDetailPage() {
             body: JSON.stringify({
               auction_id: id,
               lot_ids: batches[i],
+              push_nonce: pushNonce,
             }),
           });
 
@@ -511,6 +534,7 @@ export default function AuctionDetailPage() {
             body: JSON.stringify({
               auction_id: id,
               lot_ids: batches[i],
+              push_nonce: pushNonce,
             }),
           });
 
@@ -618,7 +642,7 @@ export default function AuctionDetailPage() {
             const res = await fetch('/api/af-upload', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ auction_id: id, lot_ids: retryBatches[i] }),
+              body: JSON.stringify({ auction_id: id, lot_ids: retryBatches[i], push_nonce: pushNonce }),
             });
             const data = await res.json().catch(() => null);
             if (!data || data.error) continue;
