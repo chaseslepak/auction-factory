@@ -656,6 +656,25 @@ export default function AuctionDetailPage() {
         setUploadProgress({ current: totalSucceeded + realFailed + totalSkipped, total: unuploaded.length });
       }
 
+      // Fire ONE relot-sync pass now that the whole push loop + retry
+      // pass is done. Previously the server fired this per 1-lot batch
+      // (300 lots → 300 overlapping relot POSTs stomping each other,
+      // which caused "out of order" + 429-cascade "failed lots" on
+      // 2026-10-17). Firing once from the client guarantees exactly one
+      // pass. Best-effort: never block the UI message on it.
+      if (totalSucceeded > 0) {
+        setUploadMsg({ type: 'success', text: `${totalSucceeded} uploaded — re-aligning lot order on AF…` });
+        try {
+          const relotRes = await fetch(`/api/relot-sync/${id}`, { method: 'POST' });
+          const relotData = await relotRes.json().catch(() => null);
+          if (!relotRes.ok || !relotData?.ok) {
+            console.warn('End-of-push relot-sync did not confirm success:', relotData);
+          }
+        } catch (relotErr) {
+          console.warn('End-of-push relot-sync fetch failed:', relotErr);
+        }
+      }
+
       const skippedNote = totalSkipped > 0
         ? ` (${totalSkipped} already uploaded — skipped to avoid duplicates)`
         : '';
