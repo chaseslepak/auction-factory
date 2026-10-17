@@ -260,6 +260,12 @@ export async function POST(request: NextRequest) {
   // (NO_PHOTOS, NO_TITLE, NO_LOT_NUMBER) instead of AF's cryptic
   // responses. Marks each lot 'failed' with its specific reason and
   // skips the upload entirely.
+  // AF-known field limits. These were reverse-engineered from the HAR
+  // of a successful save; AF truncates or rejects outside these ranges.
+  const AF_TITLE_MAX = 255;
+  const AF_DESC_MAX = 4000;
+  const VALID_CONDITIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
   const preflightFail: Array<{ lot: any; reason: string }> = [];
   const pushable: typeof candidates = [];
   for (const c of candidates) {
@@ -271,6 +277,28 @@ export async function POST(request: NextRequest) {
     if (!hasLotNumber) reason = 'NO_LOT_NUMBER: lot has no lot_number — set one in the lotter and retry.';
     else if (!hasTitle) reason = 'NO_TITLE: lot has no item name — add one and retry.';
     else if (!hasPhoto) reason = 'NO_PHOTOS: lot has zero photos — AF will reject. Add a photo (or run Find Stock Images) and retry.';
+
+    // FIELD VALIDATION: auto-truncate overlong fields (so AF doesn't
+    // reject on length), flag invalid condition. Mutates `c` in place
+    // so uploadLotToAF sees the safe values.
+    if (!reason) {
+      if (c.item_name && c.item_name.length > AF_TITLE_MAX) {
+        c.item_name = c.item_name.substring(0, AF_TITLE_MAX - 1);
+      }
+      if (c.auction_description && c.auction_description.length > AF_DESC_MAX) {
+        c.auction_description = c.auction_description.substring(0, AF_DESC_MAX - 1);
+      }
+      // Condition must be a 1-10 integer AF recognizes. Default to 5
+      // (well-used) when missing/invalid rather than failing hard.
+      const condNum = Number(c.condition_rating);
+      if (!VALID_CONDITIONS.has(condNum)) {
+        c.condition_rating = 5;
+      }
+      // Starting bid guard — must be positive numeric.
+      if (c.starting_bid != null && (!Number.isFinite(Number(c.starting_bid)) || Number(c.starting_bid) < 0)) {
+        c.starting_bid = null;
+      }
+    }
 
     if (reason) preflightFail.push({ lot: c, reason });
     else pushable.push(c);
@@ -441,12 +469,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ results });
   }
 
+  // ADAPTIVE RATE LIMIT: track recent 429s. If AF starts throttling,
+  // slow the inter-lot delay from 3s to 10s. Resets when 60s passes
+  // without a 429. Prevents cascade-failures on bursty 300+ lot pushes.
+  const recent429s: number[] = [];
+  const now429 = () => Date.now();
+  const activeThrottle = () => {
+    const cutoff = now429() - 60_000;
+    while (recent429s.length && recent429s[0] < cutoff) recent429s.shift();
+    return recent429s.length >= 2;
+  };
+
   for (let i = 0; i < lots.length; i++) {
     const lot = lots[i];
     const isLast = i === lots.length - 1;
 
     if (i > 0) {
-      await new Promise((r) => setTimeout(r, 3000));
+      const interLotDelay = activeThrottle() ? 10_000 : 3_000;
+      await new Promise((r) => setTimeout(r, interLotDelay));
     }
 
     try {
@@ -470,6 +510,10 @@ export async function POST(request: NextRequest) {
         isLast ? 'exit' : 'next'
       );
       await recordAttempt(tc, lot.id, attemptNum, result);
+      // Record 429s for adaptive rate limiting.
+      if (result.http_status === 429 || /HTTP\s+429/.test(result.error || '')) {
+        recent429s.push(now429());
+      }
       // Roll the cookie forward — AF rotates PHPSESSID on each form
       // POST, so the next lot MUST use the latest value or AF bounces
       // us to the login page mid-batch.

@@ -363,6 +363,24 @@ export async function uploadLotToAF(
     }
 
     if (photoParts.length === 0) {
+      // DEFENSE: lot was supposed to have photos but all fetches failed
+      // (broken storage paths, Supabase outage, corrupted files). Rather
+      // than POST an empty file to AF and watch it reject with "Photo
+      // upload needs attention," return a clean BAD_PHOTOS error so the
+      // route marks the lot explicitly without hitting AF. If the lot
+      // truly had zero photos in the DB, pre-flight NO_PHOTOS already
+      // caught it — this path only fires when fetching the photos
+      // during upload fails for all of them.
+      if (photos && photos.length > 0) {
+        return {
+          success: false,
+          error: 'BAD_PHOTOS: all photos failed to fetch at upload time (broken storage path or network). Check lot photos in the review page.',
+          http_status: 0,
+          elapsed_ms: Date.now() - startedAt,
+          csrf_present: !!csrfToken,
+          cookie_rotated: cookieRotatedOnGet,
+        };
+      }
       let emptyFile = `--${boundary}\r\n`;
       emptyFile += `Content-Disposition: form-data; name="file[]"; filename=""\r\n`;
       emptyFile += `Content-Type: application/octet-stream\r\n\r\n`;
