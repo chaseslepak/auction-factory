@@ -628,14 +628,22 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Retry transient failures: NETWORK_ERROR, FORBIDDEN_BY_AF (CSRF
-      // rotation; next attempt refetches a fresh token), HTTP 5xx,
-      // HTTP 429. Up to 3 retries with exponential backoff. Never
-      // retry session-expired (early-aborts the batch below) or
-      // TIMEOUT_UNCERTAIN (may have ACTUALLY uploaded on AF).
+      // Retry transient failures: FORBIDDEN_BY_AF (CSRF rotation; next
+      // attempt refetches a fresh token), HTTP 5xx, HTTP 429. Up to 3
+      // retries with exponential backoff. Never retry session-expired
+      // (early-aborts the batch below), TIMEOUT_UNCERTAIN (may have
+      // ACTUALLY uploaded on AF), or NETWORK_ERROR.
+      //
+      // NETWORK_ERROR used to be retried, but it caused the 93-dupe
+      // mechanism: when AF received the POST and the connection was
+      // reset on the way back, the retry created a duplicate. The
+      // disambiguation check (checkIfAlreadyPosted) can't help because
+      // AF's admin item list has ~10s cache lag. Trade-off: a true
+      // transient blip on an undelivered request now needs a user
+      // re-click. On the next HQ Push, the pre-batch idempotency guard
+      // runs against a settled admin list and recovers correctly.
       const isTransient = (err?: string): boolean => {
         if (!err) return false;
-        if (err.startsWith('NETWORK_ERROR:')) return true;
         if (/^FORBIDDEN_BY_AF:\s*403\b/.test(err)) return true;
         const m = err.match(/^HTTP\s+(\d+)/);
         if (m) {

@@ -159,7 +159,14 @@ export default function AuditPage() {
       const res = await fetch(`/api/audit-auction/${id}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirm: true, clear_mode: 'legacy', force: true }),
+        // NO `force: true`. The server-side 90% scraper-coverage gate
+        // is the primary defense against the Oct 15 duplicate-upload
+        // disaster — a truncated scrape + the UI's "type the number"
+        // confirm would otherwise clear hundreds of real uploads. If
+        // the gate refuses, the error surfaces back to the user and
+        // they can decide whether to override via a direct API call
+        // where they've verified completeness another way.
+        body: JSON.stringify({ confirm: true, clear_mode: 'legacy' }),
       });
       const data = await res.json();
       if (!res.ok) {

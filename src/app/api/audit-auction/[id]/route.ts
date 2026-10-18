@@ -467,17 +467,36 @@ export async function POST(
     if (Number.isFinite(idNum) && idNum > 0) afItemIds.add(idNum);
   });
 
-  // Match lotter → AF via (a) af_item_id (durable) or (b) lot_number.
-  // Union-of-matches is deliberately generous — the sync only MARKS
-  // uploads based on this; a wrong mark is less destructive than a
-  // wrong clear.
+  // Match lotter → AF via (a) af_item_id (durable) or (b) lot_number
+  // WITH a title-sanity check. Prior behavior was union-only on
+  // lot_number which caused silent wrong-link corruption: a lotter lot
+  // at lot_number N would be marked 'uploaded' even if the AF item at
+  // position N was an unrelated manual add or a prior re-lot shuffle.
+  // Downstream, the real lot was then excluded from HQ Push forever.
+  //
+  // Now: lot_number-only matches require the AF item at that position
+  // to share a normalized title with the lotter lot. af_item_id matches
+  // skip the title check (durable key is strong enough on its own).
+  // Same normalizer as the GET handler — kept local to avoid moving it
+  // to module scope in this hotfix PR.
+  const normTitle = (s: string | null | undefined) =>
+    (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const afByLotNumber = new Map<number, (typeof scraped.items)[number]>();
+  for (const it of scraped.items) {
+    if (it.lot_number != null) afByLotNumber.set(it.lot_number, it);
+  }
   const toMarkUploaded: string[] = []; // lot IDs now, not lot_numbers
   const toClearIds: string[] = [];
   const lotsClearedWithStatusUploaded: number[] = [];
   (lots || []).forEach((l: any) => {
     const afIdMatch =
       l.af_item_id != null && afItemIds.has(Number(l.af_item_id));
-    const lotNumMatch = afNumbers.has(l.lot_number);
+    const afAtNumber = afByLotNumber.get(l.lot_number);
+    // lot_number match is only trusted when the titles agree. Avoids
+    // false-link when an AF position carries a completely different item.
+    const lotNumMatch =
+      afAtNumber != null &&
+      normTitle(afAtNumber.title) === normTitle(l.item_name);
     const isOnAf = afIdMatch || lotNumMatch;
     const currentlyUploaded = l.af_upload_status === 'uploaded';
     if (isOnAf && !currentlyUploaded) {
