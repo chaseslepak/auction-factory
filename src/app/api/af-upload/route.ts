@@ -42,6 +42,33 @@ async function checkIfAlreadyPosted(
   }
 }
 
+// Encrypt and persist the possibly-rotated AF cookie back to Supabase
+// so the NEXT HTTP invocation starts with the current PHPSESSID. Called
+// from the main end-of-push block AND from the pre-flight-only early
+// return. Best-effort: a persist failure never fails the push.
+async function persistRotatedCookie(
+  originalCookie: string,
+  currentCookie: string | undefined,
+  supabase: any,
+): Promise<void> {
+  try {
+    const freshValue =
+      currentCookie && currentCookie !== originalCookie ? currentCookie : null;
+    if (!freshValue) return;
+    let toStore = freshValue;
+    try {
+      const { encrypt } = await import('@/lib/crypto');
+      toStore = encrypt(freshValue);
+    } catch {}
+    await supabase
+      .from('af_session')
+      .update({ session_cookie: toStore, updated_at: new Date().toISOString() })
+      .eq('id', 1);
+  } catch (e) {
+    console.error('Failed to persist rotated AF cookie:', e);
+  }
+}
+
 // Record a single upload attempt. Best-effort: schema mismatch or
 // transient DB errors must never bubble out and fail the actual upload.
 async function recordAttempt(
@@ -342,6 +369,22 @@ export async function POST(request: NextRequest) {
       (a, b) => (a.lot.lot_number ?? 0) - (b.lot.lot_number ?? 0),
     );
     for (const { lot, reason } of sortedFails) {
+      // Skip stubbing a lot that already has a stub on AF. Previously
+      // every push re-stubbed every unresolved pre-flight failure
+      // (idempotency guard can't match a null/empty title back to the
+      // stub), so each push accumulated one more orphan on AF per
+      // unfixed lot. Now: already has a stub → report it in results
+      // and move on.
+      if (lot.af_item_id != null && lot.af_upload_status === 'placeholder') {
+        results.push({
+          lot_id: lot.id,
+          lot_number: lot.lot_number,
+          success: false,
+          skipped: true,
+          error: `PLACEHOLDER already on AF (af_item_id ${lot.af_item_id}) — reason: ${reason}. Fix the lot and re-push to replace the stub.`,
+        });
+        continue;
+      }
       try {
         const stubResult = await createPlaceholderOnAF(
           lot,
@@ -421,6 +464,11 @@ export async function POST(request: NextRequest) {
   }
 
   if (pushable.length === 0) {
+    // All candidates failed pre-flight. The placeholder loop above
+    // may have rotated the AF cookie several times — persist the
+    // latest before returning so the NEXT push doesn't start with a
+    // stale PHPSESSID and burn a renewal attempt.
+    await persistRotatedCookie(session.session_cookie, cookieUsed, supabase);
     return NextResponse.json({ results });
   }
   // From here on, treat `candidates` as the pre-flight-passing subset.
@@ -678,7 +726,12 @@ export async function POST(request: NextRequest) {
           ? 'Upload timed out — may have succeeded, verify on AF'
           : result.error || null,
       };
-      if (result.success && result.af_item_id) {
+      // Persist af_item_id on timeout too — AF may have accepted the
+      // POST and parsed-out the id lives in the (received) response
+      // body or redirect URL. If we throw it away, the lot is forever
+      // 'uploaded' with a null durable key and never gets backfilled
+      // (the idempotency guard excludes 'uploaded' lots).
+      if ((result.success || isTimeoutResult) && result.af_item_id) {
         updates.af_item_id = result.af_item_id;
       }
       await supabase.from('lots').update(updates).eq('id', lot.id);
@@ -724,7 +777,7 @@ export async function POST(request: NextRequest) {
                 ? 'Upload timed out — may have succeeded, verify on AF'
                 : result.error || null,
             };
-            if (result.success && result.af_item_id) updates2.af_item_id = result.af_item_id;
+            if ((result.success || isTimeoutResult2) && result.af_item_id) updates2.af_item_id = result.af_item_id;
             await supabase.from('lots').update(updates2).eq('id', lot.id);
             // Replace the earlier results entry with the retry outcome.
             const existingIdx = results.findIndex((r) => r.lot_id === lot.id);
@@ -768,17 +821,75 @@ export async function POST(request: NextRequest) {
   // its public item_detail.php both have ~10s cache lag after a new
   // item is created. A just-uploaded lot often isn't visible on either
   // for the first few seconds, so verify false-flagged legitimately-
-  // uploaded lots as AF_SOFT_REJECT. The symptom on 2026-10-18 was
-  // 4 of 10 lots flipped to failed when AF actually had all 10.
+  // uploaded lots as AF_SOFT_REJECT.
   //
   // Trust the upload response's af_item_id. If a lot genuinely didn't
   // land on AF, the pre-batch IDEMPOTENCY GUARD on the NEXT push
-  // (lines ~452 above) scans the admin list fresh and either:
-  //   - finds nothing with that title → lets the lot re-upload cleanly,
-  //   - finds the item → marks it uploaded with the correct af_item_id.
+  // (lines ~452 above) scans the admin list fresh and recovers.
   //
-  // That path is the only defense we actually need against the original
-  // "93 duplicates" scenario, and it's already in place and works.
+  // DELAYED NULL-ID BACKFILL (C7 fix): if any successful lot in this
+  // batch has null af_item_id (the URL didn't carry an `item=` ref),
+  // the lot is 'uploaded' but has no durable key — the pre-batch
+  // idempotency guard EXCLUDES 'uploaded' lots so it will never
+  // backfill the id on future pushes. Here we wait for AF's cache to
+  // settle, scrape the admin list once, and backfill by title match.
+  // Best-effort: a failure here never fails the push.
+  try {
+    const uploadedWithNullId = results.filter((r: any) =>
+      r.success && !r.af_item_id && !r.skipped,
+    );
+    if (uploadedWithNullId.length > 0) {
+      // Wait for admin list cache to settle before scraping.
+      await new Promise((r) => setTimeout(r, 15_000));
+      const adminItems = await fetchAdminItemList(mapping.af_auction_id, cookieUsed);
+      // Build title → list of af_item_ids (ordered — same shape as the
+      // idempotency guard uses so qty-duplicate titles backfill fairly).
+      const titleQueue = new Map<string, number[]>();
+      for (const i of adminItems) {
+        const k = normalizeTitle(i.title);
+        if (!k) continue;
+        const q = titleQueue.get(k) || [];
+        q.push(i.af_item_id);
+        titleQueue.set(k, q);
+      }
+      // Only consume ids NOT already linked to another lot in this
+      // auction, so we don't steal an af_item_id already owned.
+      const { data: linkedLots } = await supabase
+        .from('lots')
+        .select('af_item_id')
+        .eq('auction_id', auction_id)
+        .not('af_item_id', 'is', null);
+      const linkedIds = new Set<number>(
+        (linkedLots || []).map((l: any) => Number(l.af_item_id)),
+      );
+      for (const r of uploadedWithNullId) {
+        const lotRow = lots.find((l: any) => l.id === r.lot_id);
+        if (!lotRow?.item_name) continue;
+        const k = normalizeTitle(lotRow.item_name);
+        const q = titleQueue.get(k);
+        if (!q) continue;
+        // Pop ids until we find one not already linked elsewhere.
+        let picked: number | undefined;
+        while (q.length > 0) {
+          const candidate = q.shift()!;
+          if (!linkedIds.has(candidate)) {
+            picked = candidate;
+            break;
+          }
+        }
+        if (picked != null) {
+          await supabase
+            .from('lots')
+            .update({ af_item_id: picked })
+            .eq('id', r.lot_id);
+          linkedIds.add(picked);
+          (r as any).af_item_id = picked;
+        }
+      }
+    }
+  } catch (backfillErr) {
+    console.warn('Null-id backfill skipped:', backfillErr);
+  }
 
   // AUTO-RETRY one more pass: lots now marked 'failed' with transient
   // errors get a single additional attempt before giving up. Catches
@@ -834,7 +945,7 @@ export async function POST(request: NextRequest) {
           ? 'Upload timed out — may have succeeded, verify on AF'
           : r.error || null,
       };
-      if (r.success && r.af_item_id) upd.af_item_id = r.af_item_id;
+      if ((r.success || isTimeout) && r.af_item_id) upd.af_item_id = r.af_item_id;
       await supabase.from('lots').update(upd).eq('id', lot.id);
       const idx = results.findIndex((x) => x.lot_id === lot.id);
       if (idx >= 0) results[idx] = { lot_id: lot.id, lot_number: lot.lot_number, ...r };
@@ -852,27 +963,7 @@ export async function POST(request: NextRequest) {
   // (see handleUploadToAf in /auctions/[id]/page.tsx). If the client
   // dies before firing it, Chase can click "Fix AF Order" from audit.
 
-  // Persist the rotated cookie back to Supabase so the NEXT HTTP
-  // invocation (next batch, next page refresh, next audit) starts with
-  // the current PHPSESSID instead of a stale one. Encrypt before storing.
-  try {
-    const originalCookie = session.session_cookie;
-    const freshValue =
-      cookieUsed && cookieUsed !== originalCookie ? cookieUsed : null;
-    if (freshValue) {
-      let toStore = freshValue;
-      try {
-        const { encrypt } = await import('@/lib/crypto');
-        toStore = encrypt(freshValue);
-      } catch {}
-      await supabase
-        .from('af_session')
-        .update({ session_cookie: toStore, updated_at: new Date().toISOString() })
-        .eq('id', 1);
-    }
-  } catch (e) {
-    console.error('Failed to persist rotated AF cookie:', e);
-  }
+  await persistRotatedCookie(session.session_cookie, cookieUsed, supabase);
 
   try {
     const succeededIds = results.filter((r) => r.success).map((r) => r.lot_id);

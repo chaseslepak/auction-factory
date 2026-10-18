@@ -438,10 +438,15 @@ export function parseImageDimensions(buf: Buffer): { width: number; height: numb
 
 // Classify an image as a real product photo vs a placeholder graphic
 // ("IMAGE COMING SOON", "no image available", generic silhouettes). One
-// Haiku call per image, ~$0.0004. Returns true if it looks like a
-// placeholder — the caller should refuse to save it. Fails open (returns
-// false) on error so a transient Anthropic blip doesn't block valid
-// photos.
+// Haiku call per image. Returns true if it looks like a placeholder —
+// the caller should refuse to save it.
+//
+// FAILS CLOSED on timeout or error (returns true). The prompt tells
+// the model to prefer PLACEHOLDER when in doubt because a false-
+// positive just skips one image, while a false-negative lets a
+// vendor placeholder graphic become a lot's primary photo and AF
+// rejects the whole lot. Fail-closed on infrastructure error (API
+// slow / unreachable) applies the same principle to the error path.
 export async function classifyImageAsPlaceholder(
   anthropic: Anthropic,
   imageB64: string,
@@ -449,7 +454,9 @@ export async function classifyImageAsPlaceholder(
   try {
     const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 10000));
     const apiPromise = anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      // Haiku handles the binary PRODUCT/PLACEHOLDER call cheaply. Was
+      // on sonnet-4-6 — ~100× the cost for no accuracy gain.
+      model: 'claude-haiku-5-5',
       max_tokens: 10,
       messages: [
         {
@@ -469,12 +476,15 @@ export async function classifyImageAsPlaceholder(
       ],
     });
     const response: any = await Promise.race([apiPromise, timeoutPromise]);
-    if (!response) return false;
+    // Timeout → treat as placeholder. Prefer skipping a questionable
+    // image over letting a vendor fallback become the primary photo.
+    if (!response) return true;
     const block = response.content?.[0];
     const text = (block && 'text' in block ? block.text : '').toUpperCase();
     return /PLACEHOLDER/.test(text);
   } catch {
-    return false;
+    // Any exception → fail closed (treat as placeholder).
+    return true;
   }
 }
 
