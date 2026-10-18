@@ -478,11 +478,15 @@ export async function POST(request: NextRequest) {
   // Reclaim stuck 'uploading' lots: if a prior client-side batch died
   // mid-run (tab closed, laptop sleep, network drop), the server set
   // 'uploading' but the client never came back. Those lots sat in
-  // limbo and the atomic claim below would skip them. 5 minutes is
-  // comfortably longer than one lot's wall-clock (40s timeout + 3s
-  // delay × a few retries), so anything stuck past 5 min is definitely
-  // orphaned.
-  const stuckCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  // limbo and the atomic claim below would skip them.
+  //
+  // Window is 15 min, matching the per-auction push lock TTL. A 3-lot
+  // batch retrying every lot's full budget can take ~7 min; a 5-min
+  // reclaim could flip a still-running lot back to 'failed' while a
+  // parallel batch races the same lot upward → duplicates on AF.
+  // Anchoring to the lock TTL guarantees any 'uploading' lot still
+  // in a held lock won't be reclaimed.
+  const stuckCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   await supabase
     .from('lots')
     .update({ af_upload_status: 'failed', af_upload_error: 'Reclaimed from stuck uploading state (prior batch died mid-run)' })
@@ -921,6 +925,39 @@ export async function POST(request: NextRequest) {
       .in('id', retryLotIds)
       .order('lot_number', { ascending: true });
     for (const lot of retryLots || []) {
+      // DISAMBIGUATE BEFORE RETRY: the 30s delay above let AF's admin
+      // list cache settle. Check if the original attempt actually
+      // landed. If it did, treat as success and backfill af_item_id
+      // instead of re-uploading — otherwise we create a duplicate on
+      // AF (same mechanism as the 93-dupe scenario, different path).
+      if (lot.item_name) {
+        const foundId = await checkIfAlreadyPosted(
+          mapping.af_auction_id,
+          cookieUsed,
+          lot.item_name,
+        );
+        if (foundId) {
+          await supabase
+            .from('lots')
+            .update({
+              af_upload_status: 'uploaded',
+              af_item_id: foundId,
+              af_upload_error: null,
+            })
+            .eq('id', lot.id);
+          const idx = results.findIndex((x) => x.lot_id === lot.id);
+          if (idx >= 0) {
+            results[idx] = {
+              lot_id: lot.id,
+              lot_number: lot.lot_number,
+              success: true,
+              af_item_id: foundId,
+              debug: 'recovered via admin item list in auto-retry pass',
+            } as any;
+          }
+          continue;
+        }
+      }
       // Clear status so atomic claim succeeds.
       await supabase
         .from('lots')

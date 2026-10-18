@@ -216,27 +216,35 @@ export async function GET(
   // Compute diffs. "Linked" = this lotter lot has an af_item_id that
   // AF confirms exists. Linked lots are NEVER flagged as only_in_lotter,
   // regardless of lot_number drift. Secondary link: unique title match
-  // when af_item_id is missing on both sides.
+  // when af_item_id is missing on both sides AND the matched AF item
+  // is at the same lot_number — the lot_number co-signal avoids
+  // falsely linking unrelated items that happen to share a generic
+  // title ("Vintage Chair" exists at AF lot 10 and lotter lot 99 →
+  // we must NOT consider them linked, else audit silently sweeps a
+  // real orphan under the rug and the next push's idempotency guard
+  // then persists the wrong af_item_id).
   const lotIsLinked = (l: LotterRow): boolean => {
     if ((l as any).af_item_id != null && afByItemId.has(Number((l as any).af_item_id))) return true;
-    // Title fallback: only when lotter lot has no af_item_id captured
-    // AND exactly one AF item shares its normalized title AND exactly
-    // one lotter lot shares it (so we don't collapse real duplicates).
     if ((l as any).af_item_id != null) return false;
     const key = normTitle(l.item_name);
     if (!key) return false;
     const afBucket = afByTitle.get(key) || [];
     const lotterBucket = lotterByTitle.get(key) || [];
-    return afBucket.length === 1 && lotterBucket.length === 1;
+    if (afBucket.length !== 1 || lotterBucket.length !== 1) return false;
+    // Only trust the title fallback if the AF item is at the same
+    // lot_number as this lotter lot.
+    const afItem = afBucket[0];
+    return afItem.lot_number === l.lot_number;
   };
   const afItemIsLinked = (item: (typeof scraped.items)[number]): boolean => {
     if (lotterByAfItemId.has(Number(item.af_item_id))) return true;
-    // Title fallback — unique match on both sides.
+    // Title fallback — unique match on both sides AND same lot_number.
     const key = normTitle(item.title);
     if (!key) return false;
     const lotterBucket = lotterByTitle.get(key) || [];
     const afBucket = afByTitle.get(key) || [];
-    return lotterBucket.length === 1 && afBucket.length === 1;
+    if (lotterBucket.length !== 1 || afBucket.length !== 1) return false;
+    return lotterBucket[0].lot_number === item.lot_number;
   };
 
   const onlyInLotter: Array<{
@@ -451,6 +459,24 @@ export async function POST(
     return NextResponse.json(
       { error: `Failed to scrape AF: ${err?.message || String(err)}` },
       { status: 502 }
+    );
+  }
+
+  // Refuse any sync when the AF scrape fell back to the public
+  // fragile parser (no lot_numbers, no reliable duplicate detection).
+  // Operating on fallback data has nuked valid 'uploaded' statuses
+  // before and caused duplicate uploads on the next push. The admin
+  // flow needs a healthy AF cookie — if that's not available, Chase
+  // reconnects AF in Settings first.
+  if ((scraped as any).parse_source === 'fallback') {
+    return NextResponse.json(
+      {
+        error:
+          'AF scrape fell back to the fragile public parser — refusing to run a sync. ' +
+          'Reconnect your AF admin session in Settings so the admin-list scrape succeeds, then re-run audit.',
+        scraper_warning: 'parse_source=fallback — sync disabled',
+      },
+      { status: 409 },
     );
   }
 

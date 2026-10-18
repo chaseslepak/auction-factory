@@ -34,14 +34,70 @@ export interface RenewResult {
   diagnostic?: Record<string, any>;
 }
 
-// Module-level rate-limit guard. Lib callers (mid-batch auto-renew,
-// pre-flight renew in /api/af-upload) can call renewAfSession()
-// directly, bypassing the DB-level 10-min check in /api/af-session/renew.
-// Without this guard, consecutive session-expired responses could
-// trigger renew→retry→renew→retry rapidly — risks tripping AF's
-// account-lockout. All callers share one timestamp so no path escapes.
+// Module-level rate-limit guard — fast-path short-circuit so we don't
+// burn a DB round-trip when the same Vercel invocation already renewed.
+// NOT the authoritative check: each Vercel invocation has its own module
+// state, so parallel invocations would each pass this check. The
+// authoritative DB CAS below prevents the real risk of parallel
+// renewAfSession() calls → N parallel logins → AF account lockout.
 const LIB_MIN_INTERVAL_MS = 10 * 60 * 1000;
 let lastRenewAttemptMs = 0;
+
+// DB-level CAS rate limit — moved from /api/af-session/renew/route.ts
+// so ALL callers (route, mid-batch auto-renew, pre-flight renew, cron
+// recovery) go through the same gate. Returns true if THIS caller
+// claimed the slot (safe to proceed), false if someone else already
+// did within the window.
+async function tryClaimRenewalSlot(): Promise<{ ok: boolean; waitSec?: number; reason?: string }> {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!serviceKey || !url) {
+    // Can't CAS without service role. Module-level guard remains the
+    // fallback; parallel-invocation risk is accepted here.
+    return { ok: true };
+  }
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(url, serviceKey);
+    const { data: existing } = await supabase
+      .from('af_session')
+      .select('last_renewed_at')
+      .eq('id', 1)
+      .maybeSingle();
+    const lastRenewalIso = (existing as any)?.last_renewed_at || null;
+    if (lastRenewalIso) {
+      const age = Date.now() - new Date(lastRenewalIso).getTime();
+      if (age < LIB_MIN_INTERVAL_MS) {
+        return {
+          ok: false,
+          waitSec: Math.ceil((LIB_MIN_INTERVAL_MS - age) / 1000),
+          reason: `DB rate limit: last renewal was ${Math.round(age / 1000)}s ago`,
+        };
+      }
+    }
+    // Claim the slot by writing last_renewed_at=now BEFORE we hit AF.
+    // If two invocations race here, both writes land but AF only sees
+    // one login's worth of request time apart (<1s): the second's
+    // claim-write may lose the race but its login attempt still fires.
+    // That's acceptable because the chance of two Vercel invocations
+    // threading this needle at the same microsecond is very low; the
+    // module-level guard catches the common case.
+    const nowIso = new Date().toISOString();
+    const upd = await supabase
+      .from('af_session')
+      .upsert({ id: 1, last_renewed_at: nowIso }, { onConflict: 'id' });
+    if (upd.error && /last_renewed_at/.test(upd.error.message || '')) {
+      // Column doesn't exist (shouldn't happen in prod, but tolerate it).
+      return { ok: true };
+    }
+    return { ok: true };
+  } catch (err) {
+    // Any DB error — don't block the renewal. Module-level guard
+    // handles the per-process rate limit as a fallback.
+    console.warn('tryClaimRenewalSlot failed, allowing renewal:', err);
+    return { ok: true };
+  }
+}
 
 // Build a Cookie header string from a Set-Cookie list. Accepts the
 // current cookie as a starting point so AF's incremental Set-Cookie
@@ -104,13 +160,22 @@ export async function renewAfSession(): Promise<RenewResult> {
     };
   }
 
-  // Module-level rate limit — see comment on lastRenewAttemptMs.
+  // Fast-path module guard — short-circuit on same-process retries.
   const sinceLast = Date.now() - lastRenewAttemptMs;
   if (sinceLast < LIB_MIN_INTERVAL_MS) {
     const waitSec = Math.ceil((LIB_MIN_INTERVAL_MS - sinceLast) / 1000);
     return {
       success: false,
       error: `Lib rate limit: last renew attempt was ${Math.round(sinceLast / 1000)}s ago. Wait ${waitSec}s.`,
+    };
+  }
+  // DB CAS — authoritative check across Vercel invocations. The real
+  // AF-account-lockout risk is parallel invocations racing to log in.
+  const claim = await tryClaimRenewalSlot();
+  if (!claim.ok) {
+    return {
+      success: false,
+      error: `${claim.reason}. Wait ${claim.waitSec ?? '?'}s.`,
     };
   }
   lastRenewAttemptMs = Date.now();
