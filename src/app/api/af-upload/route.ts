@@ -503,6 +503,47 @@ export async function POST(request: NextRequest) {
   // sync stays consistent. Fails open if the admin list scrape errors.
   try {
     const adminItems = await fetchAdminItemList(mapping.af_auction_id, cookieUsed);
+
+    // C5 DEFENSIVE GUARD: if the admin scrape returned FEWER items than
+    // the lotter believes are already uploaded on AF, something is
+    // wrong — most likely cause is unverified AF pagination (one of
+    // the two biggest remaining duplicate risks). Rather than let the
+    // idempotency guard false-negative on page-2 items (which would
+    // cascade into re-uploads and duplicates on AF), refuse the push
+    // with a loud error that tells Chase exactly what to check.
+    //
+    // Threshold: scrape must return at least 90% of our "uploaded"
+    // count. Chase can intentionally delete items on AF, which is why
+    // we don't require 100%. 90% catches the "AF only returned the
+    // first page" case while allowing routine deletions to proceed.
+    const { count: uploadedCount } = await supabase
+      .from('lots')
+      .select('id', { count: 'exact', head: true })
+      .eq('auction_id', auction_id)
+      .eq('af_upload_status', 'uploaded')
+      .is('deleted_at', null);
+    if (
+      uploadedCount != null &&
+      uploadedCount >= 10 &&
+      adminItems.length < uploadedCount * 0.9
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            `AF admin item scrape returned ${adminItems.length} items but the lotter has ${uploadedCount} marked uploaded. ` +
+            `This is almost always AF paginating the relot_auction.php form (unverified behavior on large auctions). ` +
+            `Pushing anyway would duplicate items the scrape missed. ` +
+            `Open https://auctionfactory.com/admin/relot_auction.php?auction=${mapping.af_auction_id}&relot=Re-Lot in your browser — ` +
+            `if you see a page nav, AF paginates and we need to fix the scraper before pushing more; ` +
+            `if you see all ${uploadedCount}+ rows on one page, the scrape itself is failing and reconnecting AF in Settings may help.`,
+          admin_scrape_count: adminItems.length,
+          lotter_uploaded_count: uploadedCount,
+          af_relot_url: `https://auctionfactory.com/admin/relot_auction.php?auction=${mapping.af_auction_id}&relot=Re-Lot`,
+          scrape_guard: 'tripped',
+        },
+        { status: 409 },
+      );
+    }
     // Track AF items per normalized title as a queue of remaining
     // af_item_ids. When Chase has qty=2 of the same item in the lotter
     // but AF only has one copy, only the FIRST candidate skips (links
