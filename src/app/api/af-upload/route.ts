@@ -574,6 +574,77 @@ export async function POST(request: NextRequest) {
       await new Promise((r) => setTimeout(r, interLotDelay));
     }
 
+    // GAP-FILL (2026-10-18): the lotter can have holes in its
+    // lot_number sequence (lot deleted after creation, legacy data).
+    // AF has no concept of gaps — the next POST lands at AF's next
+    // sequential slot regardless. If lotter sends lot 22 then jumps
+    // to lot 24, AF puts lot 24's content at position 23 and
+    // everything after is off-by-one.
+    //
+    // Detect gaps per-batch by querying the max uploaded lot_number
+    // below this lot's lot_number. If there's a gap, insert N
+    // placeholder stubs on AF to fill positions (lot_number is set
+    // by relot-sync at end). The stubs are "GAP FILLER - Position N"
+    // and have no corresponding lotter row — they only exist on AF
+    // to keep the sequence aligned.
+    try {
+      const { data: prevRow } = await supabase
+        .from('lots')
+        .select('lot_number')
+        .eq('auction_id', auction_id)
+        .eq('af_upload_status', 'uploaded')
+        .lt('lot_number', lot.lot_number)
+        .is('deleted_at', null)
+        .order('lot_number', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const expectedPrev = (prevRow as any)?.lot_number ?? 0;
+      const gapCount = lot.lot_number - expectedPrev - 1;
+      // Only fill reasonable-sized gaps automatically. A gap of >50
+      // probably means the DB is in an unexpected state (not a routine
+      // delete); refuse to blind-fill and let Chase investigate.
+      if (gapCount > 0 && gapCount <= 50) {
+        for (let gapPos = expectedPrev + 1; gapPos < lot.lot_number; gapPos++) {
+          const gapLot = {
+            lot_number: gapPos,
+            item_name: `GAP FILLER - Position ${gapPos}`,
+            auction_description: 'Position reserved; no lot exists in lotter at this number.',
+            brand: '',
+            model: '',
+            quantity: 1,
+            condition_rating: 5,
+            starting_bid: null,
+            estimated_retail_new: null,
+            width: '',
+            depth: '',
+            height: '',
+          };
+          try {
+            const stubResult = await createPlaceholderOnAF(
+              gapLot,
+              mapping.af_auction_id,
+              cookieUsed,
+              'next',
+            );
+            if (stubResult.updated_cookie) cookieUsed = stubResult.updated_cookie;
+            if (!stubResult.success) {
+              console.error(`Gap-fill placeholder for position ${gapPos} failed:`, stubResult.error);
+            }
+          } catch (gapErr: any) {
+            console.error(`Gap-fill exception for position ${gapPos}:`, gapErr?.message);
+          }
+          // Small delay between gap fills to be gentle on AF.
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      } else if (gapCount > 50) {
+        console.warn(
+          `Skipping gap-fill: gap of ${gapCount} between lot ${expectedPrev} and ${lot.lot_number} is too large to auto-fill. Investigate lotter data.`,
+        );
+      }
+    } catch (gapScanErr) {
+      console.warn('Gap scan failed, proceeding without fill:', gapScanErr);
+    }
+
     try {
       const MAX_PHOTOS = 10;
       const photos = (lot.lot_photos || [])
