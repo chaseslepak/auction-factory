@@ -26,6 +26,8 @@ interface AuditResult {
     lotter_item: string;
     af_titles: string[];
   }>;
+  scraper_warning?: string | null;
+  scraper_diag?: { parse_source?: 'primary' | 'fallback' };
 }
 
 export default function AuditPage() {
@@ -222,25 +224,40 @@ export default function AuditPage() {
           <GradientButton onClick={runAudit} loading={loading}>
             {loading ? 'Auditing…' : 'Re-run audit'}
           </GradientButton>
-          {result && (
-            <>
-              <button
-                onClick={syncStatuses}
-                disabled={syncing}
-                className="w-full py-2.5 rounded-full border-2 border-yellow-500 text-yellow-700 font-black text-xs uppercase tracking-wide disabled:opacity-50"
-              >
-                {syncing ? 'Syncing…' : 'Sync lotter statuses to AF'}
-              </button>
-              <button
-                onClick={syncStatusesDestructive}
-                disabled={syncing}
-                className="w-full py-2 rounded-full border-2 border-red-500 text-red-600 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
-                title="Clears 'uploaded' status for lots AF doesn't have. Use when you've deleted lots on AF directly or the auction was reset."
-              >
-                ⚠ Clear statuses for lots not on AF (destructive)
-              </button>
-            </>
-          )}
+          {result && (() => {
+            // When the AF scrape fell back to the fragile public parser,
+            // both sync buttons are DISABLED client-side (the server
+            // also refuses with a 409 — belt-and-suspenders). Fallback
+            // data has no lot_numbers and no reliable duplicate signal,
+            // so operating on it has caused silent corruption before.
+            const fallbackActive =
+              (result.scraper_diag?.parse_source === 'fallback') ||
+              !!result.scraper_warning;
+            return (
+              <>
+                {fallbackActive && (
+                  <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
+                    ⚠ AF scrape used the fragile fallback parser. Sync is disabled to prevent corruption. Reconnect your AF admin session in Settings, then re-run audit.
+                  </p>
+                )}
+                <button
+                  onClick={syncStatuses}
+                  disabled={syncing || fallbackActive}
+                  className="w-full py-2.5 rounded-full border-2 border-yellow-500 text-yellow-700 font-black text-xs uppercase tracking-wide disabled:opacity-50"
+                >
+                  {syncing ? 'Syncing…' : 'Sync lotter statuses to AF'}
+                </button>
+                <button
+                  onClick={syncStatusesDestructive}
+                  disabled={syncing || fallbackActive}
+                  className="w-full py-2 rounded-full border-2 border-red-500 text-red-600 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                  title="Clears 'uploaded' status for lots AF doesn't have. Use when you've deleted lots on AF directly or the auction was reset."
+                >
+                  ⚠ Clear statuses for lots not on AF (destructive)
+                </button>
+              </>
+            );
+          })()}
           {syncResult && (
             <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded p-2">
               Marked {syncResult.marked_uploaded} as uploaded, cleared{' '}
