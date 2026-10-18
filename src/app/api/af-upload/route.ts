@@ -755,104 +755,22 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // POST-BATCH VERIFY: scrape AF's admin item list and reconcile.
+  // Post-batch verify is INTENTIONALLY REMOVED (2026-10-18). It did
+  // more harm than good: AF's admin item list (relot_auction.php) and
+  // its public item_detail.php both have ~10s cache lag after a new
+  // item is created. A just-uploaded lot often isn't visible on either
+  // for the first few seconds, so verify false-flagged legitimately-
+  // uploaded lots as AF_SOFT_REJECT. The symptom on 2026-10-18 was
+  // 4 of 10 lots flipped to failed when AF actually had all 10.
   //
-  // Rule set:
-  //   1. Lot has af_item_id captured from AF's upload response AND the
-  //      admin item list contains that id → confirmed uploaded.
-  //   2. Lot has af_item_id captured but admin list is missing it → AF
-  //      gave us the id, so AF created the item. The admin list scrape
-  //      is just incomplete (pagination/truncation on large auctions —
-  //      the previous cause of the 93 false AF_SOFT_REJECT duplicates).
-  //      TRUST the captured id. Try one direct item_detail.php fetch to
-  //      confirm; if that too says missing, THEN flip to failed.
-  //   3. No af_item_id captured → fall back to title lookup; if title
-  //      found, backfill the id; if not found anywhere, soft-reject.
+  // Trust the upload response's af_item_id. If a lot genuinely didn't
+  // land on AF, the pre-batch IDEMPOTENCY GUARD on the NEXT push
+  // (lines ~452 above) scans the admin list fresh and either:
+  //   - finds nothing with that title → lets the lot re-upload cleanly,
+  //   - finds the item → marks it uploaded with the correct af_item_id.
   //
-  // Net: lots we got a solid af_item_id for during upload are no longer
-  // false-positive flagged just because the admin list scrape missed
-  // them.
-  try {
-    const adminItems = await fetchAdminItemList(mapping.af_auction_id, cookieUsed);
-    const adminById = new Map(adminItems.map((i) => [i.af_item_id, i]));
-    const adminByTitle = new Map<string, number>();
-    for (const i of adminItems) adminByTitle.set(normalizeTitle(i.title), i.af_item_id);
-
-    const supposedlyUploaded = results.filter((r) => r.success);
-    for (const r of supposedlyUploaded) {
-      const rawId = (r as any).af_item_id as number | undefined;
-      // Rule 1: strongest signal.
-      if (rawId && adminById.has(rawId)) continue;
-      if (rawId) {
-        // Rule 2: AF handed us this id. Confirm via direct fetch,
-        // requiring a POSITIVE marker (not just absence of error
-        // strings). Include the admin cookie in case AF ever gates
-        // item view behind login — without it we could read a generic
-        // login page and false-positive-confirm.
-        try {
-          const detailUrl = `https://auctionfactory.com/item_detail.php?item=${rawId}`;
-          const dr = await fetch(detailUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              Cookie: cookieUsed,
-            },
-            redirect: 'follow',
-          });
-          if (dr.ok) {
-            const html = await dr.text();
-            // Positive-marker check: the final response URL still
-            // carries the correct item id in its query string, AND the
-            // page contains at least one commerce-page marker. Either
-            // signal alone could be faked by a redirect to a stale
-            // page; both together confirm this is the right item page.
-            const urlOk =
-              dr.url.includes(`item=${rawId}`) || detailUrl.includes(`item=${rawId}`);
-            const commerceMarkers = [
-              /Current\s*Bid/i,
-              /Add\s*to\s*Watchlist/i,
-              /Place\s*Bid/i,
-              /Buy\s*It\s*Now/i,
-              /Lot\s*#\s*\d+/i,
-              new RegExp(`item=${rawId}\\b`),
-            ];
-            const hasMarker = commerceMarkers.some((rx) => rx.test(html));
-            if (urlOk && hasMarker) {
-              continue;
-            }
-          }
-        } catch {
-          // Public fetch error — don't guess. Fall through to flip only
-          // if title lookup also fails below.
-        }
-      }
-      // Rule 3: fall back to title lookup.
-      const lotRow = lots.find((l: any) => l.id === r.lot_id);
-      if (lotRow?.item_name) {
-        const match = adminByTitle.get(normalizeTitle(lotRow.item_name));
-        if (match) {
-          if (match !== rawId) {
-            await supabase.from('lots').update({ af_item_id: match }).eq('id', r.lot_id);
-          }
-          continue;
-        }
-      }
-      // Really missing. Flip to failed.
-      await supabase
-        .from('lots')
-        .update({
-          af_upload_status: 'failed',
-          af_upload_error:
-            'AF_SOFT_REJECT: upload reported success but item not found on AF after push. Retry.',
-          af_item_id: null,
-        })
-        .eq('id', r.lot_id);
-      (r as any).success = false;
-      (r as any).error = 'AF_SOFT_REJECT: upload reported success but item not found on AF after push.';
-    }
-  } catch (verifyErr) {
-    console.warn('Post-batch verify skipped:', verifyErr);
-  }
+  // That path is the only defense we actually need against the original
+  // "93 duplicates" scenario, and it's already in place and works.
 
   // AUTO-RETRY one more pass: lots now marked 'failed' with transient
   // errors get a single additional attempt before giving up. Catches
