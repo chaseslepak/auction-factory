@@ -578,18 +578,20 @@ export default function AuctionDetailPage() {
           fetchData();
 
           // Circuit breaker: once we've attempted enough lots to form a
-          // signal, abort the whole batch if the failure rate is above
-          // the threshold. Protects against sending 280 doomed requests
-          // when the first 20 reveal a global problem (dead cookie, AF
-          // outage, CSRF rotation we can't recover from).
+          // signal, abort the whole batch if the REAL failure rate is
+          // above the threshold. Skipped lots (idempotency guard
+          // skips, pre-flight placeholders, already-uploaded) are NOT
+          // real failures — they must be excluded or re-pushing a
+          // partially-uploaded auction trips the breaker falsely.
           const CIRCUIT_MIN_ATTEMPTS = 20;
           const CIRCUIT_FAIL_RATE = 0.3;
-          const attempted = totalSucceeded + totalFailed;
+          const realFailedSoFar = totalFailed - totalSkipped;
+          const attempted = totalSucceeded + realFailedSoFar;
           if (
             attempted >= CIRCUIT_MIN_ATTEMPTS &&
-            totalFailed / attempted > CIRCUIT_FAIL_RATE
+            realFailedSoFar / attempted > CIRCUIT_FAIL_RATE
           ) {
-            lastError = `Circuit breaker tripped — ${totalFailed} of ${attempted} lots failed (${Math.round((totalFailed / attempted) * 100)}%). Aborting the batch to avoid wasted requests. Fix the root cause (session, CSRF, etc.) and click HQ Push again.`;
+            lastError = `Circuit breaker tripped — ${realFailedSoFar} of ${attempted} real attempts failed (${Math.round((realFailedSoFar / attempted) * 100)}%). Aborting the batch to avoid wasted requests. Fix the root cause (session, CSRF, etc.) and click HQ Push again.`;
             break;
           }
         } catch (batchErr: any) {
