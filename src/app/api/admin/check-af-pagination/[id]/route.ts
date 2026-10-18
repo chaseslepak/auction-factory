@@ -118,19 +118,28 @@ export async function GET(
     scraperError = err?.message || String(err);
   }
 
-  // Pagination signal scan — any of these in the HTML suggests AF is
-  // serving less than everything in one shot.
+  // Pagination signal scan. STRONG signals are near-certain evidence
+  // of pagination; WEAK signals can false-fire on unrelated markup
+  // (e.g. "Previous Lot Number" column header matching /prev/).
+  // Verdict is PAGINATES only if ANY strong signal fires, OR at least
+  // TWO weak signals fire together.
   const paginationSignals = {
+    // Strong: unambiguous pagination markup.
     page_query_param: /\bpage=\d+/.test(rawHtml),
     offset_query_param: /\boffset=\d+/.test(rawHtml),
     limit_query_param: /\blimit=\d+/.test(rawHtml),
-    next_link: /\b(Next|&gt;&gt;)\s*(Page|&raquo;)?/i.test(rawHtml),
-    prev_link: /\b(Prev|Previous|&lt;&lt;|&laquo;)\s*(Page)?/i.test(rawHtml),
+    next_link: /\b(Next\s+Page|&gt;&gt;\s*Next|&raquo;\s*Next)/i.test(rawHtml),
     page_n_of_m: /\bPage\s+\d+\s+of\s+\d+\b/i.test(rawHtml),
     pagination_class: /class=["'][^"']*pag(ination|er|elinks)[^"']*["']/i.test(rawHtml),
-    results_per_page: /results?[\s_-]*per[\s_-]*page/i.test(rawHtml),
+    // Weak: common false-positive sources; need ≥1 strong or ≥2 weak.
+    prev_link_weak: /\b(Prev|Previous|&lt;&lt;|&laquo;)\s*(Page)?/i.test(rawHtml),
+    results_per_page_weak: /results?[\s_-]*per[\s_-]*page/i.test(rawHtml),
   };
-  const anyPaginationSignal = Object.values(paginationSignals).some((v) => v);
+  const strongHit = ['page_query_param', 'offset_query_param', 'limit_query_param', 'next_link', 'page_n_of_m', 'pagination_class']
+    .some((k) => (paginationSignals as any)[k]);
+  const weakHits = ['prev_link_weak', 'results_per_page_weak']
+    .filter((k) => (paginationSignals as any)[k]).length;
+  const anyPaginationSignal = strongHit || weakHits >= 2;
 
   const verdict = (() => {
     if (sessionExpired) return 'session_expired — reconnect AF in Settings';
