@@ -494,113 +494,24 @@ export async function POST(request: NextRequest) {
     .eq('af_upload_status', 'uploading')
     .lt('updated_at', stuckCutoff);
 
-  // IDEMPOTENCY GUARD: scan AF's admin item list ONCE before the batch
-  // starts and skip any candidate whose normalized title already exists
-  // on AF. Prevents duplicates when: lot_status got cleared and the
-  // item is still on AF; the previous push's post-batch verify was
-  // mistaken; or an earlier batch created the item and we lost the
-  // af_item_id. Mark as 'uploaded' with the found af_item_id so audit
-  // sync stays consistent. Fails open if the admin list scrape errors.
-  try {
-    const adminItems = await fetchAdminItemList(mapping.af_auction_id, cookieUsed);
-
-    // C5 DEFENSIVE GUARD: if the admin scrape returned FEWER items than
-    // the lotter believes are already uploaded on AF, something is
-    // wrong — most likely cause is unverified AF pagination (one of
-    // the two biggest remaining duplicate risks). Rather than let the
-    // idempotency guard false-negative on page-2 items (which would
-    // cascade into re-uploads and duplicates on AF), refuse the push
-    // with a loud error that tells Chase exactly what to check.
-    //
-    // Threshold: scrape must return at least 90% of our "uploaded"
-    // count. Chase can intentionally delete items on AF, which is why
-    // we don't require 100%. 90% catches the "AF only returned the
-    // first page" case while allowing routine deletions to proceed.
-    const { count: uploadedCount } = await supabase
-      .from('lots')
-      .select('id', { count: 'exact', head: true })
-      .eq('auction_id', auction_id)
-      .eq('af_upload_status', 'uploaded')
-      .is('deleted_at', null);
-    if (
-      uploadedCount != null &&
-      uploadedCount >= 10 &&
-      adminItems.length < uploadedCount * 0.9
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            `AF admin item scrape returned ${adminItems.length} items but the lotter has ${uploadedCount} marked uploaded. ` +
-            `This is almost always AF paginating the relot_auction.php form (unverified behavior on large auctions). ` +
-            `Pushing anyway would duplicate items the scrape missed. ` +
-            `Open https://auctionfactory.com/admin/relot_auction.php?auction=${mapping.af_auction_id}&relot=Re-Lot in your browser — ` +
-            `if you see a page nav, AF paginates and we need to fix the scraper before pushing more; ` +
-            `if you see all ${uploadedCount}+ rows on one page, the scrape itself is failing and reconnecting AF in Settings may help.`,
-          admin_scrape_count: adminItems.length,
-          lotter_uploaded_count: uploadedCount,
-          af_relot_url: `https://auctionfactory.com/admin/relot_auction.php?auction=${mapping.af_auction_id}&relot=Re-Lot`,
-          scrape_guard: 'tripped',
-        },
-        { status: 409 },
-      );
-    }
-    // Track AF items per normalized title as a queue of remaining
-    // af_item_ids. When Chase has qty=2 of the same item in the lotter
-    // but AF only has one copy, only the FIRST candidate skips (links
-    // to the existing AF item); the second still pushes (creates the
-    // missing copy). Prevents silent qty loss on duplicate titles.
-    const titleQueue = new Map<string, number[]>();
-    for (const i of adminItems) {
-      const k = normalizeTitle(i.title);
-      if (!k) continue;
-      const q = titleQueue.get(k) || [];
-      q.push(i.af_item_id);
-      titleQueue.set(k, q);
-    }
-    const alreadyOnAf: Array<{ id: string; af_item_id: number }> = [];
-    // Preserve lot_number order so we skip the lower-numbered duplicate
-    // first (feels intuitive for debugging audits later).
-    const orderedCandidates = [...candidates].sort(
-      (a: any, b: any) => (a.lot_number ?? 0) - (b.lot_number ?? 0),
-    );
-    for (const c of orderedCandidates) {
-      if (!c.item_name) continue;
-      const k = normalizeTitle(c.item_name);
-      const q = titleQueue.get(k);
-      if (q && q.length > 0) {
-        const takenId = q.shift()!;
-        alreadyOnAf.push({ id: c.id, af_item_id: takenId });
-      }
-      // q now has one fewer id. Next candidate with the same title
-      // only skips if there's still an AF item left to consume.
-    }
-    if (alreadyOnAf.length > 0) {
-      for (const row of alreadyOnAf) {
-        await supabase
-          .from('lots')
-          .update({
-            af_upload_status: 'uploaded',
-            af_item_id: row.af_item_id,
-            af_upload_error: null,
-          })
-          .eq('id', row.id);
-        results.push({
-          lot_id: row.id,
-          lot_number: candidates.find((c: any) => c.id === row.id)?.lot_number ?? 0,
-          success: true,
-          skipped: true,
-          error: `Already on AF (idempotency guard — skipped to prevent duplicate; linked af_item_id ${row.af_item_id})`,
-        } as any);
-      }
-      const skippedIds = new Set(alreadyOnAf.map((a) => a.id));
-      candidates.length = 0;
-      candidates.push(
-        ...pushable.filter((c: any) => !skippedIds.has(c.id)),
-      );
-    }
-  } catch (idemErr) {
-    console.warn('Idempotency pre-check failed, proceeding:', idemErr);
-  }
+  // Idempotency guard and C5 safety guard REMOVED (2026-10-18 Mode A).
+  //
+  // Why: AF has no "skip = preserve position" semantics. The next POST
+  // always lands at AF's next sequential slot. If the guard skipped a
+  // lot because its title matched some AF item (which could be a
+  // phantom from a stale scrape cache, a deleted-but-cached item, or a
+  // genuinely-existing-but-at-wrong-position item), the NEXT lot
+  // pushed would take the position the skipped lot was meant for, and
+  // the whole sequence would scatter. The end-of-push relot can only
+  // renumber items that EXIST on AF — it can't fill gaps.
+  //
+  // Mode A: assume AF is empty for this auction (user responsibility —
+  // delete items on AF manually or accept duplicates). Every candidate
+  // lot pushes in lot_number order; any mid-upload failure inserts a
+  // placeholder stub to preserve the slot (see main loop below).
+  //
+  // Mode B (incremental in-place update via edit_item_3.php) is still
+  // deferred — needs the HAR Chase captured wired into the lib.
 
   if (candidates.length === 0) {
     return NextResponse.json({ results });
@@ -654,7 +565,12 @@ export async function POST(request: NextRequest) {
     const isLast = i === lots.length - 1;
 
     if (i > 0) {
-      const interLotDelay = activeThrottle() ? 10_000 : 3_000;
+      // Base 5s between lots (was 3s) — AF has been visibly slow on
+      // Chase's end during 300+ lot pushes. 5s is still comfortably
+      // under the 60s Vercel function budget for a 1-lot batch and
+      // gives AF breathing room. Adaptive throttle bumps to 15s when
+      // AF 429s twice in 60s.
+      const interLotDelay = activeThrottle() ? 15_000 : 5_000;
       await new Promise((r) => setTimeout(r, interLotDelay));
     }
 
@@ -781,6 +697,59 @@ export async function POST(request: NextRequest) {
       }
       await supabase.from('lots').update(updates).eq('id', lot.id);
 
+      // MODE A: PLACEHOLDER ON MID-UPLOAD FAILURE
+      // AF has no "skip = preserve position" semantics — the next POST
+      // always lands at AF's next sequential slot. If this lot failed
+      // and we move on to the next without inserting a stub, AF's
+      // numbering drifts by one for every subsequent lot. Fire a
+      // placeholder createPlaceholderOnAF now to preserve the slot;
+      // the lot stays marked 'failed' so Chase sees it needs fixing,
+      // but the sequence on AF stays aligned.
+      // Skip for session-expired (handled below) and TIMEOUT_UNCERTAIN
+      // (may have succeeded on AF side; adding a stub would duplicate).
+      if (
+        !result.success &&
+        !isTimeoutResult &&
+        !(result.error || '').includes('session expired')
+      ) {
+        try {
+          const stubResult = await createPlaceholderOnAF(
+            lot,
+            mapping.af_auction_id,
+            cookieUsed,
+            isLast ? 'exit' : 'next',
+          );
+          if (stubResult.updated_cookie) cookieUsed = stubResult.updated_cookie;
+          if (stubResult.success && stubResult.af_item_id) {
+            await supabase
+              .from('lots')
+              .update({
+                // Keep status='failed' so Failed Lots panel surfaces it,
+                // but capture the stub's af_item_id so the slot is
+                // addressable (future edit-in-place via edit_item_3.php
+                // will target this id).
+                af_item_id: stubResult.af_item_id,
+                af_upload_error: `${result.error || 'upload failed'} — placeholder inserted at AF position (af_item_id ${stubResult.af_item_id}) to preserve order. Fix the lot and re-push to replace.`,
+              })
+              .eq('id', lot.id);
+            // Update the result's error field so the client sees the
+            // placeholder was inserted.
+            result = {
+              ...result,
+              af_item_id: stubResult.af_item_id,
+              error: `${result.error || 'upload failed'} — placeholder inserted at AF (af_item_id ${stubResult.af_item_id})`,
+            };
+          } else {
+            console.error(
+              'Mid-upload placeholder insertion failed — AF sequence will drift for subsequent lots:',
+              stubResult.error,
+            );
+          }
+        } catch (phErr: any) {
+          console.error('Mid-upload placeholder exception:', phErr?.message);
+        }
+      }
+
       results.push({
         lot_id: lot.id,
         lot_number: lot.lot_number,
@@ -845,11 +814,33 @@ export async function POST(request: NextRequest) {
       }
     } catch (lotErr: any) {
       console.error('Lot upload error:', lotErr?.message, 'lot:', lot.id);
+      // Mode A: insert a placeholder here too so an unhandled exception
+      // doesn't drift the AF sequence by one for every subsequent lot.
+      let stubIdForException: number | null = null;
+      try {
+        const stubResult = await createPlaceholderOnAF(
+          lot,
+          mapping.af_auction_id,
+          cookieUsed,
+          i === lots.length - 1 ? 'exit' : 'next',
+        );
+        if (stubResult.updated_cookie) cookieUsed = stubResult.updated_cookie;
+        if (stubResult.success && stubResult.af_item_id) {
+          stubIdForException = stubResult.af_item_id;
+        } else {
+          console.error('Exception-path placeholder failed:', stubResult.error);
+        }
+      } catch (phErr: any) {
+        console.error('Exception-path placeholder exception:', phErr?.message);
+      }
       await supabase
         .from('lots')
         .update({
           af_upload_status: 'failed',
-          af_upload_error: lotErr?.message || 'Unknown error',
+          af_upload_error: stubIdForException
+            ? `${lotErr?.message || 'Unknown error'} — placeholder inserted at AF (af_item_id ${stubIdForException}) to preserve order. Fix and re-push.`
+            : lotErr?.message || 'Unknown error',
+          ...(stubIdForException ? { af_item_id: stubIdForException } : {}),
         })
         .eq('id', lot.id);
       results.push({
@@ -857,7 +848,8 @@ export async function POST(request: NextRequest) {
         lot_number: lot.lot_number,
         success: false,
         error: lotErr?.message || 'Unknown error',
-      });
+        af_item_id: stubIdForException ?? undefined,
+      } as any);
     }
   }
 
@@ -940,23 +932,27 @@ export async function POST(request: NextRequest) {
   // errors get a single additional attempt before giving up. Catches
   // ~80% of network blips without Chase clicking Retry.
   //
-  // AF_SOFT_REJECT is DELIBERATELY EXCLUDED. When a 400+ auction push
-  // comes back through post-batch verify, the admin item list scrape
-  // sometimes returns an incomplete page (pagination or truncation on
-  // AF's side), so legitimately-uploaded lots look missing. Auto-
-  // retrying those creates duplicates on AF — exactly what caused the
-  // 369→462 jump. If verify flags a soft-reject, it stays as 'failed'
-  // in Failed Lots for Chase to inspect manually; no automatic retry.
+  // MODE A SKIP: with mid-upload placeholder insertion active, any
+  // failed lot has already had a stub inserted at its AF position.
+  // Re-uploading would create a duplicate on AF (new item at the END
+  // of the auction) while the stub stays in the correct position.
+  // Only re-attempt a transient-failed lot if we did NOT successfully
+  // insert its placeholder (results entry has no af_item_id). That's
+  // the one case where a retry can't duplicate.
   const transientFail = (err: string | null | undefined) => {
     if (!err) return false;
     if (/NETWORK_ERROR/.test(err)) return true;
     if (/HTTP\s+(429|5\d\d)/.test(err)) return true;
     if (/FORBIDDEN_BY_AF/.test(err)) return true;
-    // AF_SOFT_REJECT intentionally omitted — see comment above.
     return false;
   };
   const retryLotIds = results
-    .filter((r) => !r.success && !(r as any).skipped && transientFail((r as any).error))
+    .filter((r) =>
+      !r.success &&
+      !(r as any).skipped &&
+      !(r as any).af_item_id && // Mode A: skip if placeholder already inserted.
+      transientFail((r as any).error),
+    )
     .map((r) => r.lot_id);
   if (retryLotIds.length > 0) {
     await new Promise((r) => setTimeout(r, 30_000));

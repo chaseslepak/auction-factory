@@ -507,7 +507,13 @@ export default function AuctionDetailPage() {
       // health check.
     }
 
-    if (!confirm(`Upload ${unuploaded.length} lot(s) to Auction Factory?`)) return;
+    if (!confirm(
+      `Upload ${unuploaded.length} lot(s) to Auction Factory?\n\n` +
+      `⚠ Mode A: this push ASSUMES AF is empty for this auction.\n` +
+      `If AF already has items, you'll get DUPLICATES — delete them on AF first.\n\n` +
+      `If an individual lot fails during upload, a placeholder stub will be inserted on AF to preserve the lot's position; the lot stays marked 'failed' in the lotter so you can fix it and re-push.\n\n` +
+      `Continue?`,
+    )) return;
 
     setUploading(true);
     setUploadMsg(null);
