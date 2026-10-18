@@ -1131,21 +1131,20 @@ export async function processStockImageJob(
               (p.storage_path || '').includes('/stock_')
             );
             if (!existingStock) {
-              // Shift existing photos up by 1 to make room at
-              // display_order=0, same as the normal path.
+              // U3 FIX (2026-10-18): APPEND the sibling-reused stock
+              // image to the END, not display_order=0. Previously this
+              // shifted user photos up and made the stock image AF's
+              // primary photo — the "primary is a placeholder" bug.
               const existingPhotos = ((lot as any).lot_photos || []).sort(
-                (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0)
+                (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0),
               );
-              for (const photo of existingPhotos) {
-                await supabase
-                  .from('lot_photos')
-                  .update({ display_order: (photo.display_order ?? 0) + 1 })
-                  .eq('id', photo.id);
-              }
+              const nextOrder = existingPhotos.length > 0
+                ? (existingPhotos[existingPhotos.length - 1].display_order ?? -1) + 1
+                : 0;
               await supabase.from('lot_photos').insert({
                 lot_id: lot.id,
                 storage_path: sibStock.storage_path,
-                display_order: 0,
+                display_order: nextOrder,
                 source_type: 'af-sibling',
                 source_url: sibStock.source_url || null,
               });
