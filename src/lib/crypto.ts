@@ -5,10 +5,31 @@ import crypto from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 
+// U2 (2026-10-18): the fallback to SUPABASE_SERVICE_ROLE_KEY is a
+// disaster waiting to happen — rotating the service role key would
+// permanently brick every encrypted af_session.session_cookie, with
+// NO runtime indication of the coupling. The fallback is retained for
+// now to avoid breaking existing deployments that rely on it, but we
+// log loudly when it fires. Migration path when Chase is ready:
+//   1. Set ENCRYPTION_SECRET to the current service role key value.
+//   2. Rotate the service role key (now safe — encryption is
+//      decoupled).
+//   3. Later, rotate ENCRYPTION_SECRET independently by first
+//      re-encrypting af_session.session_cookie with the new secret.
+// Once ENCRYPTION_SECRET is set in prod, we can delete the fallback.
+let fallbackWarned = false;
 function getKey(): Buffer {
-  const secret = process.env.ENCRYPTION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const explicit = process.env.ENCRYPTION_SECRET;
+  const secret = explicit || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
   if (!secret) throw new Error('ENCRYPTION_SECRET not configured');
-  // Derive a 32-byte key from the secret
+  if (!explicit && !fallbackWarned) {
+    fallbackWarned = true;
+    console.warn(
+      '[crypto.ts] ENCRYPTION_SECRET not set — falling back to SUPABASE_SERVICE_ROLE_KEY. ' +
+      'Rotating the service role key will BRICK af_session decryption. ' +
+      'Set ENCRYPTION_SECRET to the current service role key value, then the two can be rotated independently.',
+    );
+  }
   return crypto.createHash('sha256').update(secret).digest();
 }
 

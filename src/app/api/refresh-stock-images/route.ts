@@ -208,17 +208,21 @@ async function processRefresh(request: NextRequest) {
           continue;
         }
 
-        // Shift existing photos up by 1
-        const existingPhotos = (lot.lot_photos || []).sort((a: any, b: any) => a.display_order - b.display_order);
-        for (const photo of existingPhotos) {
-          await supabase
-            .from('lot_photos')
-            .update({ display_order: photo.display_order + 1 })
-            .eq('id', photo.id);
-        }
+        // U3 FIX (2026-10-18): APPEND the stock image to the END, not
+        // the start. Previously this shifted user photos up and
+        // inserted the stock image at display_order=0, which makes it
+        // AF's primary photo — exactly the "primary image is a
+        // placeholder" bug that caused AF rejections all week. Stock
+        // images are augmentation, not replacement.
+        const existingPhotos = (lot.lot_photos || []).sort(
+          (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0),
+        );
+        const nextOrder = existingPhotos.length > 0
+          ? (existingPhotos[existingPhotos.length - 1].display_order ?? -1) + 1
+          : 0;
 
-        // Upload new stock image as display_order 0
-        const storagePath = `${lot.auction_id}/${lot.id}/stock_0.jpg`;
+        // Upload new stock image at the next free display_order slot.
+        const storagePath = `${lot.auction_id}/${lot.id}/stock_${nextOrder}.jpg`;
         const { error: uploadError } = await supabase.storage
           .from('lot-photos')
           .upload(storagePath, imgBytes, {
@@ -234,7 +238,7 @@ async function processRefresh(request: NextRequest) {
           await supabase.from('lot_photos').insert({
             lot_id: lot.id,
             storage_path: storagePath,
-            display_order: 0,
+            display_order: nextOrder,
           });
 
           const currentRetail = Number(lot.estimated_retail_new) || 0;
