@@ -171,30 +171,17 @@ export interface UploadLotResult {
   cookie_rotated?: boolean;
 }
 
-// Extract AF's assigned item id from a response URL or body. AF
-// usually redirects to add_item.php?item=NNNN after a successful post,
-// so the final URL carries it. The body occasionally embeds
-// `item_detail.php?item=NNNN` instead. Returns the LARGEST id found
-// (the just-created one) so pre-existing links in the page don't
-// confuse us.
-export function extractAfItemIdFromResponse(url: string, html: string): number | null {
-  const ids: number[] = [];
-  const urlMatch = url.match(/[?&]item=(\d+)/);
-  if (urlMatch) ids.push(Number(urlMatch[1]));
-  // After add_item.php posts, AF commonly includes a "View / Edit item"
-  // link to the newly-created item. Scan for all item= refs and take
-  // the max.
-  const bodyRe = /\bitem=(\d+)\b/g;
-  let m: RegExpExecArray | null;
-  while ((m = bodyRe.exec(html)) !== null) {
-    const n = Number(m[1]);
-    if (Number.isFinite(n) && n > 0) ids.push(n);
-  }
-  if (ids.length === 0) return null;
-  // The brand-new item generally has the largest id. If AF ever changes
-  // this (e.g. embeds older item ids after new ones), fall back to the
-  // first id in the URL match.
-  return Math.max(...ids);
+// Extract AF's assigned item id from a response URL. We ONLY trust the
+// response URL's `?item=NNNN` — the body-scan approach we used before
+// could pick up cross-auction ids from the admin chrome's sidebar /
+// recent-items links (AF's add_item form embeds many `item=` refs that
+// are NOT the just-created item). A wrong capture becomes permanent
+// drift now that PR #83 removed the post-batch verify. Null returns
+// here are self-healing: the pre-batch idempotency guard on the next
+// push backfills af_item_id via title match.
+export function extractAfItemIdFromResponse(url: string, _html: string): number | null {
+  const m = url.match(/[?&]item=(\d+)/);
+  return m ? Number(m[1]) : null;
 }
 
 export async function uploadLotToAF(
