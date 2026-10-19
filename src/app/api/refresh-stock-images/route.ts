@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { computeListedPrice, syncRetailLine } from '@/lib/listing-price';
+import { computeListedPrice, syncRetailLine, formatLotTitle } from '@/lib/listing-price';
 import {
   findAndVerifyStockImage,
   researchItemFacts,
@@ -60,6 +60,9 @@ async function updateLotPriceAndDimensions(
       updates.listed_price = computeListedPrice(newRetail);
       if (lot.auction_description) {
         updates.auction_description = syncRetailLine(lot.auction_description, updates.listed_price);
+      }
+      if (lot.item_name) {
+        updates.item_name = formatLotTitle(lot.item_name, lot.condition_rating, updates.listed_price);
       }
     }
     if (dimsOut.changed) {

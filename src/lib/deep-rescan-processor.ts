@@ -362,7 +362,7 @@ Respond with ONLY a JSON object, no other text:
     const deepPrice = priceResult.price || 0;
     const maxPrice = Math.max(currentRetail, webstaurantPrice, deepPrice);
     if (maxPrice > currentRetail) {
-      const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
+      const { computeListedPrice, syncRetailLine, formatLotTitle } = await import('@/lib/listing-price');
       const newRetail = Math.round(maxPrice);
       updates.estimated_retail_new = newRetail;
       updates.listed_price = computeListedPrice(newRetail);
@@ -370,6 +370,14 @@ Respond with ONLY a JSON object, no other text:
       const currentDesc = updates.auction_description ?? lot.auction_description;
       if (currentDesc) {
         updates.auction_description = syncRetailLine(currentDesc, updates.listed_price);
+      }
+      // Re-sync the title's "($N)" suffix to match the new price —
+      // the item_name update above sets the brand/model text but
+      // without this call the title's price suffix drifts out of sync
+      // with the description and the retail field.
+      const baseName = updates.item_name ?? lot.item_name ?? '';
+      if (baseName) {
+        updates.item_name = formatLotTitle(baseName, lot.condition_rating, updates.listed_price);
       }
     }
 

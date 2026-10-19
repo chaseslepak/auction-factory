@@ -27,7 +27,7 @@ From the photos, identify the equipment and return ONLY a JSON object (no markdo
   "model": "Model number or 'Unknown'",
   "category": "e.g. Refrigeration, Cooking, Prep, Smallwares, Bar, Shelving",
   "confidence": "high | medium | low",
-  "estimated_retail_new": 1234 (REQUIRED — this must ALWAYS be a number greater than 0. Research the item thoroughly. Find the highest available retail price for this exact item brand new, then use that number. If you cannot find an exact match, estimate based on similar items in the same category. NEVER return 0 or leave blank.),
+  "estimated_retail_new": 1234 (REQUIRED — this must ALWAYS be a number greater than 0. Research the item thoroughly. Find the MEAN retail price for this exact item brand new across major retailers (typically average 3-5 current prices from WebstaurantStore, KaTom, Amazon, etc.). If you cannot find an exact match, estimate based on similar items in the same category. NEVER return 0 or leave blank.),
   "width": "Estimated width in inches if determinable from photos, or empty string",
   "depth": "Estimated depth in inches if determinable from photos, or empty string",
   "height": "Estimated height in inches if determinable from photos, or empty string",
@@ -41,7 +41,7 @@ AUCTION DESCRIPTION FORMAT (exact line breaks):
 [1-2 sentence description — reference what you actually see in the photos. If item looks new/sealed, say so. If it shows wear, be upfront. Describe the item objectively. DO NOT speculate about what it might sell for at auction or hint at a "deal" / "value" / "savings vs retail".]
 
 FEATURES:
-Retail Price: $[estimated_retail_new × 1.10, rounded — this is 10% above the highest retail you found. Do NOT mention the markup.]
+Retail Price: $[estimated_retail_new, rounded — this is the mean retail price for the item brand new. No markup.]
 • [feature — based on what you can see/verify in photos]
 • [feature]
 • [feature]
@@ -77,7 +77,7 @@ ABSOLUTE RULES:
 - Use "•" (bullet character) for bullets, not hyphens or asterisks
 - Use straight quotes (' and ") not smart quotes
 - Use regular dashes (-) not em-dashes (—)
-- Retail price in the listing = estimated_retail_new × 1.10, rounded. Never reference the markup. The estimated_retail_new MUST be the highest retail price you can find for this item brand new — NEVER return 0
+- Retail price in the listing = estimated_retail_new, rounded. No markup. The estimated_retail_new MUST be the mean retail price for this item brand new — NEVER return 0
 - If you cannot identify the item confidently, set confidence to "low" and say so honestly in the description
 - Be honest about condition — describe what you SEE in the photos, don't just restate the rating number
 - For Gridmann items: describe as "new in box," retail $250
