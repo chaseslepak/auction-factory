@@ -32,6 +32,31 @@ export default function AuctionDetailPage() {
   const pausedRef = useRef(false);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   const [resyncingPricing, setResyncingPricing] = useState(false);
+  // Audit-driven synced count: lotter lots that AF confirms it has.
+  // Fetched on mount + after any push/sync action. Null = not yet
+  // loaded; a number = authoritative.
+  const [auditSyncedCount, setAuditSyncedCount] = useState<number | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const refreshAudit = async () => {
+    setAuditLoading(true);
+    try {
+      const res = await fetch(`/api/audit-auction/${id}`);
+      const data = await res.json();
+      if (res.ok && data?.counts) {
+        const total = data.counts.lotter_lots ?? 0;
+        const onlyInLotter = Array.isArray(data.only_in_lotter) ? data.only_in_lotter.length : 0;
+        setAuditSyncedCount(Math.max(0, total - onlyInLotter));
+      }
+    } catch {
+      // Non-fatal — the lotter-side counter still renders as fallback.
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (id) refreshAudit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
   const [afLinked, setAfLinked] = useState(false);
   const [showAfLink, setShowAfLink] = useState(false);
@@ -237,99 +262,10 @@ export default function AuctionDetailPage() {
     setUploading(false);
   };
 
-  const [markingAsOnAf, setMarkingAsOnAf] = useState(false);
-
-  // Parse a lot-number range string like "1-66", "1,3,5-10", "22, 45, 67-70".
-  // Returns a sorted array of unique numbers, or null if parsing failed.
-  const parseLotNumberRanges = (input: string): number[] | null => {
-    const text = input.trim();
-    if (!text) return null;
-    const result = new Set<number>();
-    const parts = text.split(/[,\s]+/).filter(Boolean);
-    for (const part of parts) {
-      const rangeMatch = part.match(/^(\d+)-(\d+)$/);
-      if (rangeMatch) {
-        const start = parseInt(rangeMatch[1], 10);
-        const end = parseInt(rangeMatch[2], 10);
-        if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return null;
-        for (let n = start; n <= end; n++) result.add(n);
-      } else if (/^\d+$/.test(part)) {
-        result.add(parseInt(part, 10));
-      } else {
-        return null;
-      }
-    }
-    return Array.from(result).sort((a, b) => a - b);
-  };
-
-  const handleMarkAsOnAf = async () => {
-    const input = prompt(
-      `Which lots are ALREADY on AF (so HQ Push should skip them)?\n\n` +
-      `Enter lot numbers or ranges, separated by commas:\n` +
-      `  Examples: "1-66"   "1,3,5"   "1-10, 22, 25-30"\n\n` +
-      `This marks those lotter rows as af_upload_status='uploaded' so the next\n` +
-      `HQ Push leaves them alone. Use when AF already has items from a prior\n` +
-      `push and you don't want to re-upload them.`,
-    );
-    if (input === null) return;
-    const lotNumbers = parseLotNumberRanges(input);
-    if (!lotNumbers || lotNumbers.length === 0) {
-      setUploadMsg({
-        type: 'error',
-        text: `Could not parse "${input}". Use formats like "1-66" or "1,3,5-10".`,
-      });
-      return;
-    }
-
-    // Match against lots actually in this auction.
-    const existingLotNumbers = new Set(lots.map((l: any) => Number(l.lot_number)));
-    const matched = lotNumbers.filter((n) => existingLotNumbers.has(n));
-    const missing = lotNumbers.filter((n) => !existingLotNumbers.has(n));
-    if (matched.length === 0) {
-      setUploadMsg({
-        type: 'error',
-        text: `None of the lot numbers you entered exist in this auction. Missing: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`,
-      });
-      return;
-    }
-
-    const missingNote = missing.length > 0
-      ? `\n\nNote: ${missing.length} entered lot number(s) don't exist in this auction and will be ignored: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`
-      : '';
-    if (!confirm(
-      `Mark ${matched.length} lot(s) as already uploaded to AF?\n\n` +
-      `These lot numbers will have af_upload_status='uploaded' set so HQ Push skips them:\n` +
-      `${matched.slice(0, 30).join(', ')}${matched.length > 30 ? '…' : ''}` +
-      missingNote,
-    )) return;
-
-    setMarkingAsOnAf(true);
-    setUploadMsg(null);
-    try {
-      const { error } = await supabase
-        .from('lots')
-        .update({
-          af_upload_status: 'uploaded',
-          af_upload_error: 'Marked as already on AF by user — HQ Push will skip. af_item_id not captured; audit will reconcile against real AF items by title.',
-        })
-        .eq('auction_id', id)
-        .in('lot_number', matched)
-        .is('deleted_at', null);
-      if (error) {
-        setUploadMsg({ type: 'error', text: `Update failed: ${error.message}` });
-      } else {
-        setUploadMsg({
-          type: 'success',
-          text: `${matched.length} lot(s) marked as already on AF. HQ Push will skip them.`,
-        });
-        await fetchData();
-      }
-    } catch (err: any) {
-      setUploadMsg({ type: 'error', text: err?.message || 'Update failed' });
-    } finally {
-      setMarkingAsOnAf(false);
-    }
-  };
+  // Note: the standalone "Mark Lots Already on AF" button was removed
+  // on 2026-10-19 in favor of per-row inline actions on the Audit page.
+  // Open the Audit page → each "Only in lotter" row has "On AF" to mark
+  // uploaded, "Clear" to reset, and "#" to change the lot_number.
 
   const handleResyncPricing = async () => {
     const lotCount = lots.length;
@@ -1236,14 +1172,6 @@ export default function AuctionDetailPage() {
                 {resyncingPricing ? 'Refreshing prices…' : 'Refresh Pricing on All Lots'}
               </button>
               <button
-                onClick={handleMarkAsOnAf}
-                disabled={uploading || refreshing || markingAsOnAf}
-                className="w-full py-2 rounded-xl border-2 border-yellow-500 text-yellow-700 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
-                title="Enter lot numbers (e.g. '1-66') you already pushed to AF. Those lots get af_upload_status='uploaded' so HQ Push leaves them alone."
-              >
-                {markingAsOnAf ? 'Marking…' : 'Mark Lots Already on AF'}
-              </button>
-              <button
                 onClick={() => handleUploadToAf()}
                 disabled={uploading}
                 className="w-full py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
@@ -1414,13 +1342,23 @@ export default function AuctionDetailPage() {
             </div>
             <div>
               <p
-                className="text-xs text-gray-400 uppercase tracking-wide"
-                title="This is the LOTTER's view of what's uploaded — the number of rows with af_upload_status='uploaded'. It is NOT a live check against AF. Open the Audit page to see what AF actually has."
+                className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1"
+                title="Synced to AF — lotter lots that an audit of AF confirms are there. Auto-refreshes on page load; click the arrow to re-audit."
               >
-                Marked Uploaded <span className="normal-case text-[10px] text-gray-300">(lotter)</span>
+                Synced to AF
+                <button
+                  onClick={refreshAudit}
+                  disabled={auditLoading}
+                  className="text-[10px] text-brand-blue disabled:opacity-50"
+                  title="Re-run audit"
+                >
+                  {auditLoading ? '⟳' : '↻'}
+                </button>
               </p>
               <p className="text-sm font-black text-brand-blue">
-                {lots.filter((l: any) => l.af_upload_status === 'uploaded').length}/{lots.length}
+                {auditSyncedCount != null
+                  ? `${auditSyncedCount}/${lots.length}`
+                  : `—/${lots.length}`}
               </p>
             </div>
             <div>
