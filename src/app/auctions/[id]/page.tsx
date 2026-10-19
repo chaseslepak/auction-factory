@@ -590,15 +590,82 @@ export default function AuctionDetailPage() {
     // Resume path skips the Mode A "AF assumed empty" confirmation
     // because resume continues an existing push — AF already has
     // partial content, that's expected.
+    // PRE-PUSH AUTO-LINK: run the audit first and mark any lotter lots
+    // that AF already has as uploaded (so HQ Push skips them). This
+    // handles the "AF has lot 4, lotter wants to push 1..N" case —
+    // push sends 1,2,3,5,6,... in order, AF appends them at next
+    // sequential position, end-of-push relot renumbers to match
+    // lotter's lot_numbers. No duplicates on AF for already-present lots.
+    //
+    // Non-destructive: uses clear_mode='none', so only MARKS matches
+    // (via af_item_id or title+lot_number co-sign). Doesn't touch
+    // possible_name_mismatches (user resolves those on audit page).
+    let autoLinkedCount = 0;
+    let afHasAnyItems = false;
     if (!isResume) {
+      try {
+        setUploadMsg({ type: 'success', text: 'Checking AF for existing items…' });
+        const auditRes = await fetch(`/api/audit-auction/${id}`);
+        const auditData = await auditRes.json();
+        if (auditRes.ok && auditData?.counts) {
+          afHasAnyItems = (auditData.counts.af_lots ?? 0) > 0;
+          if (afHasAnyItems) {
+            const syncRes = await fetch(`/api/audit-auction/${id}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ confirm: true, clear_mode: 'none' }),
+            });
+            const syncData = await syncRes.json();
+            if (syncRes.ok) {
+              autoLinkedCount = syncData.marked_uploaded ?? 0;
+              if (autoLinkedCount > 0) {
+                // Re-fetch lots so the unuploaded list excludes the
+                // newly-marked ones. Otherwise we'd push them again.
+                await fetchData();
+              }
+            }
+          }
+        }
+      } catch {
+        // Non-fatal — if the audit fails here, we fall back to Mode A
+        // behavior. User can abort if they want.
+      }
+    }
+
+    // Recompute unuploaded after possible auto-link.
+    const unuploadedAfterLink = isResume
+      ? unuploaded
+      : lots
+          .filter((l) => l.af_upload_status !== 'uploaded')
+          .slice()
+          .sort((a, b) => a.lot_number - b.lot_number);
+
+    if (unuploadedAfterLink.length === 0) {
+      setUploadMsg({
+        type: 'success',
+        text: `Nothing to push — ${autoLinkedCount > 0 ? `auto-linked ${autoLinkedCount} lots to existing AF items. ` : ''}All lots are already on AF.`,
+      });
+      return;
+    }
+
+    if (!isResume) {
+      const autoLinkNote = autoLinkedCount > 0
+        ? `✓ Auto-linked ${autoLinkedCount} lotter lots to existing AF items — they will be SKIPPED in this push.\n\n`
+        : afHasAnyItems
+          ? `AF currently has items but none matched your lotter lots — this push will add to AF alongside what's already there.\n\n`
+          : `AF appears empty for this auction — pushing all ${unuploadedAfterLink.length} lots fresh.\n\n`;
       if (!confirm(
-        `Upload ${unuploaded.length} lot(s) to Auction Factory?\n\n` +
-        `⚠ Mode A: this push ASSUMES AF is empty for this auction.\n` +
-        `If AF already has items, you'll get DUPLICATES — delete them on AF first.\n\n` +
+        `Upload ${unuploadedAfterLink.length} lot(s) to Auction Factory?\n\n` +
+        autoLinkNote +
         `If an individual lot fails during upload, a placeholder stub will be inserted on AF to preserve the lot's position; the lot stays marked 'failed' in the lotter so you can fix it and re-push.\n\n` +
+        `End-of-push relot renumbers AF items to match the lotter's lot_number order.\n\n` +
         `Continue?`,
       )) return;
     }
+
+    // Replace in-scope unuploaded with the post-auto-link set.
+    unuploaded.length = 0;
+    unuploaded.push(...unuploadedAfterLink);
 
     setUploading(true);
     setUploadMsg(null);
