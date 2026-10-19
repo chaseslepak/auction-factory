@@ -5,8 +5,15 @@
 // review page lets users edit retail directly. All three paths funnel
 // through these helpers.
 
-// Markup over retail that becomes the shown listing price. 10% today.
-export const LISTED_PRICE_MARKUP = 1.1;
+// Markup over retail that becomes the shown listing price.
+//
+// 2026-10-19: markup disabled per Chase. The raw mean "retail new"
+// price now shows everywhere — title suffix, description retail line,
+// and the retail field — matching his "pulling in mean price if the
+// item was new and match throughout the listing" requirement. Change
+// the constant back to a value > 1 to re-enable the markup; the
+// generate-listing AI prompt also needs matching language.
+export const LISTED_PRICE_MARKUP = 1.0;
 
 export function computeListedPrice(retailNew: number): number {
   const r = Number(retailNew) || 0;

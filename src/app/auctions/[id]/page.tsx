@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -24,6 +24,14 @@ export default function AuctionDetailPage() {
   const [uploadMsg, setUploadMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
+  // Pause/resume (2026-10-18): user can halt a long push mid-run and
+  // resume later without losing progress. pausedRef mirrors the state
+  // for inside the batch loop since React state closes over values at
+  // call time.
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+  const [resyncingPricing, setResyncingPricing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
   const [afLinked, setAfLinked] = useState(false);
   const [showAfLink, setShowAfLink] = useState(false);
@@ -227,6 +235,46 @@ export default function AuctionDetailPage() {
     }
 
     setUploading(false);
+  };
+
+  const handleResyncPricing = async () => {
+    const lotCount = lots.length;
+    if (lotCount === 0) {
+      setUploadMsg({ type: 'error', text: 'No lots in this auction to resync.' });
+      return;
+    }
+    if (!confirm(
+      `Refresh pricing on all ${lotCount} lot(s) in this auction?\n\n` +
+      `This re-applies the current pricing convention (title suffix "($N)", description "Retail Price: $N" line, and listed_price) to every lot using its estimated_retail_new as the source of truth.\n\n` +
+      `Lotter-only — items already on AF stay as-is until re-pushed.\n\n` +
+      `Continue?`,
+    )) return;
+
+    setResyncingPricing(true);
+    setUploadMsg(null);
+    try {
+      const res = await fetch(`/api/admin/resync-pricing/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setUploadMsg({ type: 'error', text: data?.error || `HTTP ${res.status}` });
+      } else {
+        const noteParts = [
+          `${data.updated} lot(s) updated`,
+        ];
+        if (data.unchanged) noteParts.push(`${data.unchanged} already matched`);
+        if (data.skipped_no_retail) noteParts.push(`${data.skipped_no_retail} skipped (no retail price)`);
+        setUploadMsg({ type: 'success', text: noteParts.join(' · ') });
+        await fetchData();
+      }
+    } catch (err: any) {
+      setUploadMsg({ type: 'error', text: err?.message || 'Resync failed' });
+    } finally {
+      setResyncingPricing(false);
+    }
   };
 
   const handleRefreshStockImages = async () => {
@@ -440,7 +488,8 @@ export default function AuctionDetailPage() {
     });
   };
 
-  const handleUploadToAf = async () => {
+  const handleUploadToAf = async (opts?: { resume?: boolean }) => {
+    const isResume = !!opts?.resume;
     // Sort by lot_number to guarantee upload order (this is critical!)
     const unuploaded = lots
       .filter((l) => l.af_upload_status !== 'uploaded')
@@ -507,13 +556,18 @@ export default function AuctionDetailPage() {
       // health check.
     }
 
-    if (!confirm(
-      `Upload ${unuploaded.length} lot(s) to Auction Factory?\n\n` +
-      `⚠ Mode A: this push ASSUMES AF is empty for this auction.\n` +
-      `If AF already has items, you'll get DUPLICATES — delete them on AF first.\n\n` +
-      `If an individual lot fails during upload, a placeholder stub will be inserted on AF to preserve the lot's position; the lot stays marked 'failed' in the lotter so you can fix it and re-push.\n\n` +
-      `Continue?`,
-    )) return;
+    // Resume path skips the Mode A "AF assumed empty" confirmation
+    // because resume continues an existing push — AF already has
+    // partial content, that's expected.
+    if (!isResume) {
+      if (!confirm(
+        `Upload ${unuploaded.length} lot(s) to Auction Factory?\n\n` +
+        `⚠ Mode A: this push ASSUMES AF is empty for this auction.\n` +
+        `If AF already has items, you'll get DUPLICATES — delete them on AF first.\n\n` +
+        `If an individual lot fails during upload, a placeholder stub will be inserted on AF to preserve the lot's position; the lot stays marked 'failed' in the lotter so you can fix it and re-push.\n\n` +
+        `Continue?`,
+      )) return;
+    }
 
     setUploading(true);
     setUploadMsg(null);
@@ -532,6 +586,12 @@ export default function AuctionDetailPage() {
 
     try {
       for (let i = 0; i < batches.length; i++) {
+        // PAUSE check — stop before the next batch's request fires.
+        // Any in-flight batch finishes normally so no partial writes.
+        if (pausedRef.current) {
+          lastError = `Push paused by user after ${totalSucceeded + totalFailed} of ${unuploaded.length} lots. Click Resume to continue from where you left off.`;
+          break;
+        }
 
         try {
           const res = await fetch('/api/af-upload', {
@@ -646,6 +706,7 @@ export default function AuctionDetailPage() {
         }
         let retrySucceeded = 0;
         for (let i = 0; i < retryBatches.length; i++) {
+          if (pausedRef.current) break; // Respect pause in retry pass too.
           try {
             const res = await fetch('/api/af-upload', {
               method: 'POST',
@@ -703,6 +764,9 @@ export default function AuctionDetailPage() {
 
     setUploading(false);
     setUploadProgress({ current: 0, total: 0 });
+    // Reset pause flag so the next push isn't instantly paused.
+    setPaused(false);
+    pausedRef.current = false;
   };
 
   const deleteLot = async (lotId: string) => {
@@ -863,7 +927,7 @@ export default function AuctionDetailPage() {
       const multi = Number(bulkPriceMultiplier);
       if (!isNaN(multi) && multi > 0) {
         // Apply multiplier per-lot (can't do in one query)
-        const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
+        const { computeListedPrice, syncRetailLine, formatLotTitle } = await import('@/lib/listing-price');
         const lotsToUpdate = lots.filter((l) => selectedLots.has(l.id));
         for (const lot of lotsToUpdate) {
           const currentRetail = Number(lot.estimated_retail_new) || 0;
@@ -874,12 +938,20 @@ export default function AuctionDetailPage() {
             listed_price: newListed,
             ...updates,
           };
-          // Keep "Retail Price: $X" line inside the description in sync
-          // with the new listed_price so the two don't drift apart.
+          // Keep "Retail Price: $X" line inside the description AND the
+          // "($N)" suffix on the title in sync with the new listed_price
+          // so none of the three drift apart.
           if ((lot as any).auction_description) {
             perLotUpdate.auction_description = syncRetailLine(
               (lot as any).auction_description,
               newListed
+            );
+          }
+          if ((lot as any).item_name) {
+            perLotUpdate.item_name = formatLotTitle(
+              (lot as any).item_name,
+              (lot as any).condition_rating,
+              newListed,
             );
           }
           await supabase.from('lots').update(perLotUpdate).eq('id', lot.id);
@@ -1062,12 +1134,49 @@ export default function AuctionDetailPage() {
                 Audit AF vs Lotter
               </Link>
               <button
-                onClick={handleUploadToAf}
+                onClick={handleResyncPricing}
+                disabled={uploading || refreshing || resyncingPricing}
+                className="w-full py-2 rounded-xl border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                title="Re-apply pricing convention (title suffix, retail line in description, listed_price) to every lot in this auction. Lotter-only; items on AF stay as-is until re-pushed."
+              >
+                {resyncingPricing ? 'Refreshing prices…' : 'Refresh Pricing on All Lots'}
+              </button>
+              <button
+                onClick={() => handleUploadToAf()}
                 disabled={uploading}
                 className="w-full py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
               >
-                {uploading ? 'Pushing to AF…' : 'HQ Push to AF'}
+                {uploading
+                  ? (paused ? 'Pausing…' : `Pushing to AF… ${uploadProgress.current}/${uploadProgress.total}`)
+                  : 'HQ Push to AF'}
               </button>
+              {uploading && !paused && (
+                <button
+                  onClick={() => setPaused(true)}
+                  className="w-full py-2 rounded-xl border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide"
+                  title="Finishes the current lot's upload, then stops. Click Resume to continue from where you left off."
+                >
+                  Pause Push
+                </button>
+              )}
+              {!uploading && (() => {
+                // Resume button appears when there are still lots left
+                // to push (i.e. an earlier push was paused or interrupted).
+                const unuploadedCount = lots.filter((l) =>
+                  l.af_upload_status !== 'uploaded',
+                ).length;
+                const anyUploaded = lots.some((l) => l.af_upload_status === 'uploaded');
+                if (unuploadedCount === 0 || !anyUploaded) return null;
+                return (
+                  <button
+                    onClick={() => handleUploadToAf({ resume: true })}
+                    className="w-full py-2 rounded-xl border-2 border-brand-green text-brand-green font-bold text-xs uppercase tracking-wide"
+                    title={`Resume push — ${unuploadedCount} lot(s) remaining. Skips the "AF empty" confirmation; AF already has partial content from the previous push.`}
+                  >
+                    ▶ Resume Push ({unuploadedCount} remaining)
+                  </button>
+                );
+              })()}
               <button
                 onClick={async () => {
                   if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;

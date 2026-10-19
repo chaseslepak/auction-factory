@@ -1149,11 +1149,10 @@ export async function processStockImageJob(
                 source_url: sibStock.source_url || null,
               });
             }
-            // Price bump + description sync, same shape as the normal
-            // path below.
+            // Price bump + description sync + title suffix sync.
             const currentRetail = Number(lot.estimated_retail_new) || 0;
             if (sibRetail > currentRetail) {
-              const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
+              const { computeListedPrice, syncRetailLine, formatLotTitle } = await import('@/lib/listing-price');
               const newRetail = Math.round(sibRetail);
               const newListed = computeListedPrice(newRetail);
               const updates: any = {
@@ -1165,6 +1164,9 @@ export async function processStockImageJob(
                   lot.auction_description,
                   newListed
                 );
+              }
+              if (lot.item_name) {
+                updates.item_name = formatLotTitle(lot.item_name, lot.condition_rating, newListed);
               }
               await supabase.from('lots').update(updates).eq('id', lot.id);
             }
@@ -1256,11 +1258,14 @@ export async function processStockImageJob(
     if (needsRetailUpdate || dimsOut.changed) {
       const updates: any = {};
       if (needsRetailUpdate) {
-        const { computeListedPrice, syncRetailLine } = await import('@/lib/listing-price');
+        const { computeListedPrice, syncRetailLine, formatLotTitle } = await import('@/lib/listing-price');
         updates.estimated_retail_new = picked.retail;
         updates.listed_price = computeListedPrice(picked.retail);
         if (lot.auction_description) {
           updates.auction_description = syncRetailLine(lot.auction_description, updates.listed_price);
+        }
+        if (lot.item_name) {
+          updates.item_name = formatLotTitle(lot.item_name, lot.condition_rating, updates.listed_price);
         }
       }
       if (dimsOut.changed) {
