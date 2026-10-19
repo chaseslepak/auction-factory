@@ -103,8 +103,27 @@ export async function fetchAdminItemList(
   return parseAdminItemList(html);
 }
 
-// Normalize an item title for cross-source matching. Mirrors the
-// relot-sync normalizer so admin ↔ lotter comparisons agree.
+// Normalize an item title for cross-source matching. Handles:
+//  - case + whitespace
+//  - HTML entities AF often emits (&amp; &quot; &#039;)
+//  - smart quotes vs straight quotes
+//  - em-dash / en-dash vs regular hyphen
+// Prevents false mismatches between visually-identical titles that are
+// encoded differently on the lotter and the AF scrape.
 export function normalizeTitle(s: string | null | undefined): string {
-  return (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  return s
+    .toLowerCase()
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

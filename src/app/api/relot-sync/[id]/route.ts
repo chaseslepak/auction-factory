@@ -9,8 +9,26 @@ const AF_BASE = 'https://auctionfactory.com/admin';
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-const normalize = (s: string) =>
-  (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Same normalization as audit + admin scraper — decodes HTML entities
+// and normalizes smart quotes / dashes so lotter↔AF title matches
+// don't false-mismatch on encoding differences.
+const normalize = (s: string): string => {
+  if (!s) return '';
+  return s
+    .toLowerCase()
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
 
 interface RelotRow {
   af_item_id: string;
