@@ -163,8 +163,30 @@ export async function GET(
   }
 
   type LotterRow = NonNullable<typeof lots>[number];
-  const normTitle = (s: string | null | undefined) =>
-    (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  // Normalize titles for lotter↔AF comparison. Handles:
+  //  - case + whitespace
+  //  - HTML entities AF often emits in rendered titles (&amp; &quot; &#039;)
+  //  - smart quotes vs straight quotes
+  //  - em-dash / en-dash vs regular hyphen
+  // Prevents false mismatches where titles are visually identical but
+  // encoded differently on each side.
+  const normTitle = (s: string | null | undefined) => {
+    if (!s) return '';
+    return s
+      .toLowerCase()
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/[–—]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
 
   const lotterByNumber = new Map<number, LotterRow>();
   // af_item_id is the durable key: when the lotter captured one on a
