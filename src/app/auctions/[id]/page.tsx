@@ -43,9 +43,10 @@ export default function AuctionDetailPage() {
       const res = await fetch(`/api/audit-auction/${id}`);
       const data = await res.json();
       if (res.ok && data?.counts) {
-        const total = data.counts.lotter_lots ?? 0;
-        const onlyInLotter = Array.isArray(data.only_in_lotter) ? data.only_in_lotter.length : 0;
-        setAuditSyncedCount(Math.max(0, total - onlyInLotter));
+        // Show the audit's actual AF item count — same number the
+        // Audit page displays. Keeps the stat tile and the audit
+        // page in exact agreement.
+        setAuditSyncedCount(data.counts.af_lots ?? 0);
       }
     } catch {
       // Non-fatal — the lotter-side counter still renders as fallback.
