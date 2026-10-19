@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Header from '@/components/Header';
 import GradientButton from '@/components/GradientButton';
+import { createClient } from '@/lib/supabase/client';
 
 interface AuditResult {
   auction_name: string;
@@ -11,6 +12,7 @@ interface AuditResult {
   af_url: string;
   counts: { lotter_lots: number; af_lots: number };
   only_in_lotter: Array<{
+    lot_id: string;
     lot_number: number;
     item_name: string;
     af_upload_status: string | null;
@@ -22,6 +24,7 @@ interface AuditResult {
     copies: Array<{ af_item_id: string; title: string; af_item_url: string }>;
   }>;
   possible_name_mismatches: Array<{
+    lot_id: string;
     lot_number: number;
     lotter_item: string;
     af_titles: string[];
@@ -184,6 +187,79 @@ export default function AuditPage() {
       setError(err?.message || String(err));
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // Supabase client for inline row actions.
+  const supabase = createClient();
+  const [rowBusy, setRowBusy] = useState<Set<string>>(new Set());
+  const markRowBusy = (lot_id: string, busy: boolean) => {
+    setRowBusy((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(lot_id); else next.delete(lot_id);
+      return next;
+    });
+  };
+
+  // Accept: mark the lotter row as uploaded so HQ Push will skip it.
+  // Used on "only in lotter" rows when user says "AF has it, I just
+  // don't have the af_item_id captured". No AF side-effect.
+  const acceptOnlyInLotterAsUploaded = async (lot_id: string, lot_number: number) => {
+    if (!confirm(`Mark lot #${lot_number} as already on AF? HQ Push will skip it.`)) return;
+    markRowBusy(lot_id, true);
+    try {
+      const { error } = await supabase
+        .from('lots')
+        .update({
+          af_upload_status: 'uploaded',
+          af_upload_error: 'Marked as already on AF via audit — HQ Push will skip. af_item_id not captured.',
+        })
+        .eq('id', lot_id);
+      if (error) alert(`Update failed: ${error.message}`);
+      else await runAudit();
+    } finally {
+      markRowBusy(lot_id, false);
+    }
+  };
+
+  // Accept: for "only in lotter" rows the user wants to clear status
+  // so HQ Push WILL send it (e.g. user intentionally deleted the AF
+  // item and wants a fresh push).
+  const acceptOnlyInLotterAsNotUploaded = async (lot_id: string, lot_number: number) => {
+    if (!confirm(`Clear uploaded status on lot #${lot_number}? HQ Push will try to send it to AF.`)) return;
+    markRowBusy(lot_id, true);
+    try {
+      const { error } = await supabase
+        .from('lots')
+        .update({ af_upload_status: null, af_item_id: null, af_upload_error: null })
+        .eq('id', lot_id);
+      if (error) alert(`Update failed: ${error.message}`);
+      else await runAudit();
+    } finally {
+      markRowBusy(lot_id, false);
+    }
+  };
+
+  // Change the lotter row's lot_number. Prompts for a new one.
+  const changeLotNumber = async (lot_id: string, current: number) => {
+    const input = prompt(`Change lot #${current} to a new lot number:`, String(current));
+    if (input === null) return;
+    const next = parseInt(input.trim(), 10);
+    if (!Number.isFinite(next) || next <= 0) {
+      alert(`"${input}" is not a valid lot number.`);
+      return;
+    }
+    if (next === current) return;
+    markRowBusy(lot_id, true);
+    try {
+      const { error } = await supabase
+        .from('lots')
+        .update({ lot_number: next })
+        .eq('id', lot_id);
+      if (error) alert(`Update failed: ${error.message}`);
+      else await runAudit();
+    } finally {
+      markRowBusy(lot_id, false);
     }
   };
 
@@ -455,15 +531,44 @@ export default function AuditPage() {
               empty="None — everything in the lotter is on AF"
               variant="warning"
             >
-              {result.only_in_lotter.map((lot) => (
-                <Row key={`lot-${lot.lot_number}`}>
-                  <span className="font-mono text-xs w-14">#{lot.lot_number}</span>
-                  <span className="flex-1 truncate">{lot.item_name}</span>
-                  <span className="text-xs text-gray-500">
-                    {lot.af_upload_status || 'never sent'}
-                  </span>
-                </Row>
-              ))}
+              {result.only_in_lotter.map((lot) => {
+                const busy = rowBusy.has(lot.lot_id);
+                return (
+                  <Row key={`lot-${lot.lot_number}`}>
+                    <span className="font-mono text-xs w-14">#{lot.lot_number}</span>
+                    <span className="flex-1 truncate">{lot.item_name}</span>
+                    <span className="text-[10px] text-gray-500 whitespace-nowrap">
+                      {lot.af_upload_status || 'never sent'}
+                    </span>
+                    <div className="flex gap-1 ml-2">
+                      <button
+                        onClick={() => acceptOnlyInLotterAsUploaded(lot.lot_id, lot.lot_number)}
+                        disabled={busy}
+                        title="Mark as already on AF (HQ Push will skip)"
+                        className="text-[10px] px-2 py-1 rounded border border-green-500 text-green-700 disabled:opacity-50"
+                      >
+                        On AF
+                      </button>
+                      <button
+                        onClick={() => acceptOnlyInLotterAsNotUploaded(lot.lot_id, lot.lot_number)}
+                        disabled={busy}
+                        title="Clear status so HQ Push will re-send it"
+                        className="text-[10px] px-2 py-1 rounded border border-yellow-500 text-yellow-700 disabled:opacity-50"
+                      >
+                        Clear
+                      </button>
+                      <button
+                        onClick={() => changeLotNumber(lot.lot_id, lot.lot_number)}
+                        disabled={busy}
+                        title="Change this lot's number in the lotter"
+                        className="text-[10px] px-2 py-1 rounded border border-brand-blue text-brand-blue disabled:opacity-50"
+                      >
+                        #
+                      </button>
+                    </div>
+                  </Row>
+                );
+              })}
             </Section>
 
             <Section
@@ -472,17 +577,38 @@ export default function AuditPage() {
               empty="None"
               variant="warning"
             >
-              {result.possible_name_mismatches.map((m) => (
-                <Row key={`mm-${m.lot_number}`}>
-                  <span className="font-mono text-xs w-14">#{m.lot_number}</span>
-                  <div className="flex-1">
-                    <p className="text-xs text-gray-500">Lotter: {m.lotter_item}</p>
-                    <p className="text-xs text-gray-500">
-                      AF: {m.af_titles.join(' | ')}
-                    </p>
-                  </div>
-                </Row>
-              ))}
+              {result.possible_name_mismatches.map((m) => {
+                const busy = rowBusy.has(m.lot_id);
+                return (
+                  <Row key={`mm-${m.lot_number}`}>
+                    <span className="font-mono text-xs w-14">#{m.lot_number}</span>
+                    <div className="flex-1">
+                      <p className="text-xs text-gray-500">Lotter: {m.lotter_item}</p>
+                      <p className="text-xs text-gray-500">
+                        AF: {m.af_titles.join(' | ')}
+                      </p>
+                    </div>
+                    <div className="flex gap-1 ml-2">
+                      <button
+                        onClick={() => acceptOnlyInLotterAsUploaded(m.lot_id, m.lot_number)}
+                        disabled={busy}
+                        title="Accept as is — the AF item IS this lot (different wording). Mark as uploaded, HQ Push skips."
+                        className="text-[10px] px-2 py-1 rounded border border-green-500 text-green-700 disabled:opacity-50"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => changeLotNumber(m.lot_id, m.lot_number)}
+                        disabled={busy}
+                        title="Change this lot's number in the lotter"
+                        className="text-[10px] px-2 py-1 rounded border border-brand-blue text-brand-blue disabled:opacity-50"
+                      >
+                        #
+                      </button>
+                    </div>
+                  </Row>
+                );
+              })}
             </Section>
           </>
         )}

@@ -113,7 +113,7 @@ export async function GET(
       .single(),
     supabase
       .from('lots')
-      .select('lot_number, item_name, brand, model, af_upload_status, af_item_id')
+      .select('id, lot_number, item_name, brand, model, af_upload_status, af_item_id')
       .eq('auction_id', auctionId)
       .is('deleted_at', null)
       .order('lot_number', { ascending: true, nullsFirst: false })
@@ -248,6 +248,7 @@ export async function GET(
   };
 
   const onlyInLotter: Array<{
+    lot_id: string;
     lot_number: number;
     item_name: string;
     af_upload_status: string | null;
@@ -260,6 +261,7 @@ export async function GET(
     copies: Array<{ af_item_id: string; title: string; af_item_url: string }>;
   }> = [];
   const numberCollisions: Array<{
+    lot_id: string;
     lot_number: number;
     lotter_item: string;
     af_titles: string[];
@@ -270,6 +272,7 @@ export async function GET(
     if (lotIsLinked(lot)) return;
     if (!afByNumber.has(num)) {
       onlyInLotter.push({
+        lot_id: (lot as any).id,
         lot_number: num,
         item_name: lot.item_name || '(no name)',
         af_upload_status: lot.af_upload_status,
@@ -319,6 +322,7 @@ export async function GET(
         });
         if (overlap === 0 && lotterWords.size > 0 && afWords.size > 0) {
           numberCollisions.push({
+            lot_id: (lotterByNumber.get(num) as any).id,
             lot_number: num,
             lotter_item: lotterByNumber.get(num)!.item_name || '(no name)',
             af_titles: items.map((i) => i.title).slice(0, 3),
