@@ -236,37 +236,71 @@ export async function GET(
   });
 
   // Compute diffs. "Linked" = this lotter lot has an af_item_id that
-  // AF confirms exists. Linked lots are NEVER flagged as only_in_lotter,
-  // regardless of lot_number drift. Secondary link: unique title match
-  // when af_item_id is missing on both sides AND the matched AF item
-  // is at the same lot_number — the lot_number co-signal avoids
-  // falsely linking unrelated items that happen to share a generic
-  // title ("Vintage Chair" exists at AF lot 10 and lotter lot 99 →
-  // we must NOT consider them linked, else audit silently sweeps a
-  // real orphan under the rug and the next push's idempotency guard
-  // then persists the wrong af_item_id).
+  // AF confirms exists. Linked lots are NEVER flagged as only_in_lotter.
+  //
+  // Secondary links (tried in order):
+  //  (a) Exact unique title match on both sides.
+  //  (b) SUBSTRING match: lotter's item_name is contained in AF's title
+  //      (or vice versa) AND the substring match is unique (one AF item
+  //      contains that lotter string, one lotter row's name appears in
+  //      that AF item). Needed because AF's admin pages often display
+  //      the full description (e.g. "Brand new Haton On-Rite Display
+  //      Light, Model HL-18, still in original packaging...") while the
+  //      lotter stores a shorter item_name ("Haton On-Rite Display
+  //      Light, Model HL-18"). Exact match fails even after normaliz-
+  //      ation; substring is the honest signal.
+  //
+  // Uniqueness requirement in both paths prevents false links on
+  // generic titles.
+  const substringUniqueMatch = (lotterKey: string): boolean => {
+    if (!lotterKey || lotterKey.length < 8) return false;
+    // Find AF items whose normalized title CONTAINS the lotter's key,
+    // OR whose normalized title IS CONTAINED IN the lotter's key.
+    const matchingAfItems = scraped.items.filter((it) => {
+      const afKey = normTitle(it.title);
+      if (!afKey) return false;
+      return afKey.includes(lotterKey) || lotterKey.includes(afKey);
+    });
+    if (matchingAfItems.length !== 1) return false;
+    // And the inverse must be unique: among lotter rows, this is the
+    // only one whose item_name string plays this containment role vs
+    // THAT one AF item.
+    const afKeyForMatch = normTitle(matchingAfItems[0].title);
+    const matchingLotterLots = (lots || []).filter((ll: any) => {
+      const lk = normTitle(ll.item_name);
+      if (!lk || lk.length < 8) return false;
+      return afKeyForMatch.includes(lk) || lk.includes(afKeyForMatch);
+    });
+    return matchingLotterLots.length === 1;
+  };
   const lotIsLinked = (l: LotterRow): boolean => {
     if ((l as any).af_item_id != null && afByItemId.has(Number((l as any).af_item_id))) return true;
     if ((l as any).af_item_id != null) return false;
     const key = normTitle(l.item_name);
     if (!key) return false;
+    // (a) Exact unique match.
     const afBucket = afByTitle.get(key) || [];
     const lotterBucket = lotterByTitle.get(key) || [];
-    if (afBucket.length !== 1 || lotterBucket.length !== 1) return false;
-    // Only trust the title fallback if the AF item is at the same
-    // lot_number as this lotter lot.
-    const afItem = afBucket[0];
-    return afItem.lot_number === l.lot_number;
+    if (afBucket.length === 1 && lotterBucket.length === 1) return true;
+    // (b) Substring match (AF's long description vs lotter's short name).
+    return substringUniqueMatch(key);
   };
   const afItemIsLinked = (item: (typeof scraped.items)[number]): boolean => {
     if (lotterByAfItemId.has(Number(item.af_item_id))) return true;
-    // Title fallback — unique match on both sides AND same lot_number.
     const key = normTitle(item.title);
     if (!key) return false;
+    // (a) Exact unique match.
     const lotterBucket = lotterByTitle.get(key) || [];
     const afBucket = afByTitle.get(key) || [];
-    if (lotterBucket.length !== 1 || afBucket.length !== 1) return false;
-    return lotterBucket[0].lot_number === item.lot_number;
+    if (lotterBucket.length === 1 && afBucket.length === 1) return true;
+    // (b) Substring match: this AF item's title contains exactly one
+    // lotter item_name (or is contained in exactly one lotter name).
+    const matchingLotters = (lots || []).filter((ll: any) => {
+      const lk = normTitle(ll.item_name);
+      if (!lk || lk.length < 8) return false;
+      return key.includes(lk) || lk.includes(key);
+    });
+    return matchingLotters.length === 1;
   };
 
   const onlyInLotter: Array<{
@@ -529,14 +563,48 @@ export async function POST(
   // Now: lot_number-only matches require the AF item at that position
   // to share a normalized title with the lotter lot. af_item_id matches
   // skip the title check (durable key is strong enough on its own).
-  // Same normalizer as the GET handler — kept local to avoid moving it
-  // to module scope in this hotfix PR.
-  const normTitle = (s: string | null | undefined) =>
-    (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  // Keep normalizer consistent with the GET handler (HTML entity +
+  // smart quote decoding). Local copy — small enough to not need
+  // module-scope hoisting right now.
+  const normTitle = (s: string | null | undefined) => {
+    if (!s) return '';
+    return s
+      .toLowerCase()
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/[–—]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
   const afByLotNumber = new Map<number, (typeof scraped.items)[number]>();
+  // Title → AF items with that title (array because titles can repeat).
+  const afByTitleSync = new Map<string, (typeof scraped.items)[number][]>();
   for (const it of scraped.items) {
     if (it.lot_number != null) afByLotNumber.set(it.lot_number, it);
+    const k = normTitle(it.title);
+    if (k) {
+      const arr = afByTitleSync.get(k) || [];
+      arr.push(it);
+      afByTitleSync.set(k, arr);
+    }
   }
+  // Lotter title bucket for uniqueness check (prevents false-link when
+  // two lotter rows share a title).
+  const lotterByTitleSync = new Map<string, any[]>();
+  (lots || []).forEach((l: any) => {
+    const k = normTitle(l.item_name);
+    if (!k) return;
+    const arr = lotterByTitleSync.get(k) || [];
+    arr.push(l);
+    lotterByTitleSync.set(k, arr);
+  });
   const toMarkUploaded: string[] = []; // lot IDs now, not lot_numbers
   const toClearIds: string[] = [];
   const lotsClearedWithStatusUploaded: number[] = [];
@@ -544,12 +612,34 @@ export async function POST(
     const afIdMatch =
       l.af_item_id != null && afItemIds.has(Number(l.af_item_id));
     const afAtNumber = afByLotNumber.get(l.lot_number);
-    // lot_number match is only trusted when the titles agree. Avoids
-    // false-link when an AF position carries a completely different item.
     const lotNumMatch =
       afAtNumber != null &&
       normTitle(afAtNumber.title) === normTitle(l.item_name);
-    const isOnAf = afIdMatch || lotNumMatch;
+    const titleKey = normTitle(l.item_name);
+    const uniqueTitleMatch =
+      !!titleKey &&
+      (afByTitleSync.get(titleKey)?.length === 1) &&
+      (lotterByTitleSync.get(titleKey)?.length === 1);
+    // Substring match: AF often displays the full description while the
+    // lotter stores a shorter item_name. If the lotter name is contained
+    // in exactly one AF item's title (or vice versa) AND no other lotter
+    // row shares that containment, it's a confident link.
+    let substringMatch = false;
+    if (!afIdMatch && !lotNumMatch && !uniqueTitleMatch && titleKey && titleKey.length >= 8) {
+      const matchingAf = scraped.items.filter((it: any) => {
+        const afKey = normTitle(it.title);
+        return afKey && (afKey.includes(titleKey) || titleKey.includes(afKey));
+      });
+      if (matchingAf.length === 1) {
+        const afKeyForMatch = normTitle(matchingAf[0].title);
+        const matchingLotters = (lots || []).filter((ll: any) => {
+          const lk = normTitle(ll.item_name);
+          return lk && lk.length >= 8 && (afKeyForMatch.includes(lk) || lk.includes(afKeyForMatch));
+        });
+        substringMatch = matchingLotters.length === 1;
+      }
+    }
+    const isOnAf = afIdMatch || lotNumMatch || uniqueTitleMatch || substringMatch;
     const currentlyUploaded = l.af_upload_status === 'uploaded';
     if (isOnAf && !currentlyUploaded) {
       toMarkUploaded.push(l.id);
