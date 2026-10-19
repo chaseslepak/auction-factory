@@ -237,80 +237,97 @@ export default function AuctionDetailPage() {
     setUploading(false);
   };
 
-  const [syncingToReality, setSyncingToReality] = useState(false);
+  const [markingAsOnAf, setMarkingAsOnAf] = useState(false);
 
-  const handleSyncToAfReality = async () => {
-    setSyncingToReality(true);
+  // Parse a lot-number range string like "1-66", "1,3,5-10", "22, 45, 67-70".
+  // Returns a sorted array of unique numbers, or null if parsing failed.
+  const parseLotNumberRanges = (input: string): number[] | null => {
+    const text = input.trim();
+    if (!text) return null;
+    const result = new Set<number>();
+    const parts = text.split(/[,\s]+/).filter(Boolean);
+    for (const part of parts) {
+      const rangeMatch = part.match(/^(\d+)-(\d+)$/);
+      if (rangeMatch) {
+        const start = parseInt(rangeMatch[1], 10);
+        const end = parseInt(rangeMatch[2], 10);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return null;
+        for (let n = start; n <= end; n++) result.add(n);
+      } else if (/^\d+$/.test(part)) {
+        result.add(parseInt(part, 10));
+      } else {
+        return null;
+      }
+    }
+    return Array.from(result).sort((a, b) => a - b);
+  };
+
+  const handleMarkAsOnAf = async () => {
+    const input = prompt(
+      `Which lots are ALREADY on AF (so HQ Push should skip them)?\n\n` +
+      `Enter lot numbers or ranges, separated by commas:\n` +
+      `  Examples: "1-66"   "1,3,5"   "1-10, 22, 25-30"\n\n` +
+      `This marks those lotter rows as af_upload_status='uploaded' so the next\n` +
+      `HQ Push leaves them alone. Use when AF already has items from a prior\n` +
+      `push and you don't want to re-upload them.`,
+    );
+    if (input === null) return;
+    const lotNumbers = parseLotNumberRanges(input);
+    if (!lotNumbers || lotNumbers.length === 0) {
+      setUploadMsg({
+        type: 'error',
+        text: `Could not parse "${input}". Use formats like "1-66" or "1,3,5-10".`,
+      });
+      return;
+    }
+
+    // Match against lots actually in this auction.
+    const existingLotNumbers = new Set(lots.map((l: any) => Number(l.lot_number)));
+    const matched = lotNumbers.filter((n) => existingLotNumbers.has(n));
+    const missing = lotNumbers.filter((n) => !existingLotNumbers.has(n));
+    if (matched.length === 0) {
+      setUploadMsg({
+        type: 'error',
+        text: `None of the lot numbers you entered exist in this auction. Missing: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`,
+      });
+      return;
+    }
+
+    const missingNote = missing.length > 0
+      ? `\n\nNote: ${missing.length} entered lot number(s) don't exist in this auction and will be ignored: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`
+      : '';
+    if (!confirm(
+      `Mark ${matched.length} lot(s) as already uploaded to AF?\n\n` +
+      `These lot numbers will have af_upload_status='uploaded' set so HQ Push skips them:\n` +
+      `${matched.slice(0, 30).join(', ')}${matched.length > 30 ? '…' : ''}` +
+      missingNote,
+    )) return;
+
+    setMarkingAsOnAf(true);
     setUploadMsg(null);
     try {
-      // Step 1: fresh audit to see what AF actually has.
-      setUploadMsg({ type: 'success', text: 'Checking AF…' });
-      const auditRes = await fetch(`/api/audit-auction/${id}`);
-      const auditData = await auditRes.json();
-      if (!auditRes.ok) {
-        setUploadMsg({ type: 'error', text: auditData?.error || `HTTP ${auditRes.status}` });
-        return;
-      }
-      if (auditData?.scraper_diag?.parse_source === 'fallback') {
+      const { error } = await supabase
+        .from('lots')
+        .update({
+          af_upload_status: 'uploaded',
+          af_upload_error: 'Marked as already on AF by user — HQ Push will skip. af_item_id not captured; audit will reconcile against real AF items by title.',
+        })
+        .eq('auction_id', id)
+        .in('lot_number', matched)
+        .is('deleted_at', null);
+      if (error) {
+        setUploadMsg({ type: 'error', text: `Update failed: ${error.message}` });
+      } else {
         setUploadMsg({
-          type: 'error',
-          text: 'AF scraper fell back to the fragile parser — reconnect your AF admin session in Settings before running this.',
+          type: 'success',
+          text: `${matched.length} lot(s) marked as already on AF. HQ Push will skip them.`,
         });
-        return;
+        await fetchData();
       }
-
-      const afCount = auditData.counts?.af_lots ?? 0;
-      const lotterUploaded = lots.filter((l: any) => l.af_upload_status === 'uploaded').length;
-      const lotterTotal = lots.length;
-
-      // Step 2: user confirms the AF count. Typing the number proves
-      // they verified AF visually (not just trusting the scraper, which
-      // is what caused Oct 15).
-      const dialog =
-        `Sync lotter af_upload_status to AF reality for this auction?\n\n` +
-        `• AF currently has ${afCount} items (via admin scrape)\n` +
-        `• Lotter has ${lotterUploaded} of ${lotterTotal} marked uploaded\n\n` +
-        `This will:\n` +
-        `  — Clear status on lotter lots AF doesn't have (orphan 'uploaded' rows)\n` +
-        `  — Mark lotter lots AF has but lotter doesn't (unlinked items)\n\n` +
-        `BEFORE confirming, open AF to verify ${afCount} is correct:\n` +
-        `https://auctionfactory.com/admin/relot_auction.php?auction=${auditData.af_auction_id}&relot=Re-Lot\n\n` +
-        `Type ${afCount} to confirm:`;
-      const answer = prompt(dialog);
-      if (answer === null) {
-        setUploadMsg(null);
-        return;
-      }
-      if (String(answer).trim() !== String(afCount)) {
-        setUploadMsg({
-          type: 'error',
-          text: `Confirmation mismatch — expected "${afCount}", got "${answer}". Not syncing.`,
-        });
-        return;
-      }
-
-      // Step 3: run the destructive sync with force:true (user confirmed
-      // the AF count visually, so the 90% safety gate doesn't apply).
-      setUploadMsg({ type: 'success', text: 'Syncing…' });
-      const syncRes = await fetch(`/api/audit-auction/${id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: true, clear_mode: 'legacy', force: true }),
-      });
-      const syncData = await syncRes.json();
-      if (!syncRes.ok) {
-        setUploadMsg({ type: 'error', text: syncData?.error || `HTTP ${syncRes.status}` });
-        return;
-      }
-      setUploadMsg({
-        type: 'success',
-        text: `Synced: ${syncData.marked_uploaded ?? 0} marked uploaded · ${syncData.cleared ?? 0} orphan statuses cleared`,
-      });
-      await fetchData();
     } catch (err: any) {
-      setUploadMsg({ type: 'error', text: err?.message || 'Sync failed' });
+      setUploadMsg({ type: 'error', text: err?.message || 'Update failed' });
     } finally {
-      setSyncingToReality(false);
+      setMarkingAsOnAf(false);
     }
   };
 
@@ -1219,12 +1236,12 @@ export default function AuctionDetailPage() {
                 {resyncingPricing ? 'Refreshing prices…' : 'Refresh Pricing on All Lots'}
               </button>
               <button
-                onClick={handleSyncToAfReality}
-                disabled={uploading || refreshing || syncingToReality}
+                onClick={handleMarkAsOnAf}
+                disabled={uploading || refreshing || markingAsOnAf}
                 className="w-full py-2 rounded-xl border-2 border-yellow-500 text-yellow-700 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
-                title="Overwrite the lotter's af_upload_status to match what AF actually has. Clears orphan 'uploaded' statuses (lotter thinks it's on AF but AF doesn't have it) and marks lotter lots that AF has but lotter doesn't know about. You confirm by typing the AF item count."
+                title="Enter lot numbers (e.g. '1-66') you already pushed to AF. Those lots get af_upload_status='uploaded' so HQ Push leaves them alone."
               >
-                {syncingToReality ? 'Syncing…' : 'Sync Lotter to AF Reality'}
+                {markingAsOnAf ? 'Marking…' : 'Mark Lots Already on AF'}
               </button>
               <button
                 onClick={() => handleUploadToAf()}
