@@ -237,6 +237,83 @@ export default function AuctionDetailPage() {
     setUploading(false);
   };
 
+  const [syncingToReality, setSyncingToReality] = useState(false);
+
+  const handleSyncToAfReality = async () => {
+    setSyncingToReality(true);
+    setUploadMsg(null);
+    try {
+      // Step 1: fresh audit to see what AF actually has.
+      setUploadMsg({ type: 'success', text: 'Checking AF…' });
+      const auditRes = await fetch(`/api/audit-auction/${id}`);
+      const auditData = await auditRes.json();
+      if (!auditRes.ok) {
+        setUploadMsg({ type: 'error', text: auditData?.error || `HTTP ${auditRes.status}` });
+        return;
+      }
+      if (auditData?.scraper_diag?.parse_source === 'fallback') {
+        setUploadMsg({
+          type: 'error',
+          text: 'AF scraper fell back to the fragile parser — reconnect your AF admin session in Settings before running this.',
+        });
+        return;
+      }
+
+      const afCount = auditData.counts?.af_lots ?? 0;
+      const lotterUploaded = lots.filter((l: any) => l.af_upload_status === 'uploaded').length;
+      const lotterTotal = lots.length;
+
+      // Step 2: user confirms the AF count. Typing the number proves
+      // they verified AF visually (not just trusting the scraper, which
+      // is what caused Oct 15).
+      const dialog =
+        `Sync lotter af_upload_status to AF reality for this auction?\n\n` +
+        `• AF currently has ${afCount} items (via admin scrape)\n` +
+        `• Lotter has ${lotterUploaded} of ${lotterTotal} marked uploaded\n\n` +
+        `This will:\n` +
+        `  — Clear status on lotter lots AF doesn't have (orphan 'uploaded' rows)\n` +
+        `  — Mark lotter lots AF has but lotter doesn't (unlinked items)\n\n` +
+        `BEFORE confirming, open AF to verify ${afCount} is correct:\n` +
+        `https://auctionfactory.com/admin/relot_auction.php?auction=${auditData.af_auction_id}&relot=Re-Lot\n\n` +
+        `Type ${afCount} to confirm:`;
+      const answer = prompt(dialog);
+      if (answer === null) {
+        setUploadMsg(null);
+        return;
+      }
+      if (String(answer).trim() !== String(afCount)) {
+        setUploadMsg({
+          type: 'error',
+          text: `Confirmation mismatch — expected "${afCount}", got "${answer}". Not syncing.`,
+        });
+        return;
+      }
+
+      // Step 3: run the destructive sync with force:true (user confirmed
+      // the AF count visually, so the 90% safety gate doesn't apply).
+      setUploadMsg({ type: 'success', text: 'Syncing…' });
+      const syncRes = await fetch(`/api/audit-auction/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true, clear_mode: 'legacy', force: true }),
+      });
+      const syncData = await syncRes.json();
+      if (!syncRes.ok) {
+        setUploadMsg({ type: 'error', text: syncData?.error || `HTTP ${syncRes.status}` });
+        return;
+      }
+      setUploadMsg({
+        type: 'success',
+        text: `Synced: ${syncData.marked_uploaded ?? 0} marked uploaded · ${syncData.cleared ?? 0} orphan statuses cleared`,
+      });
+      await fetchData();
+    } catch (err: any) {
+      setUploadMsg({ type: 'error', text: err?.message || 'Sync failed' });
+    } finally {
+      setSyncingToReality(false);
+    }
+  };
+
   const handleResyncPricing = async () => {
     const lotCount = lots.length;
     if (lotCount === 0) {
@@ -1142,6 +1219,14 @@ export default function AuctionDetailPage() {
                 {resyncingPricing ? 'Refreshing prices…' : 'Refresh Pricing on All Lots'}
               </button>
               <button
+                onClick={handleSyncToAfReality}
+                disabled={uploading || refreshing || syncingToReality}
+                className="w-full py-2 rounded-xl border-2 border-yellow-500 text-yellow-700 font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                title="Overwrite the lotter's af_upload_status to match what AF actually has. Clears orphan 'uploaded' statuses (lotter thinks it's on AF but AF doesn't have it) and marks lotter lots that AF has but lotter doesn't know about. You confirm by typing the AF item count."
+              >
+                {syncingToReality ? 'Syncing…' : 'Sync Lotter to AF Reality'}
+              </button>
+              <button
                 onClick={() => handleUploadToAf()}
                 disabled={uploading}
                 className="w-full py-3 rounded-xl bg-brand-green text-white font-black text-sm uppercase tracking-wide disabled:opacity-50"
@@ -1311,7 +1396,12 @@ export default function AuctionDetailPage() {
               </p>
             </div>
             <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wide">Uploaded</p>
+              <p
+                className="text-xs text-gray-400 uppercase tracking-wide"
+                title="This is the LOTTER's view of what's uploaded — the number of rows with af_upload_status='uploaded'. It is NOT a live check against AF. Open the Audit page to see what AF actually has."
+              >
+                Marked Uploaded <span className="normal-case text-[10px] text-gray-300">(lotter)</span>
+              </p>
               <p className="text-sm font-black text-brand-blue">
                 {lots.filter((l: any) => l.af_upload_status === 'uploaded').length}/{lots.length}
               </p>
