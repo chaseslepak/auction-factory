@@ -31,6 +31,7 @@ export default function AuctionDetailPage() {
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  const [resyncingPricing, setResyncingPricing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
   const [afLinked, setAfLinked] = useState(false);
   const [showAfLink, setShowAfLink] = useState(false);
@@ -234,6 +235,46 @@ export default function AuctionDetailPage() {
     }
 
     setUploading(false);
+  };
+
+  const handleResyncPricing = async () => {
+    const lotCount = lots.length;
+    if (lotCount === 0) {
+      setUploadMsg({ type: 'error', text: 'No lots in this auction to resync.' });
+      return;
+    }
+    if (!confirm(
+      `Refresh pricing on all ${lotCount} lot(s) in this auction?\n\n` +
+      `This re-applies the current pricing convention (title suffix "($N)", description "Retail Price: $N" line, and listed_price) to every lot using its estimated_retail_new as the source of truth.\n\n` +
+      `Lotter-only — items already on AF stay as-is until re-pushed.\n\n` +
+      `Continue?`,
+    )) return;
+
+    setResyncingPricing(true);
+    setUploadMsg(null);
+    try {
+      const res = await fetch(`/api/admin/resync-pricing/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setUploadMsg({ type: 'error', text: data?.error || `HTTP ${res.status}` });
+      } else {
+        const noteParts = [
+          `${data.updated} lot(s) updated`,
+        ];
+        if (data.unchanged) noteParts.push(`${data.unchanged} already matched`);
+        if (data.skipped_no_retail) noteParts.push(`${data.skipped_no_retail} skipped (no retail price)`);
+        setUploadMsg({ type: 'success', text: noteParts.join(' · ') });
+        await fetchData();
+      }
+    } catch (err: any) {
+      setUploadMsg({ type: 'error', text: err?.message || 'Resync failed' });
+    } finally {
+      setResyncingPricing(false);
+    }
   };
 
   const handleRefreshStockImages = async () => {
@@ -1092,6 +1133,14 @@ export default function AuctionDetailPage() {
               >
                 Audit AF vs Lotter
               </Link>
+              <button
+                onClick={handleResyncPricing}
+                disabled={uploading || refreshing || resyncingPricing}
+                className="w-full py-2 rounded-xl border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide disabled:opacity-50"
+                title="Re-apply pricing convention (title suffix, retail line in description, listed_price) to every lot in this auction. Lotter-only; items on AF stay as-is until re-pushed."
+              >
+                {resyncingPricing ? 'Refreshing prices…' : 'Refresh Pricing on All Lots'}
+              </button>
               <button
                 onClick={() => handleUploadToAf()}
                 disabled={uploading}
