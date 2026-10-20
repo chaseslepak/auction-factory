@@ -499,7 +499,7 @@ export async function POST(
       .single(),
     supabase
       .from('lots')
-      .select('id, lot_number, af_upload_status, af_item_id')
+      .select('id, lot_number, item_name, af_upload_status, af_item_id')
       .eq('auction_id', auctionId)
       .is('deleted_at', null),
   ]);
