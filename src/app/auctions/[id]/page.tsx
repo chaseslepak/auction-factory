@@ -1256,7 +1256,17 @@ export default function AuctionDetailPage() {
               </button>
               {uploading && !paused && (
                 <button
-                  onClick={() => setPaused(true)}
+                  onClick={() => {
+                    // Flip the ref SYNCHRONOUSLY on click so the next
+                    // loop iteration sees paused=true immediately. The
+                    // useEffect that mirrors state → ref runs after a
+                    // render; if the loop's next await resolves before
+                    // then, pausedRef.current is still false and one
+                    // more lot slips through. Setting both closes that
+                    // race.
+                    pausedRef.current = true;
+                    setPaused(true);
+                  }}
                   className="w-full py-2 rounded-xl border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide"
                   title="Finishes the current lot's upload, then stops. Click Resume to continue from where you left off."
                 >
@@ -1283,7 +1293,20 @@ export default function AuctionDetailPage() {
               })()}
               <button
                 onClick={async () => {
-                  if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;
+                  // Stop any running push BEFORE touching the DB.
+                  // Deleting af_auction_map and resetting statuses
+                  // while a push loop is still dispatching batches
+                  // caused "unlink doesn't stop the push" — the loop
+                  // kept firing against a now-missing map. Flip the
+                  // pause ref synchronously so the next loop iteration
+                  // exits.
+                  if (uploading) {
+                    if (!confirm('A push is in progress. Unlink will stop the push after the current lot finishes, then reset everything. Continue?')) return;
+                    pausedRef.current = true;
+                    setPaused(true);
+                  } else {
+                    if (!confirm('Unlink AF auction? All lots will be reset to not-uploaded status and can be uploaded again.')) return;
+                  }
                   await supabase.from('af_auction_map').delete().eq('auction_id', id);
                   await supabase
                     .from('lots')
