@@ -633,8 +633,14 @@ export default function AuctionDetailPage() {
     }
 
     // Recompute unuploaded after possible auto-link.
+    // IMPORTANT: on resume we must copy the array, not share the
+    // reference. The code below does `unuploaded.length = 0; unuploaded
+    // .push(...unuploadedAfterLink)` — if both point to the same
+    // array, clearing one empties the other and the push spreads
+    // nothing, leaving zero lots in the batch loop ("0 lots uploaded"
+    // and nothing happens on Resume).
     const unuploadedAfterLink = isResume
-      ? unuploaded
+      ? [...unuploaded]
       : lots
           .filter((l) => l.af_upload_status !== 'uploaded')
           .slice()
