@@ -581,18 +581,27 @@ export async function POST(request: NextRequest) {
     // to lot 24, AF puts lot 24's content at position 23 and
     // everything after is off-by-one.
     //
-    // Detect gaps per-batch by querying the max uploaded lot_number
-    // below this lot's lot_number. If there's a gap, insert N
-    // placeholder stubs on AF to fill positions (lot_number is set
-    // by relot-sync at end). The stubs are "GAP FILLER - Position N"
-    // and have no corresponding lotter row — they only exist on AF
-    // to keep the sequence aligned.
+    // Detect gaps per-batch by querying the max lot_number below this
+    // lot's lot_number WITH an af_item_id set. If there's a gap,
+    // insert N placeholder stubs on AF to fill positions (lot_number
+    // is set by relot-sync at end). The stubs are "GAP FILLER -
+    // Position N" and have no corresponding lotter row — they only
+    // exist on AF to keep the sequence aligned.
+    //
+    // IMPORTANT (2026-10-28): the check is `af_item_id IS NOT NULL`,
+    // NOT `af_upload_status = 'uploaded'`. A mid-upload failure path
+    // (lines ~790) inserts a stub on AF for a transient-failed lot
+    // and writes its af_item_id but leaves status='failed'. If gap
+    // scan only counts 'uploaded', the next lot sees that slot as
+    // empty and double-stubs it — shifting every AF position beyond
+    // by one. Counting any af_item_id-bearing row correctly treats
+    // the position as taken.
     try {
       const { data: prevRow } = await supabase
         .from('lots')
         .select('lot_number')
         .eq('auction_id', auction_id)
-        .eq('af_upload_status', 'uploaded')
+        .not('af_item_id', 'is', null)
         .lt('lot_number', lot.lot_number)
         .is('deleted_at', null)
         .order('lot_number', { ascending: false })
