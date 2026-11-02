@@ -618,154 +618,242 @@ export default function LotReviewPage() {
               : null)
           : null;
 
+      // Lot numbers that failed to save despite retries, surfaced at the
+      // end so Chase can see exactly which slots in the range need a redo
+      // instead of a cryptic "TypeError: Failed to fetch" that abandons
+      // every lot after it.
+      const failedLotNumbers: number[] = [];
+
+      // Retry a supabase builder on transient browser-fetch failures
+      // (TypeError: Failed to fetch, which bubbles up when the network
+      // blips mid-save or Supabase's auth refresh fetch itself dies).
+      // Each attempt is a brand-new builder — supabase builders are
+      // single-use, so we take a factory, not a promise.
+      const isFetchErr = (e: any): boolean => {
+        const m = String(e?.message || '').toLowerCase();
+        return (
+          e instanceof TypeError ||
+          m.includes('failed to fetch') ||
+          m.includes('networkerror') ||
+          m.includes('load failed')
+        );
+      };
+      const retryFetch = async <T,>(
+        makeCall: () => PromiseLike<T>,
+        label: string,
+      ): Promise<T> => {
+        let lastErr: any = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            return await makeCall();
+          } catch (err: any) {
+            lastErr = err;
+            if (!isFetchErr(err) || attempt === 3) throw err;
+            console.warn(`${label} attempt ${attempt} failed with ${err?.message}; retrying`);
+            await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
+          }
+        }
+        throw lastErr;
+      };
+
       for (let i = 0; i < lotsToCreate; i++) {
         const lotNumber = nextLotNumber + i;
 
-        // Hard-delete any soft-deleted lot with this auction_id + lot_number
-        // to free up the unique constraint slot
-        await supabase
-          .from('lots')
-          .delete()
-          .eq('auction_id', auctionId)
-          .eq('lot_number', lotNumber)
-          .not('deleted_at', 'is', null);
-
-        // Insert lot row
-        const { data: lotData, error: lotError } = await supabase
-          .from('lots')
-          .insert({
-            auction_id: auctionId,
-            lot_number: lotNumber,
-            item_name: listing.item_name,
-            brand: listing.brand,
-            model: listing.model,
-            category: listing.category,
-            confidence: listing.confidence,
-            condition_rating: condition,
-            quantity,
-            estimated_retail_new: listing.estimated_retail_new,
-            listed_price: listing.listed_price,
-            width: listing.width || null,
-            depth: listing.depth || null,
-            height: listing.height || null,
-            key_features: listing.key_features,
-            auction_description: listing.auction_description,
-            notes,
-            lot_group_id: lotGroupId,
-          })
-          .select()
-          .single();
-
-        if (lotError) {
-          // Surface a friendly message when two lotters collide on the same
-          // lot number — the DB's unique(auction_id, lot_number) constraint
-          // catches this. Tell the user to bump their starting number.
-          const msg = String(lotError.message || '');
-          if (
-            msg.toLowerCase().includes('duplicate') ||
-            msg.toLowerCase().includes('unique')
-          ) {
-            throw new Error(
-              `Lot #${lotNumber} already exists in this auction — your partner likely just created it. Go back, open "Change start", and pick a higher starting number.`
-            );
-          }
-          throw lotError;
-        }
-
-        // Upload photos to storage and create lot_photos records
-        let photoIndex = 0;
-
-        // Dedupe shortcut: if generate-listing handed us a
-        // stock_image_storage_path (meaning it reused another lot in
-        // this auction's existing stock image), point a new lot_photos
-        // row at the SAME storage object instead of downloading and
-        // re-uploading. Zero storage cost, instant.
-        const stockStoragePath = (listing as any).stock_image_storage_path as
-          | string
-          | undefined;
-        if (stockStoragePath) {
-          await supabase.from('lot_photos').insert({
-            lot_id: lotData.id,
-            storage_path: stockStoragePath,
-            display_order: 0,
-          });
-          photoIndex = 1;
-        } else if (listing.stock_image_url) {
-          // If stock image URL is available, download and make it the first photo
-          try {
-            const stockRes = await fetch(listing.stock_image_url);
-            if (stockRes.ok) {
-              const stockBlob = await stockRes.blob();
-              const storagePath = `${auctionId}/${lotData.id}/stock_0.jpg`;
-              const { error: stockUploadError } = await supabase.storage
-                .from('lot-photos')
-                .upload(storagePath, stockBlob, { contentType: 'image/jpeg' });
-              if (!stockUploadError) {
-                await supabase.from('lot_photos').insert({
-                  lot_id: lotData.id,
-                  storage_path: storagePath,
-                  display_order: 0,
-                });
-                photoIndex = 1;
-              }
-            }
-          } catch {
-            // Stock image download failed, continue with user photos
-          }
-        }
-
-        // Upload user photos. A single failed photo upload should NOT
-        // abort the whole range — the lot row is already saved, so
-        // aborting here would leave partial state without advancing the
-        // localStorage counter, forcing the user into a duplicate-lot-#
-        // error on their next attempt. Log and continue instead.
-        for (let j = 0; j < photos.length; j++) {
-          try {
-            const base64 = photos[j].replace(/^data:image\/\w+;base64,/, '');
-            const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-            const blob = new Blob([buffer], { type: 'image/jpeg' });
-
-            const storagePath = `${auctionId}/${lotData.id}/${photoIndex + j}.jpg`;
-
-            const { error: uploadError } = await supabase.storage
-              .from('lot-photos')
-              .upload(storagePath, blob, { contentType: 'image/jpeg' });
-
-            if (uploadError) {
-              console.warn(`Photo ${j} upload failed for lot #${lotNumber}:`, uploadError);
-              continue;
-            }
-
-            await supabase.from('lot_photos').insert({
-              lot_id: lotData.id,
-              storage_path: storagePath,
-              display_order: photoIndex + j,
-            });
-          } catch (photoErr) {
-            console.warn(`Photo ${j} exception for lot #${lotNumber}:`, photoErr);
-          }
-        }
-
-        // If no stock image was attached inline (neither sibling-dedupe
-        // nor the generator surfaced one), queue a background job to
-        // search the AF archive + web for one. The job runs after the
-        // lotter has moved on, so no wait on their critical path.
-        const hasBrand = !!(listing.brand && listing.brand.trim() && listing.brand !== 'Unknown');
-        const hasModel = !!(listing.model && listing.model.trim() && listing.model !== 'Unknown');
-        if (hasBrand && hasModel && photoIndex === 0) {
-          lotIdsNeedingStockImage.push(lotData.id);
-        }
-
-        // Persist "next lot" pointer INSIDE the loop after every successful
-        // insert, not just after the whole range completes. If a later
-        // iteration throws (duplicate-key collision, network blip, etc.)
-        // the user's next visit still defaults past what's already saved
-        // instead of colliding with it.
         try {
-          localStorage.setItem(`lotter-next-${auctionId}`, String(lotNumber + 1));
-        } catch {}
+          // Hard-delete any soft-deleted lot with this auction_id +
+          // lot_number to free up the unique constraint slot. Wrapped in
+          // retryFetch so a transient browser-fetch failure doesn't
+          // abandon the rest of the range.
+          await retryFetch(
+            () =>
+              supabase
+                .from('lots')
+                .delete()
+                .eq('auction_id', auctionId)
+                .eq('lot_number', lotNumber)
+                .not('deleted_at', 'is', null),
+            `delete-soft-deleted lot #${lotNumber}`,
+          );
 
-        setSaveProgress({ current: i + 1, total: lotsToCreate });
+          // Insert lot row (same retry wrapper — this is the call that
+          // throws TypeError: Failed to fetch when Supabase is briefly
+          // unreachable).
+          const { data: lotData, error: lotError } = await retryFetch(
+            () =>
+              supabase
+                .from('lots')
+                .insert({
+                  auction_id: auctionId,
+                  lot_number: lotNumber,
+                  item_name: listing.item_name,
+                  brand: listing.brand,
+                  model: listing.model,
+                  category: listing.category,
+                  confidence: listing.confidence,
+                  condition_rating: condition,
+                  quantity,
+                  estimated_retail_new: listing.estimated_retail_new,
+                  listed_price: listing.listed_price,
+                  width: listing.width || null,
+                  depth: listing.depth || null,
+                  height: listing.height || null,
+                  key_features: listing.key_features,
+                  auction_description: listing.auction_description,
+                  notes,
+                  lot_group_id: lotGroupId,
+                })
+                .select()
+                .single(),
+            `insert lot #${lotNumber}`,
+          );
+
+          if (lotError) {
+            // Surface a friendly message when two lotters collide on the
+            // same lot number — the DB's unique(auction_id, lot_number)
+            // constraint catches this. Tell the user to bump their
+            // starting number. This still aborts because every later lot
+            // in the range would hit the same collision.
+            const msg = String(lotError.message || '');
+            if (
+              msg.toLowerCase().includes('duplicate') ||
+              msg.toLowerCase().includes('unique')
+            ) {
+              throw new Error(
+                `Lot #${lotNumber} already exists in this auction — your partner likely just created it. Go back, open "Change start", and pick a higher starting number.`
+              );
+            }
+            throw lotError;
+          }
+
+          // Upload photos to storage and create lot_photos records
+          let photoIndex = 0;
+
+          // Dedupe shortcut: if generate-listing handed us a
+          // stock_image_storage_path (meaning it reused another lot in
+          // this auction's existing stock image), point a new lot_photos
+          // row at the SAME storage object instead of downloading and
+          // re-uploading. Zero storage cost, instant.
+          const stockStoragePath = (listing as any).stock_image_storage_path as
+            | string
+            | undefined;
+          if (stockStoragePath) {
+            try {
+              await retryFetch(
+                () =>
+                  supabase.from('lot_photos').insert({
+                    lot_id: lotData.id,
+                    storage_path: stockStoragePath,
+                    display_order: 0,
+                  }),
+                `stock-dedupe lot_photos insert for lot #${lotNumber}`,
+              );
+              photoIndex = 1;
+            } catch (dedupErr) {
+              console.warn(`Stock-dedupe insert failed for lot #${lotNumber}:`, dedupErr);
+            }
+          } else if (listing.stock_image_url) {
+            // If stock image URL is available, download and make it the first photo
+            try {
+              const stockRes = await fetch(listing.stock_image_url);
+              if (stockRes.ok) {
+                const stockBlob = await stockRes.blob();
+                const storagePath = `${auctionId}/${lotData.id}/stock_0.jpg`;
+                const { error: stockUploadError } = await supabase.storage
+                  .from('lot-photos')
+                  .upload(storagePath, stockBlob, { contentType: 'image/jpeg' });
+                if (!stockUploadError) {
+                  await supabase.from('lot_photos').insert({
+                    lot_id: lotData.id,
+                    storage_path: storagePath,
+                    display_order: 0,
+                  });
+                  photoIndex = 1;
+                }
+              }
+            } catch {
+              // Stock image download failed, continue with user photos
+            }
+          }
+
+          // Upload user photos. A single failed photo upload should NOT
+          // abort the whole range — the lot row is already saved, so
+          // aborting here would leave partial state without advancing the
+          // localStorage counter, forcing the user into a duplicate-lot-#
+          // error on their next attempt. Log and continue instead.
+          for (let j = 0; j < photos.length; j++) {
+            try {
+              const base64 = photos[j].replace(/^data:image\/\w+;base64,/, '');
+              const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+              const blob = new Blob([buffer], { type: 'image/jpeg' });
+
+              const storagePath = `${auctionId}/${lotData.id}/${photoIndex + j}.jpg`;
+
+              const { error: uploadError } = await retryFetch(
+                () =>
+                  supabase.storage
+                    .from('lot-photos')
+                    .upload(storagePath, blob, { contentType: 'image/jpeg' }),
+                `photo ${j} upload for lot #${lotNumber}`,
+              );
+
+              if (uploadError) {
+                console.warn(`Photo ${j} upload failed for lot #${lotNumber}:`, uploadError);
+                continue;
+              }
+
+              await retryFetch(
+                () =>
+                  supabase.from('lot_photos').insert({
+                    lot_id: lotData.id,
+                    storage_path: storagePath,
+                    display_order: photoIndex + j,
+                  }),
+                `photo ${j} lot_photos insert for lot #${lotNumber}`,
+              );
+            } catch (photoErr) {
+              console.warn(`Photo ${j} exception for lot #${lotNumber}:`, photoErr);
+            }
+          }
+
+          // If no stock image was attached inline (neither sibling-dedupe
+          // nor the generator surfaced one), queue a background job to
+          // search the AF archive + web for one. The job runs after the
+          // lotter has moved on, so no wait on their critical path.
+          const hasBrand = !!(listing.brand && listing.brand.trim() && listing.brand !== 'Unknown');
+          const hasModel = !!(listing.model && listing.model.trim() && listing.model !== 'Unknown');
+          if (hasBrand && hasModel && photoIndex === 0) {
+            lotIdsNeedingStockImage.push(lotData.id);
+          }
+
+          // Persist "next lot" pointer INSIDE the loop after every
+          // successful insert, not just after the whole range completes.
+          // If a later iteration throws (duplicate-key collision,
+          // network blip, etc.) the user's next visit still defaults
+          // past what's already saved instead of colliding with it.
+          try {
+            localStorage.setItem(`lotter-next-${auctionId}`, String(lotNumber + 1));
+          } catch {}
+
+          setSaveProgress({ current: i + 1, total: lotsToCreate });
+        } catch (iterErr: any) {
+          // Fatal lot-level errors (duplicate-key collision) still abort
+          // the whole range — every later iteration would hit the same
+          // problem. Transient browser-fetch failures that survived the
+          // retry wrapper above are recorded and we continue so Chase
+          // doesn't lose 14 of 15 saved lots to one bad network moment.
+          const msg = String(iterErr?.message || '');
+          const isDupCollision =
+            msg.toLowerCase().includes('already exists in this auction');
+          if (isDupCollision || !isFetchErr(iterErr)) throw iterErr;
+          console.error(`Lot #${lotNumber} save failed after retries:`, iterErr);
+          failedLotNumbers.push(lotNumber);
+          // Still advance the next-lot pointer so a redo picks up at the
+          // right spot and the user can see which numbers to retry.
+          try {
+            localStorage.setItem(`lotter-next-${auctionId}`, String(lotNumber + 1));
+          } catch {}
+          setSaveProgress({ current: i + 1, total: lotsToCreate });
+        }
       }
 
       // Fire-and-forget: enqueue background stock-image jobs for lots
@@ -785,6 +873,18 @@ export default function LotReviewPage() {
           // The lots are already saved; a failed enqueue just means Chase
           // has to click "Find Stock Images" himself later. No surfacing.
         });
+      }
+
+      // If any lots in the range failed their save despite the retry
+      // wrapper, keep the user on the page with a clear note on which
+      // lot numbers to redo. Don't clear pending-lot or navigate away:
+      // Redo on the next screen rebuilds the form from pending-lot.
+      if (failedLotNumbers.length > 0) {
+        const list = failedLotNumbers.map((n) => `#${n}`).join(', ');
+        setError(
+          `${lotsToCreate - failedLotNumbers.length} of ${lotsToCreate} lots saved. Network dropped on ${list} — click Redo and start a new range from the next number to retry just those.`,
+        );
+        return;
       }
 
       // Clear pending data
