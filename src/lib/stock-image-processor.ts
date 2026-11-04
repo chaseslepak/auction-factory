@@ -66,12 +66,12 @@ export interface StockImageResult {
 }
 
 // Minimum vision-confidence score (1-10) a candidate must earn before we
-// attach it as a lot's primary photo. Chase: "accuracy > hit-rate." At 8
-// vision has to be clearly same brand+model+form factor; below that we
-// leave the user's own photos as the primary. Raised from 7 after Chase
-// reported "all stock photos are incorrect" — the 7-cutoff was letting
-// through plausible-but-wrong siblings of the real product.
-const MIN_VISION_CONFIDENCE = 8;
+// attach it as a lot's primary photo. Chase: "accuracy > hit-rate." At 7
+// vision has to be reasonably sure same brand + model + form factor;
+// below that we leave the user's own photos as the primary.
+// (Briefly raised to 8 on 2026-11-04, rolled back same day — Chase
+// confirmed 7 was working well 2 weeks prior and 8 was too strict.)
+const MIN_VISION_CONFIDENCE = 7;
 
 export function emptyDiag(): SearchDiagnostics {
   return {
@@ -440,7 +440,7 @@ export function parseImageDimensions(buf: Buffer): { width: number; height: numb
 
 // Classify an image as a real product photo vs a placeholder graphic
 // ("IMAGE COMING SOON", "no image available", generic silhouettes). One
-// Haiku call per image. Returns true if it looks like a placeholder —
+// Sonnet call per image. Returns true if it looks like a placeholder —
 // the caller should refuse to save it.
 //
 // FAILS CLOSED on timeout or error (returns true). The prompt tells
@@ -456,9 +456,11 @@ export async function classifyImageAsPlaceholder(
   try {
     const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 10000));
     const apiPromise = anthropic.messages.create({
-      // Haiku handles the binary PRODUCT/PLACEHOLDER call cheaply. Was
-      // on sonnet-4-6 — ~100× the cost for no accuracy gain.
-      model: 'claude-haiku-5-5',
+      // Back on Sonnet (2026-11-04). The Haiku swap on 2026-10-18 saved
+      // cost but let through some wrong-product classifications Chase
+      // noticed in the "all stock photos are incorrect" report. Accuracy
+      // wins over cost on this one.
+      model: 'claude-sonnet-4-6',
       max_tokens: 10,
       messages: [
         {
