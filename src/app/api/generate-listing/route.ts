@@ -204,6 +204,15 @@ export async function POST(request: NextRequest) {
     const hasModel = listing.model && listing.model !== 'Unknown' && listing.model.trim() !== '';
     const isNewInBox = Number(condition) === 10;
 
+    // Scrub any AI-provided stock_image_url up front. The prompt tells the
+    // AI to only emit one when condition is 10 + high confidence, but AIs
+    // have been observed to hallucinate retailer URLs that resolve to
+    // unrelated products (or 404 / placeholder pages). Everything that
+    // ends up on a saved lot's stock image must come from the
+    // sibling-dedupe or findAndVerifyStockImageFromB64 paths below, both
+    // of which run a vision check against the user's own photos.
+    listing.stock_image_url = '';
+
     // Dedupe shortcut: if THIS auction already has another lot with the
     // same brand+model that already has a stock image + a known retail,
     // reuse that instead of hitting WebstaurantStore + Anthropic web
@@ -212,7 +221,13 @@ export async function POST(request: NextRequest) {
     // never cross-pollute dissimilar items.
     let webstaurantPrice = 0;
     let reusedSibling = false;
-    if (hasBrand && hasModel && auction_id) {
+    // Guard against cross-pollution: dedupe only when BOTH brand and model
+    // are specific enough to disambiguate (≥3 chars after stripping
+    // whitespace). A sibling matched on a 2-char "N1" model number, or a
+    // one-word generic brand, will pull in genuinely different products.
+    const brandLenOk = (listing.brand || '').replace(/\s/g, '').length >= 3;
+    const modelLenOk = (listing.model || '').replace(/\s/g, '').length >= 3;
+    if (hasBrand && hasModel && brandLenOk && modelLenOk && auction_id) {
       try {
         const { data: siblings } = await supabase
           .from('lots')
