@@ -638,6 +638,10 @@ export default function LotReviewPage() {
           m.includes('load failed')
         );
       };
+      // Shorter backoff (200/400/800ms vs original 500/1000/2000ms) so a
+      // run of transient blips across many photos doesn't pile up into a
+      // perceived "save is taking forever." Still catches real transient
+      // network blips without making the user wait on recovered requests.
       const retryFetch = async <T,>(
         makeCall: () => PromiseLike<T>,
         label: string,
@@ -650,11 +654,18 @@ export default function LotReviewPage() {
             lastErr = err;
             if (!isFetchErr(err) || attempt === 3) throw err;
             console.warn(`${label} attempt ${attempt} failed with ${err?.message}; retrying`);
-            await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
+            await new Promise((r) => setTimeout(r, 200 * Math.pow(2, attempt - 1)));
           }
         }
         throw lastErr;
       };
+
+      // Per-photo failure tally across the whole range — surfaced in the
+      // end-of-save summary so photos that silently died (Supabase
+      // storage returned {error}, orphaned storage file but no lot_photos
+      // row, or a thrown exception) are visible to the user instead of
+      // producing a saved lot with mysteriously-missing images.
+      const photoFailures: Array<{ lotNumber: number; index: number; reason: string }> = [];
 
       for (let i = 0; i < lotsToCreate; i++) {
         const lotNumber = nextLotNumber + i;
@@ -775,45 +786,71 @@ export default function LotReviewPage() {
             }
           }
 
-          // Upload user photos. A single failed photo upload should NOT
-          // abort the whole range — the lot row is already saved, so
-          // aborting here would leave partial state without advancing the
-          // localStorage counter, forcing the user into a duplicate-lot-#
-          // error on their next attempt. Log and continue instead.
-          for (let j = 0; j < photos.length; j++) {
-            try {
-              const base64 = photos[j].replace(/^data:image\/\w+;base64,/, '');
-              const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-              const blob = new Blob([buffer], { type: 'image/jpeg' });
+          // Upload user photos IN PARALLEL within one lot. Sequential
+          // upload of 10 photos meant waiting for each one's round-trip
+          // before starting the next; across a 15-lot range that was a
+          // perceptible "sync is slow" (users were waiting on 150+
+          // sequential uploads). Supabase Storage handles concurrent
+          // uploads fine; the user's uplink is the bottleneck, not us.
+          //
+          // A single failed photo upload should NOT abort the whole
+          // range — the lot row is already saved, so aborting here would
+          // leave partial state without advancing the localStorage
+          // counter, forcing the user into a duplicate-lot-# error on
+          // their next attempt. Record the failure and keep going.
+          await Promise.all(
+            photos.map(async (photoData, j) => {
+              try {
+                const base64 = photoData.replace(/^data:image\/\w+;base64,/, '');
+                const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+                const blob = new Blob([buffer], { type: 'image/jpeg' });
 
-              const storagePath = `${auctionId}/${lotData.id}/${photoIndex + j}.jpg`;
+                const storagePath = `${auctionId}/${lotData.id}/${photoIndex + j}.jpg`;
 
-              const { error: uploadError } = await retryFetch(
-                () =>
-                  supabase.storage
-                    .from('lot-photos')
-                    .upload(storagePath, blob, { contentType: 'image/jpeg' }),
-                `photo ${j} upload for lot #${lotNumber}`,
-              );
+                const { error: uploadError } = await retryFetch(
+                  () =>
+                    supabase.storage
+                      .from('lot-photos')
+                      .upload(storagePath, blob, { contentType: 'image/jpeg' }),
+                  `photo ${j} upload for lot #${lotNumber}`,
+                );
 
-              if (uploadError) {
-                console.warn(`Photo ${j} upload failed for lot #${lotNumber}:`, uploadError);
-                continue;
+                if (uploadError) {
+                  const reason = `storage: ${uploadError.message || 'unknown'}`;
+                  console.warn(`Photo ${j} upload failed for lot #${lotNumber}:`, uploadError);
+                  photoFailures.push({ lotNumber, index: j, reason });
+                  return;
+                }
+
+                const { error: insertError } = await retryFetch(
+                  () =>
+                    supabase.from('lot_photos').insert({
+                      lot_id: lotData.id,
+                      storage_path: storagePath,
+                      display_order: photoIndex + j,
+                    }),
+                  `photo ${j} lot_photos insert for lot #${lotNumber}`,
+                );
+
+                if (insertError) {
+                  // Storage uploaded but lot_photos row didn't — orphan
+                  // file. Surface so the user knows the photo is
+                  // "missing" even though the bytes landed. (purge
+                  // endpoint handles cleanup.)
+                  const reason = `lot_photos row: ${insertError.message || 'unknown'}`;
+                  console.warn(`Photo ${j} lot_photos insert failed for lot #${lotNumber}:`, insertError);
+                  photoFailures.push({ lotNumber, index: j, reason });
+                }
+              } catch (photoErr: any) {
+                console.warn(`Photo ${j} exception for lot #${lotNumber}:`, photoErr);
+                photoFailures.push({
+                  lotNumber,
+                  index: j,
+                  reason: `exception: ${photoErr?.message || photoErr}`,
+                });
               }
-
-              await retryFetch(
-                () =>
-                  supabase.from('lot_photos').insert({
-                    lot_id: lotData.id,
-                    storage_path: storagePath,
-                    display_order: photoIndex + j,
-                  }),
-                `photo ${j} lot_photos insert for lot #${lotNumber}`,
-              );
-            } catch (photoErr) {
-              console.warn(`Photo ${j} exception for lot #${lotNumber}:`, photoErr);
-            }
-          }
+            }),
+          );
 
           // If no stock image was attached inline (neither sibling-dedupe
           // nor the generator surfaced one), queue a background job to
@@ -884,6 +921,30 @@ export default function LotReviewPage() {
         setError(
           `${lotsToCreate - failedLotNumbers.length} of ${lotsToCreate} lots saved. Network dropped on ${list} — click Redo and start a new range from the next number to retry just those.`,
         );
+        return;
+      }
+
+      // Photos uploaded in parallel — if any failed we surface a visible
+      // summary instead of silently dropping them. Common causes: a
+      // Supabase Storage RLS reject, bucket quota, request-size limit,
+      // or a mid-save auth token refresh that died. The lot ROW still
+      // saved so we can't block navigation on this — but the user needs
+      // to know, so we show a toast and skip the auto-navigate so they
+      // see it before leaving the page.
+      if (photoFailures.length > 0) {
+        const totalPhotos = lotsToCreate * photos.length;
+        const sample = photoFailures
+          .slice(0, 3)
+          .map((f) => `lot #${f.lotNumber} photo ${f.index + 1}: ${f.reason}`)
+          .join(' | ');
+        const more = photoFailures.length > 3 ? ` (+${photoFailures.length - 3} more)` : '';
+        setError(
+          `All ${lotsToCreate} lots saved, BUT ${photoFailures.length} of ${totalPhotos} photos failed to upload. Add missing photos per lot from the auction. First: ${sample}${more}`,
+        );
+        // Still clear pending-lot — the lot rows are saved, Redo would
+        // create duplicates. But stay on this page so the user reads it.
+        sessionStorage.removeItem('pending-lot');
+        clearPendingLot();
         return;
       }
 
