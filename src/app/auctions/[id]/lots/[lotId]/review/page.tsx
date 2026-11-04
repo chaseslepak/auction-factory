@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { LotWithPhotos, GenerateListingResponse } from '@/lib/types';
@@ -18,7 +18,10 @@ import { computeListedPrice, syncRetailLine, formatLotTitle } from '@/lib/listin
 export default function LotReviewPage() {
   const { id: auctionId, lotId } = useParams<{ id: string; lotId: string }>();
   const router = useRouter();
-  const supabase = createClient();
+  // Memoize so re-renders don't create a new Supabase client (every new
+  // client attempts its own auth refresh; stacking those on a bad
+  // token has surfaced as "TypeError: Failed to fetch" on save).
+  const supabase = useMemo(() => createClient(), []);
   const isNew = lotId === 'new';
 
   // New lot state
@@ -598,6 +601,46 @@ export default function LotReviewPage() {
         return;
       }
 
+      // PRE-SAVE AUTH CHECK. Supabase's browser client throws
+      // "TypeError: Failed to fetch" on any write when the stored
+      // session token has expired AND the refresh-token call itself
+      // fails (expired refresh, revoked token, network blocking
+      // Supabase's auth endpoint). Users saw it cross-tab, cross-device,
+      // because all our retry wrappers hit the same dead session and
+      // fail identically. Check and refresh BEFORE the save loop so the
+      // user sees an actionable "Sign in again" instead of the cryptic
+      // fetch error after we've already partially inserted lots.
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData?.session) {
+          setError(
+            'Your session has expired. Please sign in again, then come back to this page and press Save Lots.',
+          );
+          setSaving(false);
+          return;
+        }
+        // Force a refresh when the access token is within 60s of expiry
+        // so a 15-lot save that takes 30-60s doesn't expire mid-run.
+        const expiresAtSec = (sessionData.session.expires_at as number | undefined) ?? 0;
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (expiresAtSec && expiresAtSec - nowSec < 60) {
+          const { error: refreshErr } = await supabase.auth.refreshSession();
+          if (refreshErr) {
+            setError(
+              `Your session couldn't be refreshed (${refreshErr.message}). Please sign in again and retry.`,
+            );
+            setSaving(false);
+            return;
+          }
+        }
+      } catch (authErr: any) {
+        setError(
+          `Couldn't verify your sign-in (${authErr?.message || 'unknown error'}). Please sign in again and retry.`,
+        );
+        setSaving(false);
+        return;
+      }
+
       setSaveProgress({ current: 0, total: lotsToCreate });
 
       // Pre-fetch on save: collect ids of lots that end up WITHOUT a stock
@@ -642,6 +685,12 @@ export default function LotReviewPage() {
       // run of transient blips across many photos doesn't pile up into a
       // perceived "save is taking forever." Still catches real transient
       // network blips without making the user wait on recovered requests.
+      //
+      // On the first fetch error, attempt a silent session refresh.
+      // When the auth token has expired mid-save, every subsequent
+      // write throws TypeError: Failed to fetch; a refresh often gets
+      // us a fresh token so the rest of the loop succeeds.
+      let refreshedOnce = false;
       const retryFetch = async <T,>(
         makeCall: () => PromiseLike<T>,
         label: string,
@@ -654,6 +703,14 @@ export default function LotReviewPage() {
             lastErr = err;
             if (!isFetchErr(err) || attempt === 3) throw err;
             console.warn(`${label} attempt ${attempt} failed with ${err?.message}; retrying`);
+            if (!refreshedOnce) {
+              refreshedOnce = true;
+              try {
+                await supabase.auth.refreshSession();
+              } catch (refreshErr) {
+                console.warn('mid-save session refresh failed:', refreshErr);
+              }
+            }
             await new Promise((r) => setTimeout(r, 200 * Math.pow(2, attempt - 1)));
           }
         }
