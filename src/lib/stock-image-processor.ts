@@ -66,10 +66,12 @@ export interface StockImageResult {
 }
 
 // Minimum vision-confidence score (1-10) a candidate must earn before we
-// attach it as a lot's primary photo. Chase: "accuracy > hit-rate." At 7
-// vision has to be reasonably sure same brand + model + form factor;
-// below that we leave the user's own photos as the primary.
-const MIN_VISION_CONFIDENCE = 7;
+// attach it as a lot's primary photo. Chase: "accuracy > hit-rate." At 8
+// vision has to be clearly same brand+model+form factor; below that we
+// leave the user's own photos as the primary. Raised from 7 after Chase
+// reported "all stock photos are incorrect" — the 7-cutoff was letting
+// through plausible-but-wrong siblings of the real product.
+const MIN_VISION_CONFIDENCE = 8;
 
 export function emptyDiag(): SearchDiagnostics {
   return {
@@ -909,17 +911,16 @@ async function findAndVerifyStockImageCore(
     ? candidates.filter((c) => normalizeForMatch(c.title).includes(modelNormalized))
     : candidates;
 
+  // Always route through the vision verifier when user photos exist.
+  // The old shortcut returned the single strict-match candidate without
+  // verification — fine when the model-number-in-title filter was tight,
+  // but Chase reports "all stock photos are incorrect," which this
+  // shortcut would mask: a wrong candidate whose title happened to
+  // contain a generic model substring (e.g. "100", "pro", "std")
+  // bypassed vision entirely. Only skip vision when we literally have no
+  // user photo to compare against.
   let toVerify: StockCandidate[];
-  if (strictFiltered.length === 1) {
-    diag.vision = 'skipped';
-    diag.visionPickedSource = strictFiltered[0].source;
-    return {
-      imageUrl: strictFiltered[0].imageUrl,
-      price: strictFiltered[0].price,
-      source: strictFiltered[0].source,
-      confidence: null,
-    };
-  } else if (strictFiltered.length >= 2) {
+  if (strictFiltered.length >= 1) {
     toVerify = strictFiltered;
   } else {
     // Strict filter killed everything — vision picks from the full set.
