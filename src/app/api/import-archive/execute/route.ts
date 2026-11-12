@@ -63,11 +63,14 @@ export async function POST(req: NextRequest) {
   if (af_item_ids.length === 0) {
     return NextResponse.json({ error: 'af_item_ids required' }, { status: 400 });
   }
-  // Server-side cap so one call stays inside the Vercel function
-  // timeout even at ~1s/photo on a lot with 10 images.
-  if (af_item_ids.length > 10) {
+  // Server-side cap so one call stays inside the Vercel 60s function
+  // timeout even on photo-heavy lots. 5 lots × (~8s detail scrape + 5s
+  // photo downloads + inserts) leaves comfortable headroom vs. the
+  // previous 10-cap that occasionally got truncated and surfaced in
+  // iOS Safari as "The string did not match the expected pattern."
+  if (af_item_ids.length > 5) {
     return NextResponse.json(
-      { error: 'Max 10 lots per import batch — split into multiple calls.' },
+      { error: 'Max 5 lots per import batch — split into multiple calls.' },
       { status: 400 },
     );
   }

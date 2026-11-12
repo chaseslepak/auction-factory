@@ -8,7 +8,7 @@ const AF_ORIGIN = 'https://auctionfactory.com';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 AuctionFactoryLotter/1.0';
 
-const FETCH_TIMEOUT_MS = 15000;
+const FETCH_TIMEOUT_MS = 8000;
 // Server-enforced per-page item count on archive_auction_details.php
 // (overriding via query param didn't work in testing).
 const ITEMS_PER_PAGE = 18;
@@ -303,11 +303,12 @@ export async function fetchLotFullDetailAuthed(
   af_item_id: number,
   cookie: string,
 ): Promise<ScrapedLotFull | null> {
-  // Try the admin edit-item pages first (those carry the full gallery
-  // + raw description Chase sees when he edits a lot), then fall back
-  // to the public item_detail page served with the admin cookie.
-  // Picks the one that yields the most unique images; if any yields
-  // a non-empty parse we return it.
+  // Probe admin edit-item pages + public detail IN PARALLEL. The
+  // previous sequential version did up to 4 × 15s = 60s per item,
+  // which blew past Vercel's 60s function cap on a 10-lot batch and
+  // truncated the JSON response (surfaced on iOS Safari as "The
+  // string did not match the expected pattern"). Parallel means the
+  // slowest single URL caps total per-item latency at ~15s.
   const candidateUrls = [
     `${AF_ORIGIN}/admin/edit_item_3.php?item=${af_item_id}`,
     `${AF_ORIGIN}/admin/edit_item_2.php?item=${af_item_id}`,
@@ -315,19 +316,17 @@ export async function fetchLotFullDetailAuthed(
     `${AF_ORIGIN}/item_detail.php?item=${af_item_id}`,
   ];
 
+  const htmls = await Promise.all(candidateUrls.map((u) => fetchAuthedHtml(u, cookie)));
+
   let bestHtml: string | null = null;
   let bestImgs: string[] = [];
-  for (const url of candidateUrls) {
-    const html = await fetchAuthedHtml(url, cookie);
+  for (const html of htmls) {
     if (!html) continue;
     const imgs = extractAllItemImageUrls(html);
     if (imgs.length > bestImgs.length) {
       bestHtml = html;
       bestImgs = imgs;
     }
-    // Any admin edit page with ≥2 images is already a strong source;
-    // skip the fallback probes to save time.
-    if (imgs.length >= 2) break;
   }
 
   if (!bestHtml) return null;
