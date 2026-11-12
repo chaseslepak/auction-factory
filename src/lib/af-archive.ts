@@ -36,6 +36,13 @@ export interface ScrapedLot {
   sold_price: number | null;
   image_url: string | null;
   lot_href: string;
+  // Full long-form auction description — the <p> block right under
+  // the item title on the archive listing page. Already per-lot in the
+  // public HTML so no second fetch is needed to get it.
+  description: string | null;
+  width: string | null;
+  depth: string | null;
+  height: string | null;
 }
 
 export interface ScrapedAuction {
@@ -155,6 +162,26 @@ export function parseAuctionLotsHtml(
     const model = extractField(dims, 'MODEL');
     const retailRaw = extractField(dims, 'ORIGINAL PRICE NEW');
     const retail_new = parsePrice(retailRaw);
+    const widthRaw = extractField(dims, 'WIDTH');
+    const depthRaw = extractField(dims, 'DEPTH');
+    const heightRaw = extractField(dims, 'HEIGHT');
+
+    // Description: the <p> block AF renders directly under the title
+    // row with features, condition notes, retail line, etc. One <p>
+    // per lot. If absent (uncommon) leave null and the importer can
+    // proceed with an empty description.
+    let description: string | null = null;
+    const pMatch = block.match(/<p>([\s\S]*?)<\/p>/i);
+    if (pMatch) {
+      // Preserve line breaks that AF uses, strip only tags.
+      const raw = pMatch[1]
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      if (raw.length >= 10) description = raw;
+    }
 
     // Hammer price. AF renders "Current Bid: $NNN.NN" inside the lot's
     // detail block. On live auctions this is the current bid; on
@@ -181,6 +208,10 @@ export function parseAuctionLotsHtml(
       sold_price,
       image_url,
       lot_href,
+      description,
+      width: widthRaw || null,
+      depth: depthRaw || null,
+      height: heightRaw || null,
     });
   }
   return lots;
@@ -259,34 +290,47 @@ async function fetchAuthedHtml(url: string, cookie: string): Promise<string | nu
   }
 }
 
-// Pull ONLY the full auction_description for this item from AF.
+// Fetch every /uploaded_files/item_* image belonging to this lot by
+// hitting the PUBLIC item_detail.php?item=<id> page WITH the admin
+// cookie. item_detail.php is item-scoped — unlike the admin edit
+// pages, there is no "related items" sidebar leaking other lots'
+// thumbnails. Previous attempts to probe admin/edit_item_X.php
+// repeatedly bled in nav thumbnails, which is what caused the
+// "pictures from every lot loaded in each lot" bug.
 //
-// Everything else (title, brand, model, condition, retail, primary
-// photo) comes from the already-parsed public archive listing — that
-// data is per-item and verified correct per lot. Trying to also scrape
-// a full image gallery from admin/edit_item.php proved unreliable: the
-// admin HTML renders thumbnails of OTHER items in nav/sidebars that
-// every regex/anchor heuristic I tried leaked into the wrong lot.
-//
-// Single targeted request to admin/edit_item_3.php, grab the
-// <textarea name="auction_description"> value. Returns null on login
-// bounce / timeout / missing textarea so the caller can proceed with
-// an empty description rather than aborting the whole import.
-export async function fetchLotDescriptionAuthed(
+// Caller passes a Set of other lots' known archive thumbnails; those
+// are filtered out as a second defense in case item_detail turns out
+// to render a navigational element somewhere. Returns an empty array
+// on login bounce / network failure so the import proceeds with the
+// archive thumbnail only.
+export async function fetchLotImagesAuthed(
   af_item_id: number,
+  af_auction_id: number,
   cookie: string,
-): Promise<string | null> {
-  const html = await fetchAuthedHtml(
-    `${AF_ORIGIN}/admin/edit_item_3.php?item=${af_item_id}`,
-    cookie,
-  );
-  if (!html) return null;
-  const ta = html.match(
-    /<textarea\b[^>]*\bname=["'](?:auction_description|description|detail)["'][^>]*>([\s\S]*?)<\/textarea>/i,
-  );
-  if (!ta?.[1]) return null;
-  const text = cleanText(ta[1]);
-  return text && text.length >= 10 ? text : null;
+  otherLotsThumbs: Set<string>,
+): Promise<string[]> {
+  const url = `${AF_ORIGIN}/item_detail.php?item=${af_item_id}&auction=${af_auction_id}`;
+  const html = await fetchAuthedHtml(url, cookie);
+  if (!html) return [];
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /\/uploaded_files\d*\/item_[^\s"'<>)]+\.(?:jpg|jpeg|png|webp|gif)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const u = `${AF_ORIGIN}${m[0]}`;
+    if (seen.has(u)) continue;
+    seen.add(u);
+    // Cross-reference filter: drop any URL that is some other lot's
+    // archive thumbnail. Our lot's own primary thumbnail is NOT in
+    // otherLotsThumbs (the caller excludes it) so it passes through.
+    if (otherLotsThumbs.has(u)) continue;
+    out.push(u);
+    // Hard cap in case a future AF layout dumps a huge list; 30 covers
+    // any realistic per-item gallery with headroom.
+    if (out.length >= 30) break;
+  }
+  return out;
 }
 
 export interface ReindexOptions {
