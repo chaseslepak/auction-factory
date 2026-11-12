@@ -165,6 +165,7 @@ export default function ImportFromArchivePage() {
     setProgress({ current: 0, total: idsAll.length });
     let created = 0;
     let errors = 0;
+    let firstFailReason: string | null = null;
     let currentStart = startLotNumber;
     try {
       for (let i = 0; i < idsAll.length; i += BATCH) {
@@ -182,14 +183,22 @@ export default function ImportFromArchivePage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || `execute failed: ${res.status}`);
         created += data.created || 0;
-        errors += (data.results || []).filter((r: any) => !r.success).length;
+        const failedInChunk = (data.results || []).filter((r: any) => !r.success);
+        errors += failedInChunk.length;
+        if (!firstFailReason && failedInChunk.length > 0) {
+          const r = failedInChunk[0];
+          firstFailReason = `lot #${r.destination_lot_number} (af_item_id ${r.af_item_id}): ${r.error || 'unknown'}`;
+        }
         currentStart += chunk.length;
         setProgress({ current: Math.min(idsAll.length, i + chunk.length), total: idsAll.length });
       }
       if (errors > 0) {
         setResultIsError(true);
+        // Surface the first failure's actual reason so Chase can see what
+        // broke (missing AF cookie, DB column mismatch, etc.) instead of
+        // just a count.
         setResultMsg(
-          `Imported ${created} of ${idsAll.length} lots. ${errors} failed — check lotter for gaps and retry those lot numbers individually.`,
+          `Imported ${created} of ${idsAll.length} lots. ${errors} failed.${firstFailReason ? ` First reason — ${firstFailReason}` : ''}`,
         );
       } else {
         setResultMsg(`Imported ${created} lots. Returning to auction…`);
