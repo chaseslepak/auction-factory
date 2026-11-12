@@ -90,6 +90,17 @@ export async function POST(req: NextRequest) {
     cookie = decrypt(cookie);
   } catch {}
 
+  // Log a top-level marker so Vercel runtime logs make it easy to grep
+  // this endpoint's activity. User-visible errors still return through
+  // the normal result array, but this + the per-lot error logs below
+  // let Chase pull the real reasons from the Vercel dashboard without
+  // needing a client hard-refresh.
+  console.log(
+    `[IMPORT-ARCHIVE] start auction_id=${auction_id} af_auction_id=${af_auction_id} ` +
+    `start_lot_number=${start_lot_number} count=${af_item_ids.length} ` +
+    `cookie_present=${!!cookie}`,
+  );
+
   // Fallback-source lookup: if the authed detail scrape yields no
   // image URLs, use the archive page's thumbnail as a one-photo
   // fallback. Scan once up front — avoids N re-crawls below.
@@ -97,8 +108,10 @@ export async function POST(req: NextRequest) {
   try {
     const scanned = await fetchAuctionLots(af_auction_id);
     archiveIndex = new Map(scanned.map((l) => [l.af_item_id, l]));
-  } catch {
+    console.log(`[IMPORT-ARCHIVE] archive-index loaded (${scanned.length} lots)`);
+  } catch (err: any) {
     archiveIndex = null;
+    console.error(`[IMPORT-ARCHIVE] archive-index FAILED: ${err?.message || err}`);
   }
 
   const results: ImportResult[] = [];
@@ -169,6 +182,11 @@ export async function POST(req: NextRequest) {
           key_features: [],
           auction_description: description,
           notes: `Imported from AF archive auction ${af_auction_id}, item ${af_item_id}`,
+          // lots.created_by is NOT NULL with default auth.uid(). The
+          // service-role client doesn't carry a user, so auth.uid()
+          // comes back null and every insert would violate the
+          // constraint. Pass the signed-in user explicitly.
+          created_by: user.id,
         })
         .select()
         .single();
