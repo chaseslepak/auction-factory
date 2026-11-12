@@ -291,9 +291,20 @@ export default function ImportFromArchivePage() {
               </div>
             </div>
 
+            {/* Build a map of af_item_id → destination lot # so each row
+                 can show "source #X → dest #Y". Rebuilt whenever the
+                 selection or startLotNumber changes.  */}
+            {(() => null)()}
             <div className="border rounded-lg divide-y max-h-[520px] overflow-auto">
               {scanned.map((l) => {
                 const isPicked = selected.has(l.af_item_id);
+                // Destination lot # = startLotNumber + its position in
+                // the ordered selection. Lots not selected show no
+                // destination.
+                const destIdx = isPicked
+                  ? orderedSelection.findIndex((s) => s.af_item_id === l.af_item_id)
+                  : -1;
+                const destNum = destIdx >= 0 ? startLotNumber + destIdx : null;
                 return (
                   <label
                     key={l.af_item_id}
@@ -304,7 +315,12 @@ export default function ImportFromArchivePage() {
                       checked={isPicked}
                       onChange={() => toggle(l.af_item_id)}
                     />
-                    <span className="w-12 text-xs font-mono text-gray-600">#{l.lot_number ?? '?'}</span>
+                    <span className="w-24 text-xs font-mono text-gray-600">
+                      src #{l.lot_number ?? '?'}
+                      {destNum != null && (
+                        <> → <span className="text-brand-green font-bold">dest #{destNum}</span></>
+                      )}
+                    </span>
                     {l.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img

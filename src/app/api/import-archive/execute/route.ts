@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { fetchLotFullDetailAuthed, fetchAuctionLots, ScrapedLot } from '@/lib/af-archive';
+import { computeListedPrice, formatLotTitle, syncRetailLine } from '@/lib/listing-price';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -127,11 +128,11 @@ export async function POST(req: NextRequest) {
       // Fall back to archive-page fields when the authed detail scrape
       // comes back empty (e.g. session expired). We still get an
       // importable lot, just with one photo and lighter metadata.
-      const item_name = detail?.item_name || archiveLot?.item_name || `Imported lot ${af_item_id}`;
+      const baseName = detail?.item_name || archiveLot?.item_name || `Imported lot ${af_item_id}`;
       const brand = detail?.brand || archiveLot?.brand || '';
       const model = detail?.model || archiveLot?.model || '';
-      const retail = detail?.retail_new ?? archiveLot?.retail_new ?? null;
-      const description = detail?.description || '';
+      const retail = detail?.retail_new ?? archiveLot?.retail_new ?? 0;
+      let description = detail?.description || '';
       // Condition rating from authed detail (parsed int); otherwise
       // parse the archive page's "N - Label" string; otherwise null.
       let condition_rating: number | null = detail?.condition_rating ?? null;
@@ -146,12 +147,28 @@ export async function POST(req: NextRequest) {
       const depth = detail?.depth || null;
       const height = detail?.height || null;
 
+      // Apply the lotter's listing conventions so an imported lot looks
+      // identical to one Chase would create from the review page:
+      // compute listed_price from retail, synchronize the "Retail
+      // Price: $N" line inside the description, and run the item_name
+      // through the title formatter so the "NEW ... ($price)" suffix
+      // gets applied when condition is new-in-box.
+      const listedPrice = computeListedPrice(retail || 0);
+      if (description) {
+        description = syncRetailLine(description, listedPrice);
+      }
+      const item_name = formatLotTitle(baseName, condition_rating, listedPrice);
+
       // Photo URL list: prefer the authed detail scrape (full set);
       // fall back to the archive thumbnail if the detail page gave
       // nothing.
       const image_urls = detail?.image_urls?.length
         ? detail.image_urls
         : archiveLot?.image_url ? [archiveLot.image_url] : [];
+      console.log(
+        `[IMPORT-ARCHIVE] lot af_item_id=${af_item_id} → dest #${destination_lot_number} ` +
+        `images=${image_urls.length} desc_len=${description.length} retail=${retail}`,
+      );
 
       // Hard-delete any soft-deleted lot at the destination slot so the
       // unique (auction_id, lot_number) constraint has room.
@@ -175,7 +192,7 @@ export async function POST(req: NextRequest) {
           condition_rating: condition_rating ?? 5,
           quantity: 1,
           estimated_retail_new: retail ?? 0,
-          listed_price: 0,
+          listed_price: listedPrice,
           width,
           depth,
           height,
