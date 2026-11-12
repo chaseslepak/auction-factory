@@ -158,9 +158,10 @@ export default function ImportFromArchivePage() {
     setImporting(true);
     setResultMsg(null);
     setResultIsError(false);
-    // Server caps at 10 per batch to stay under Vercel function timeout
-    // on photo-heavy lots. Chunk the selection and submit sequentially.
-    const BATCH = 10;
+    // Server caps at 5 per batch to stay under Vercel's 60s function
+    // timeout on photo-heavy lots. Chunk the selection and submit
+    // sequentially — UI shows progress across the whole selection.
+    const BATCH = 5;
     const idsAll = orderedSelection.map((l) => l.af_item_id);
     setProgress({ current: 0, total: idsAll.length });
     let created = 0;
@@ -180,7 +181,19 @@ export default function ImportFromArchivePage() {
             af_item_ids: chunk,
           }),
         });
-        const data = await res.json();
+        // Safe parse — if the function timed out server-side the body
+        // can be truncated HTML or empty, which iOS Safari surfaces as
+        // 'The string did not match the expected pattern' from JSON
+        // parsing. Give the user a clearer message instead.
+        const bodyText = await res.text();
+        let data: any = null;
+        try {
+          data = bodyText ? JSON.parse(bodyText) : null;
+        } catch {
+          throw new Error(
+            `Server response couldn't be parsed (status ${res.status}). This usually means the function timed out — try a smaller batch.`,
+          );
+        }
         if (!res.ok) throw new Error(data?.error || `execute failed: ${res.status}`);
         created += data.created || 0;
         const failedInChunk = (data.results || []).filter((r: any) => !r.success);
