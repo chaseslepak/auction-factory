@@ -315,139 +315,61 @@ export async function fetchLotImagesAuthed(
   af_item_id: number,
   af_auction_id: number,
   cookie: string,
-  otherLotsThumbs: Set<string>,
-  anchorText: string[],
+  // kept for call-site compatibility; unused now that we extract from
+  // the archive_item_detail gallery container directly.
+  _otherLotsThumbs: Set<string>,
+  _anchorText: string[],
 ): Promise<{ urls: string[]; sourceUrl: string | null; debug: string }> {
-  const candidateUrls = [
-    `${AF_ORIGIN}/item_detail.php?item=${af_item_id}&auction=${af_auction_id}`,
-    `${AF_ORIGIN}/item_detail.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/edit_item_3.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/edit_item.php?item=${af_item_id}`,
-  ];
-
-  const results = await Promise.all(
-    candidateUrls.map(async (url) => {
-      const html = await fetchAuthedHtml(url, cookie);
-      if (!html) return { url, urls: [], htmlLen: 0 };
-      const urls = extractImagesAroundAnchor(html, af_item_id, anchorText, otherLotsThumbs);
-      return { url, urls, htmlLen: html.length };
-    }),
-  );
-
-  // Pick the URL that yielded the most unique, filtered images.
-  let best = results[0];
-  for (const r of results) {
-    if (r.urls.length > best.urls.length) best = r;
+  // AF's archived-item detail page. Proven by diagnostic probe:
+  // item_detail.php?item=<id> 301s here, and this page is item-scoped
+  // (no sidebar/related-items leakage). Every /uploaded_files/item_*
+  // reference inside its <div class="itemGallery"> / <div
+  // class="cycle-slideshow"> container is a photo of THIS item.
+  const url = `${AF_ORIGIN}/archive_item_detail.php?item=${af_item_id}`;
+  const html = await fetchAuthedHtml(url, cookie);
+  if (!html) {
+    return { urls: [], sourceUrl: null, debug: `${url} → no html` };
   }
 
-  const debug = results
-    .map((r) => `${r.url.replace(AF_ORIGIN, '')} → ${r.urls.length} (${r.htmlLen}b)`)
-    .join('; ');
+  // Extract only the content of the item-gallery container. AF renders
+  // the gallery as a cycle-slideshow div immediately inside an
+  // itemGallery-classed wrapper. Scoping to that block guarantees we
+  // don't pick up site logos, badges or payment-provider images that
+  // live elsewhere in the template.
+  const galleryMatch = html.match(
+    /<div\b[^>]*\bclass=["'][^"']*\bitemGallery\b[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*(?:<\/div>|<script|<style|$)/i,
+  );
+  const galleryBlock = galleryMatch ? galleryMatch[1] : null;
+
+  // Narrower pass: the images actually sit inside the cycle-slideshow
+  // nested div. Prefer that if present; fall back to the outer gallery
+  // block, and last-resort the whole doc (which still can't pollute
+  // across items because archive_item_detail is item-scoped).
+  let region = html;
+  if (galleryBlock) region = galleryBlock;
+  const slideshowMatch = (galleryBlock || html).match(
+    /<div\b[^>]*\bclass=["'][^"']*\bcycle-slideshow\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+  );
+  if (slideshowMatch) region = slideshowMatch[1];
+
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  const imgRe = /\/uploaded_files\d*\/item_[^\s"'<>)]+\.(?:jpg|jpeg|png|webp|gif)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = imgRe.exec(region)) !== null) {
+    const u = `${AF_ORIGIN}${m[0]}`;
+    if (!seen.has(u)) {
+      seen.add(u);
+      urls.push(u);
+      if (urls.length >= 30) break;
+    }
+  }
 
   return {
-    urls: best.urls,
-    sourceUrl: best.urls.length > 0 ? best.url : null,
-    debug,
+    urls,
+    sourceUrl: urls.length > 0 ? url : null,
+    debug: `archive_item_detail → ${urls.length} images (${html.length}b, gallery=${galleryMatch ? 'y' : 'n'}, slideshow=${slideshowMatch ? 'y' : 'n'})`,
   };
-}
-
-// Pull /uploaded_files/item_* image URLs that sit WITHIN a bounded
-// window of a HIGH-CONFIDENCE anchor for this specific item. The
-// anchor hierarchy, strongest first:
-//
-//   1. 'item=<af_item_id>' — a URL/data-attribute pattern that is
-//      structurally tied to this item and never appears for another.
-//      This is the strongest signal; if it hits we use it alone.
-//   2. Full item_name text — reasonably unique per lot.
-//   3. model + brand — least unique, used only if nothing stronger
-//      matched.
-//
-// Matches in the first 1500 or last 1500 chars of the document are
-// discarded on the assumption that header/nav/footer live there. We
-// also hard-filter any URL that is another lot's archive thumbnail.
-function extractImagesAroundAnchor(
-  html: string,
-  af_item_id: number,
-  anchorText: string[],
-  otherLotsThumbs: Set<string>,
-): string[] {
-  const WINDOW = 2500; // chars either side of anchor (was 6000 — too wide, bled sidebars)
-  const HEAD = 1500;    // skip nav/header region
-  const TAIL = 1500;    // skip footer region
-  const minIdx = Math.min(HEAD, Math.max(0, html.length - TAIL));
-  const maxIdx = Math.max(minIdx, html.length - TAIL);
-
-  const findAll = (needle: string): Array<[number, number]> => {
-    if (!needle || needle.length < 3) return [];
-    const spans: Array<[number, number]> = [];
-    let idx = 0;
-    while (idx < html.length) {
-      const found = html.indexOf(needle, idx);
-      if (found < 0) break;
-      // Reject hits inside nav/footer regions.
-      if (found >= minIdx && found <= maxIdx) {
-        spans.push([Math.max(0, found - WINDOW), Math.min(html.length, found + WINDOW)]);
-      }
-      idx = found + needle.length;
-    }
-    return spans;
-  };
-
-  // Tier 1: structural URL pattern unique to this item.
-  let spans = findAll(`item=${af_item_id}`);
-  // Tier 2: item_name (first non-empty anchor that is reasonably long).
-  if (spans.length === 0) {
-    const nameCandidates = anchorText
-      .map((s) => (s || '').replace(/\s*\(\s*\$[\d,]+(?:\.\d{2})?\s*\)\s*$/i, '').trim())
-      .filter((s) => s.length >= 10);
-    for (const needle of nameCandidates) {
-      spans = spans.concat(findAll(needle));
-    }
-  }
-  // Tier 3: brand+model + anything else short but still ≥4 chars.
-  if (spans.length === 0) {
-    const shortCandidates = anchorText
-      .map((s) => (s || '').replace(/\s*\(\s*\$[\d,]+(?:\.\d{2})?\s*\)\s*$/i, '').trim())
-      .filter((s) => s.length >= 4);
-    for (const needle of shortCandidates) {
-      spans = spans.concat(findAll(needle));
-    }
-  }
-
-  // If no anchor matched, don't blindly scan the whole doc — that's
-  // what caused the cross-lot bleed. Return empty; caller falls back
-  // to the archive thumbnail.
-  if (spans.length === 0) return [];
-
-  // Merge overlapping spans so we scan each byte at most once.
-  spans.sort((a, b) => a[0] - b[0]);
-  const merged: Array<[number, number]> = [];
-  for (const [s, e] of spans) {
-    const last = merged[merged.length - 1];
-    if (last && s <= last[1]) {
-      last[1] = Math.max(last[1], e);
-    } else {
-      merged.push([s, e]);
-    }
-  }
-
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const re = /\/uploaded_files\d*\/item_[^\s"'<>)]+\.(?:jpg|jpeg|png|webp|gif)/gi;
-  for (const [s, e] of merged) {
-    const region = html.substring(s, e);
-    let m: RegExpExecArray | null;
-    re.lastIndex = 0;
-    while ((m = re.exec(region)) !== null) {
-      const u = `${AF_ORIGIN}${m[0]}`;
-      if (seen.has(u)) continue;
-      seen.add(u);
-      if (otherLotsThumbs.has(u)) continue;
-      out.push(u);
-      if (out.length >= 30) return out;
-    }
-  }
-  return out;
 }
 
 export interface ReindexOptions {
