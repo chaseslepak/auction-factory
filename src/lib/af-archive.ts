@@ -290,45 +290,131 @@ async function fetchAuthedHtml(url: string, cookie: string): Promise<string | nu
   }
 }
 
-// Fetch every /uploaded_files/item_* image belonging to this lot by
-// hitting the PUBLIC item_detail.php?item=<id> page WITH the admin
-// cookie. item_detail.php is item-scoped — unlike the admin edit
-// pages, there is no "related items" sidebar leaking other lots'
-// thumbnails. Previous attempts to probe admin/edit_item_X.php
-// repeatedly bled in nav thumbnails, which is what caused the
-// "pictures from every lot loaded in each lot" bug.
+// Fetch every /uploaded_files/item_* image belonging to this lot.
 //
-// Caller passes a Set of other lots' known archive thumbnails; those
-// are filtered out as a second defense in case item_detail turns out
-// to render a navigational element somewhere. Returns an empty array
-// on login bounce / network failure so the import proceeds with the
-// archive thumbnail only.
+// Strategy:
+//  1. Try several candidate AF URLs in parallel — the public
+//     item_detail page is the most likely source (item-scoped),
+//     with admin edit variants as backup.
+//  2. For each page that returned HTML, locate an ANCHOR — the
+//     first position where this lot's own brand/model/title text
+//     appears. These strings came from the archive listing, so
+//     anywhere they occur is text belonging to THIS item.
+//  3. Extract only /uploaded_files/item_*.ext references within a
+//     bounded window on both sides of the anchor. This keeps
+//     nav/sidebar/header imagery out even if the admin page serves
+//     it, because those are at the top of the document far from
+//     the item's own text block.
+//  4. Cross-reference filter against other lots' archive thumbnails
+//     as a final defense.
+//  5. Pick the URL that yielded the most anchored, filtered images.
+//
+// Returns [] on total failure so the import proceeds with the
+// archive thumbnail alone.
 export async function fetchLotImagesAuthed(
   af_item_id: number,
   af_auction_id: number,
   cookie: string,
   otherLotsThumbs: Set<string>,
-): Promise<string[]> {
-  const url = `${AF_ORIGIN}/item_detail.php?item=${af_item_id}&auction=${af_auction_id}`;
-  const html = await fetchAuthedHtml(url, cookie);
-  if (!html) return [];
+  anchorText: string[],
+): Promise<{ urls: string[]; sourceUrl: string | null; debug: string }> {
+  const candidateUrls = [
+    `${AF_ORIGIN}/item_detail.php?item=${af_item_id}&auction=${af_auction_id}`,
+    `${AF_ORIGIN}/item_detail.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item_3.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item.php?item=${af_item_id}`,
+  ];
+
+  const results = await Promise.all(
+    candidateUrls.map(async (url) => {
+      const html = await fetchAuthedHtml(url, cookie);
+      if (!html) return { url, urls: [], htmlLen: 0 };
+      const urls = extractImagesAroundAnchor(html, anchorText, otherLotsThumbs);
+      return { url, urls, htmlLen: html.length };
+    }),
+  );
+
+  // Pick the URL that yielded the most unique, filtered images.
+  let best = results[0];
+  for (const r of results) {
+    if (r.urls.length > best.urls.length) best = r;
+  }
+
+  const debug = results
+    .map((r) => `${r.url.replace(AF_ORIGIN, '')} → ${r.urls.length} (${r.htmlLen}b)`)
+    .join('; ');
+
+  return {
+    urls: best.urls,
+    sourceUrl: best.urls.length > 0 ? best.url : null,
+    debug,
+  };
+}
+
+// Pull /uploaded_files/item_* image URLs that sit WITHIN a bounded
+// window of one of the given anchor strings in the HTML. Anchor
+// strings are the lot's own brand/model/title — any image near text
+// we know belongs to this item almost certainly belongs to it too.
+// Also filters out any URL that matches another lot's archive
+// thumbnail as a secondary defense.
+function extractImagesAroundAnchor(
+  html: string,
+  anchorText: string[],
+  otherLotsThumbs: Set<string>,
+): string[] {
+  // Normalize anchor candidates — strip the "($N)" suffix AF adds and
+  // drop short or empty entries that would false-match. Need at least
+  // 4 chars so we don't anchor on common substrings.
+  const anchors = anchorText
+    .map((s) => (s || '')
+      .replace(/\s*\(\s*\$[\d,]+(?:\.\d{2})?\s*\)\s*$/i, '')
+      .trim())
+    .filter((s) => s.length >= 4);
+
+  const WINDOW = 6000; // chars either side of anchor
+  const spans: Array<[number, number]> = [];
+  for (const needle of anchors) {
+    let idx = 0;
+    while (idx < html.length) {
+      const found = html.indexOf(needle, idx);
+      if (found < 0) break;
+      spans.push([Math.max(0, found - WINDOW), Math.min(html.length, found + WINDOW)]);
+      idx = found + needle.length;
+    }
+  }
+
+  // If no anchor matched, don't blindly scan the whole doc — that's
+  // what caused the cross-lot bleed. Return empty; caller falls back
+  // to the archive thumbnail.
+  if (spans.length === 0) return [];
+
+  // Merge overlapping spans so we scan each byte at most once.
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  for (const [s, e] of spans) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1]) {
+      last[1] = Math.max(last[1], e);
+    } else {
+      merged.push([s, e]);
+    }
+  }
 
   const out: string[] = [];
   const seen = new Set<string>();
   const re = /\/uploaded_files\d*\/item_[^\s"'<>)]+\.(?:jpg|jpeg|png|webp|gif)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const u = `${AF_ORIGIN}${m[0]}`;
-    if (seen.has(u)) continue;
-    seen.add(u);
-    // Cross-reference filter: drop any URL that is some other lot's
-    // archive thumbnail. Our lot's own primary thumbnail is NOT in
-    // otherLotsThumbs (the caller excludes it) so it passes through.
-    if (otherLotsThumbs.has(u)) continue;
-    out.push(u);
-    // Hard cap in case a future AF layout dumps a huge list; 30 covers
-    // any realistic per-item gallery with headroom.
-    if (out.length >= 30) break;
+  for (const [s, e] of merged) {
+    const region = html.substring(s, e);
+    let m: RegExpExecArray | null;
+    re.lastIndex = 0;
+    while ((m = re.exec(region)) !== null) {
+      const u = `${AF_ORIGIN}${m[0]}`;
+      if (seen.has(u)) continue;
+      seen.add(u);
+      if (otherLotsThumbs.has(u)) continue;
+      out.push(u);
+      if (out.length >= 30) return out;
+    }
   }
   return out;
 }

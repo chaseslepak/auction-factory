@@ -173,12 +173,15 @@ export async function POST(req: NextRequest) {
       }
       if (!listedPrice && retail > 0) listedPrice = retail;
 
-      // Photos: fetch the authed item_detail.php for this item and
-      // extract every /uploaded_files/item_*.jpg reference. Cross-
-      // reference filter excludes URLs that are some OTHER lot's
-      // archive thumbnail, as a second defense against navigational
-      // bleed. Fall back to the archive thumbnail alone if authed
-      // fetch returns nothing so the lot still gets a primary photo.
+      // Photos: fetch candidate AF pages and extract images only in
+      // proximity to text we KNOW belongs to this item (its own brand
+      // / model / title from the archive). That is the most defensive
+      // signal available without live visibility into the authed HTML:
+      // nav bars and sidebars live far from the item's own content
+      // block, so an anchor-scoped window reliably excludes them.
+      // Cross-reference filter against other lots' archive thumbnails
+      // is kept as a final defense. Fall back to the archive thumbnail
+      // if nothing anchored matched so the lot always gets a photo.
       const otherLotsThumbs = new Set<string>();
       if (archiveIndex) {
         archiveIndex.forEach((otherLot, otherAfItemId) => {
@@ -186,18 +189,23 @@ export async function POST(req: NextRequest) {
           if (otherLot.image_url) otherLotsThumbs.add(otherLot.image_url);
         });
       }
-      let image_urls = await fetchLotImagesAuthed(
+      const anchorText = [model, brand, item_name].filter(Boolean) as string[];
+      const imgResult = await fetchLotImagesAuthed(
         af_item_id,
         af_auction_id,
         cookie,
         otherLotsThumbs,
+        anchorText,
       );
+      let image_urls = imgResult.urls;
+      let photoSource = imgResult.sourceUrl ? 'authed' : 'thumb-fallback';
       if (image_urls.length === 0 && archiveLot.image_url) {
         image_urls = [archiveLot.image_url];
       }
       console.log(
         `[IMPORT-ARCHIVE] lot af_item_id=${af_item_id} → dest #${destination_lot_number} ` +
-        `desc_len=${description.length} retail=${retail} photos=${image_urls.length}`,
+        `photos=${image_urls.length} (source=${photoSource}) probes=[${imgResult.debug}] ` +
+        `desc_len=${description.length} retail=${retail}`,
       );
 
       // Hard-delete any soft-deleted lot at the destination slot so the
