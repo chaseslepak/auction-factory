@@ -18,6 +18,11 @@ const MAX_ITEM_PAGES_PER_AUCTION = 60;
 export interface ScrapedLot {
   af_auction_id: number;
   af_item_id: number;
+  // Position on the archive listing page, 1-indexed across all pages.
+  // After an auction is relot-synced this equals the auction's final
+  // lot number. Used by the archive-import flow so Chase can pick by
+  // lot number even though AF doesn't render it on the public page.
+  lot_number: number | null;
   item_name: string | null;
   brand: string | null;
   model: string | null;
@@ -31,6 +36,24 @@ export interface ScrapedLot {
   sold_price: number | null;
   image_url: string | null;
   lot_href: string;
+}
+
+// Full lot detail scraped from the authed item_detail page — includes
+// every photo URL (the public archive page only exposes the primary
+// thumbnail). Used by the archive-import executor to populate the
+// destination lot with the full image set.
+export interface ScrapedLotFull {
+  af_item_id: number;
+  item_name: string | null;
+  brand: string | null;
+  model: string | null;
+  condition_rating: number | null;
+  retail_new: number | null;
+  description: string | null;
+  width: string | null;
+  depth: string | null;
+  height: string | null;
+  image_urls: string[];
 }
 
 export interface ScrapedAuction {
@@ -165,6 +188,9 @@ export function parseAuctionLotsHtml(
     lots.push({
       af_auction_id,
       af_item_id,
+      // Caller fills this in by position across pages — parser can't
+      // know the global index of this lot on its own.
+      lot_number: null,
       item_name,
       brand,
       model,
@@ -200,6 +226,10 @@ export async function fetchAuctionLots(af_auction_id: number): Promise<ScrapedLo
     for (const l of lots) {
       if (!seenItemIds.has(l.af_item_id)) {
         seenItemIds.add(l.af_item_id);
+        // Fill lot_number by global 1-indexed position. AF's archive
+        // page renders lots in their post-relot order, which is the
+        // original auction's lot number.
+        l.lot_number = all.length + 1;
         all.push(l);
         addedThisPage++;
       }
@@ -211,6 +241,115 @@ export async function fetchAuctionLots(af_auction_id: number): Promise<ScrapedLo
     if (lots.length < ITEMS_PER_PAGE) break;
   }
   return all;
+}
+
+// Fetch an individual lot's full detail from AF's authenticated
+// item_detail.php page. The public page is login-gated on closed
+// auctions, so we pass the stored admin session cookie. Returns the
+// full image set, description, dimensions and item fields in a shape
+// the import executor can hand to the lots-insert path.
+//
+// Falls back gracefully: if the authed fetch 302s to login or returns
+// no parseable detail, returns null and the executor uses the primary
+// thumbnail from the archive listing instead.
+export async function fetchLotFullDetailAuthed(
+  af_item_id: number,
+  cookie: string,
+): Promise<ScrapedLotFull | null> {
+  const url = `${AF_ORIGIN}/item_detail.php?item=${af_item_id}`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  let html: string;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': UA,
+        Accept: 'text/html,application/xhtml+xml',
+        Cookie: cookie,
+      },
+      redirect: 'manual',
+      signal: ctrl.signal,
+    });
+    if (res.status === 302 || res.status === 301) return null;
+    if (!res.ok) return null;
+    html = await res.text();
+  } finally {
+    clearTimeout(t);
+  }
+  // Login-marker check (same signature the admin scraper uses).
+  if (/name=["']psEmail["']|name=["']psPassword["']/i.test(html.substring(0, 5000))) {
+    return null;
+  }
+
+  // All full-size photo URLs. AF's detail page renders the primary +
+  // thumbnails as <img src="/uploaded_files*/item_*.jpg">. Dedupe
+  // preserving order so the primary stays first.
+  const image_urls: string[] = [];
+  const seenImg = new Set<string>();
+  const imgRe = /<img\b[^>]*\bsrc=["'](\/uploaded_files[^"']+)["']/gi;
+  let im: RegExpExecArray | null;
+  while ((im = imgRe.exec(html)) !== null) {
+    const u = `${AF_ORIGIN}${im[1]}`;
+    if (!seenImg.has(u)) {
+      seenImg.add(u);
+      image_urls.push(u);
+    }
+  }
+
+  // Item name — try <h1> first (common pattern), fall back to <title>.
+  let item_name: string | null = null;
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  if (h1) item_name = cleanText(h1[1]);
+  if (!item_name) {
+    const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (t) item_name = cleanText(t[1]);
+  }
+
+  // Spec fields — same labels as the listing page.
+  const specHay = html;
+  const brand = extractField(specHay, 'MAKE');
+  const model = extractField(specHay, 'MODEL');
+  const condText = extractField(specHay, 'CONDITION');
+  const retailRaw = extractField(specHay, 'ORIGINAL PRICE NEW');
+  const widthRaw = extractField(specHay, 'WIDTH');
+  const depthRaw = extractField(specHay, 'DEPTH');
+  const heightRaw = extractField(specHay, 'HEIGHT');
+
+  // Condition "10 - NEW IN BOX" → 10. Clamp to 1–10.
+  let condition_rating: number | null = null;
+  if (condText) {
+    const m = condText.match(/(\d{1,2})/);
+    if (m) {
+      const n = Number(m[1]);
+      if (n >= 1 && n <= 10) condition_rating = n;
+    }
+  }
+
+  // Description: AF shows the long listing text inside an area the
+  // template labels with the item name near the top. Grab the longest
+  // block of plain text between the first <h1> and the first <table>
+  // (specs table), then strip tags. Best-effort — if we can't find
+  // anything sensible, leave null.
+  let description: string | null = null;
+  const descRegion = html.match(/<\/h1>([\s\S]*?)<table/i);
+  if (descRegion) {
+    const text = cleanText(descRegion[1]);
+    if (text && text.length >= 20) description = text;
+  }
+
+  return {
+    af_item_id,
+    item_name,
+    brand,
+    model,
+    condition_rating,
+    retail_new: parsePrice(retailRaw),
+    description,
+    width: widthRaw || null,
+    depth: depthRaw || null,
+    height: heightRaw || null,
+    image_urls,
+  };
 }
 
 export interface ReindexOptions {
