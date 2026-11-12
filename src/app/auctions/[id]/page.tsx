@@ -1245,6 +1245,13 @@ export default function AuctionDetailPage() {
               >
                 {resyncingPricing ? 'Refreshing prices…' : 'Refresh Pricing on All Lots'}
               </button>
+              <Link
+                href={`/auctions/${id}/import-from-archive`}
+                className="w-full py-2 rounded-xl border-2 border-brand-blue text-brand-blue font-bold text-xs uppercase tracking-wide text-center block"
+                title="Pull lots (with every photo) from a published AF archive auction into this one."
+              >
+                Import from AF Archive
+              </Link>
               <button
                 onClick={() => handleUploadToAf()}
                 disabled={uploading}
