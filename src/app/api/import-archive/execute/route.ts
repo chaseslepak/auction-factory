@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
-import { fetchLotDescriptionAuthed, fetchAuctionLots, ScrapedLot } from '@/lib/af-archive';
+import { fetchLotImagesAuthed, fetchAuctionLots, ScrapedLot } from '@/lib/af-archive';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -155,10 +155,12 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Description: single, targeted admin fetch. Returns null on any
-      // failure and we proceed with an empty description — Chase can
-      // edit it on the lot.
-      const description = (await fetchLotDescriptionAuthed(af_item_id, cookie)) || '';
+      // Description: lives on the public archive page already (the <p>
+      // block below the title). No extra fetch needed.
+      const description = archiveLot.description || '';
+      const width = archiveLot.width || null;
+      const depth = archiveLot.depth || null;
+      const height = archiveLot.height || null;
 
       // listed_price: parse the source title's "($N)" suffix when
       // present (that is what the source actually listed at); fall
@@ -171,10 +173,28 @@ export async function POST(req: NextRequest) {
       }
       if (!listedPrice && retail > 0) listedPrice = retail;
 
-      // One photo per imported lot — the archive page's own thumbnail
-      // for THIS item. Guaranteed correct (AF renders one thumbnail
-      // per item per auction, keyed by af_item_id).
-      const image_urls = archiveLot.image_url ? [archiveLot.image_url] : [];
+      // Photos: fetch the authed item_detail.php for this item and
+      // extract every /uploaded_files/item_*.jpg reference. Cross-
+      // reference filter excludes URLs that are some OTHER lot's
+      // archive thumbnail, as a second defense against navigational
+      // bleed. Fall back to the archive thumbnail alone if authed
+      // fetch returns nothing so the lot still gets a primary photo.
+      const otherLotsThumbs = new Set<string>();
+      if (archiveIndex) {
+        archiveIndex.forEach((otherLot, otherAfItemId) => {
+          if (otherAfItemId === af_item_id) return;
+          if (otherLot.image_url) otherLotsThumbs.add(otherLot.image_url);
+        });
+      }
+      let image_urls = await fetchLotImagesAuthed(
+        af_item_id,
+        af_auction_id,
+        cookie,
+        otherLotsThumbs,
+      );
+      if (image_urls.length === 0 && archiveLot.image_url) {
+        image_urls = [archiveLot.image_url];
+      }
       console.log(
         `[IMPORT-ARCHIVE] lot af_item_id=${af_item_id} → dest #${destination_lot_number} ` +
         `desc_len=${description.length} retail=${retail} photos=${image_urls.length}`,
@@ -203,9 +223,9 @@ export async function POST(req: NextRequest) {
           quantity: 1,
           estimated_retail_new: retail ?? 0,
           listed_price: listedPrice,
-          width: null,
-          depth: null,
-          height: null,
+          width,
+          depth,
+          height,
           key_features: [],
           auction_description: description,
           notes: `Imported from AF archive auction ${af_auction_id}, item ${af_item_id}`,
