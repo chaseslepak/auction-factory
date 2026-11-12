@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
-import { fetchLotFullDetailAuthed, fetchAuctionLots, ScrapedLot } from '@/lib/af-archive';
+import { fetchLotDescriptionAuthed, fetchAuctionLots, ScrapedLot } from '@/lib/af-archive';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -62,14 +62,13 @@ export async function POST(req: NextRequest) {
   if (af_item_ids.length === 0) {
     return NextResponse.json({ error: 'af_item_ids required' }, { status: 400 });
   }
-  // Server-side cap: 3 lots per call keeps the whole function well
-  // under Vercel's 60s cap even for photo-heavy lots. With per-lot
-  // detail scraped in parallel (~8s) and photos downloaded in parallel
-  // (~3s per lot), 3 × ~12s ≈ 36s with headroom for AF slowness.
-  // Previously 5 and 10 both occasionally 504'd.
-  if (af_item_ids.length > 3) {
+  // Server-side cap: 5 lots per call. Each lot now does exactly one
+  // description fetch (~3s) and one photo download (~1s) — much
+  // lighter than the old multi-URL + full-gallery version.
+  // 5 × ~5s ≈ 25s, well inside Vercel's 60s cap.
+  if (af_item_ids.length > 5) {
     return NextResponse.json(
-      { error: 'Max 3 lots per import batch — split into multiple calls.' },
+      { error: 'Max 5 lots per import batch — split into multiple calls.' },
       { status: 400 },
     );
   }
@@ -124,35 +123,47 @@ export async function POST(req: NextRequest) {
     const destination_lot_number = start_lot_number + i;
 
     try {
-      const detail = await fetchLotFullDetailAuthed(af_item_id, cookie);
+      // All lot metadata comes from the public archive index — it is
+      // scraped per-item from AF's own archive listing, so a lot's
+      // title / brand / model / condition / retail / primary photo are
+      // guaranteed to belong to that lot (no sidebar bleed).
       const archiveLot = archiveIndex?.get(af_item_id) ?? null;
+      if (!archiveLot) {
+        results.push({
+          af_item_id,
+          destination_lot_number,
+          success: false,
+          photos_uploaded: 0,
+          error: `Item ${af_item_id} not found in AF archive auction ${af_auction_id}. Did the auction id change?`,
+        });
+        continue;
+      }
 
-      // Mirror the source lot as-is — no title reformatting, no
-      // description rewrite, no listed_price recomputation. Chase's
-      // intent: the imported lot should be identical to the source,
-      // with only the destination lot number reassigned.
-      const item_name = detail?.item_name || archiveLot?.item_name || `Imported lot ${af_item_id}`;
-      const brand = detail?.brand || archiveLot?.brand || '';
-      const model = detail?.model || archiveLot?.model || '';
-      const retail = detail?.retail_new ?? archiveLot?.retail_new ?? 0;
-      const description = detail?.description || '';
-      // Condition rating from authed detail (parsed int); otherwise
-      // parse the archive page's "N - Label" string; otherwise null.
-      let condition_rating: number | null = detail?.condition_rating ?? null;
-      if (condition_rating == null && archiveLot?.condition_rating) {
+      const item_name = archiveLot.item_name || `Imported lot ${af_item_id}`;
+      const brand = archiveLot.brand || '';
+      const model = archiveLot.model || '';
+      const retail = archiveLot.retail_new ?? 0;
+
+      // Condition is "N - Label" on the archive page; peel the leading
+      // integer. Default to 5 (well-used) when nothing parses.
+      let condition_rating: number | null = null;
+      if (archiveLot.condition_rating) {
         const m = String(archiveLot.condition_rating).match(/(\d{1,2})/);
         if (m) {
           const n = Number(m[1]);
           if (n >= 1 && n <= 10) condition_rating = n;
         }
       }
-      const width = detail?.width || null;
-      const depth = detail?.depth || null;
-      const height = detail?.height || null;
 
-      // listed_price: pull from the source title's "($N)" suffix when
-      // present (that's what the source auction actually listed at);
-      // otherwise fall back to retail. Avoids 0 showing up on imports.
+      // Description: single, targeted admin fetch. Returns null on any
+      // failure and we proceed with an empty description — Chase can
+      // edit it on the lot.
+      const description = (await fetchLotDescriptionAuthed(af_item_id, cookie)) || '';
+
+      // listed_price: parse the source title's "($N)" suffix when
+      // present (that is what the source actually listed at); fall
+      // back to retail. Keeps 0 from showing up when we have usable
+      // data.
       let listedPrice = 0;
       const priceInTitle = item_name.match(/\$\s*([\d,]+(?:\.\d{2})?)\s*\)/);
       if (priceInTitle) {
@@ -160,27 +171,13 @@ export async function POST(req: NextRequest) {
       }
       if (!listedPrice && retail > 0) listedPrice = retail;
 
-      // Photo URL list: prefer the authed detail scrape (full set);
-      // fall back to the archive thumbnail if the detail page gave
-      // nothing. Then filter out any image URL that is clearly ANOTHER
-      // lot's archive thumbnail — a second defense against the admin
-      // page bleeding nav/sidebar/related-items thumbnails into this
-      // lot's gallery. A URL equal to this lot's own thumbnail stays.
-      const otherLotsThumbs = new Set<string>();
-      if (archiveIndex) {
-        archiveIndex.forEach((otherLot, otherAfItemId) => {
-          if (otherAfItemId === af_item_id) return;
-          if (otherLot.image_url) otherLotsThumbs.add(otherLot.image_url);
-        });
-      }
-      const rawUrls = detail?.image_urls?.length
-        ? detail.image_urls
-        : archiveLot?.image_url ? [archiveLot.image_url] : [];
-      const image_urls = rawUrls.filter((u) => !otherLotsThumbs.has(u));
+      // One photo per imported lot — the archive page's own thumbnail
+      // for THIS item. Guaranteed correct (AF renders one thumbnail
+      // per item per auction, keyed by af_item_id).
+      const image_urls = archiveLot.image_url ? [archiveLot.image_url] : [];
       console.log(
         `[IMPORT-ARCHIVE] lot af_item_id=${af_item_id} → dest #${destination_lot_number} ` +
-        `images=${image_urls.length} (filtered ${rawUrls.length - image_urls.length} other-lot thumbs) ` +
-        `desc_len=${description.length} retail=${retail}`,
+        `desc_len=${description.length} retail=${retail} photos=${image_urls.length}`,
       );
 
       // Hard-delete any soft-deleted lot at the destination slot so the
@@ -206,9 +203,9 @@ export async function POST(req: NextRequest) {
           quantity: 1,
           estimated_retail_new: retail ?? 0,
           listed_price: listedPrice,
-          width,
-          depth,
-          height,
+          width: null,
+          depth: null,
+          height: null,
           key_features: [],
           auction_description: description,
           notes: `Imported from AF archive auction ${af_auction_id}, item ${af_item_id}`,

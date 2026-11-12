@@ -38,24 +38,6 @@ export interface ScrapedLot {
   lot_href: string;
 }
 
-// Full lot detail scraped from the authed item_detail page — includes
-// every photo URL (the public archive page only exposes the primary
-// thumbnail). Used by the archive-import executor to populate the
-// destination lot with the full image set.
-export interface ScrapedLotFull {
-  af_item_id: number;
-  item_name: string | null;
-  brand: string | null;
-  model: string | null;
-  condition_rating: number | null;
-  retail_new: number | null;
-  description: string | null;
-  width: string | null;
-  depth: string | null;
-  height: string | null;
-  image_urls: string[];
-}
-
 export interface ScrapedAuction {
   af_auction_id: number;
   title: string | null;
@@ -277,181 +259,34 @@ async function fetchAuthedHtml(url: string, cookie: string): Promise<string | nu
   }
 }
 
-// Scan an HTML blob for /uploaded_files*/item_* image references that
-// belong to THIS item — not thumbnails of other items sitting in nav
-// bars, sidebars or related-items strips. Scopes the search to a
-// bounded region: starts at the first form/section that references
-// item=<af_item_id> (admin edit form's hidden input, or an action URL
-// targeting this item) and ends at the next </form> or </section>.
-// Falls back to the full HTML if that anchor can't be found, but with
-// a hard cap of 20 images and ordering preserved — the first few
-// occurrences of /uploaded_files/ tend to be the lot's own gallery.
-function extractAllItemImageUrls(html: string, af_item_id: number): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const re = /\/uploaded_files\d*\/item_[^\s"'<>)]+\.(?:jpg|jpeg|png|webp|gif)/gi;
-
-  // Try to locate a region of the HTML that is clearly scoped to this
-  // item. Admin edit forms generally include <input type="hidden"
-  // name="id" value="<af_item_id>"> or an action URL carrying the id;
-  // the item's photo gallery lives inside that same form.
-  const anchorRes = [
-    new RegExp(`<form\\b[^>]*action=["'][^"']*item=${af_item_id}\\b[^>]*>([\\s\\S]*?)<\\/form>`, 'i'),
-    new RegExp(`<form\\b[^>]*>([\\s\\S]*?<input[^>]*name=["'](?:id|item)["'][^>]*value=["']${af_item_id}["'][\\s\\S]*?)<\\/form>`, 'i'),
-    new RegExp(`<input[^>]*name=["'](?:id|item)["'][^>]*value=["']${af_item_id}["'][^>]*>([\\s\\S]*?)<\\/form>`, 'i'),
-  ];
-  let scope: string | null = null;
-  for (const r of anchorRes) {
-    const m = html.match(r);
-    if (m) { scope = m[1]; break; }
-  }
-  if (!scope) scope = html;
-
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(scope)) !== null) {
-    const u = `${AF_ORIGIN}${m[0]}`;
-    if (!seen.has(u)) {
-      seen.add(u);
-      out.push(u);
-      // Hard cap so if we ever fail to find the scope anchor and fall
-      // back to the full HTML, we can't pull dozens of unrelated
-      // sidebar thumbnails into one lot.
-      if (out.length >= 20) break;
-    }
-  }
-  return out;
-}
-
-export async function fetchLotFullDetailAuthed(
+// Pull ONLY the full auction_description for this item from AF.
+//
+// Everything else (title, brand, model, condition, retail, primary
+// photo) comes from the already-parsed public archive listing — that
+// data is per-item and verified correct per lot. Trying to also scrape
+// a full image gallery from admin/edit_item.php proved unreliable: the
+// admin HTML renders thumbnails of OTHER items in nav/sidebars that
+// every regex/anchor heuristic I tried leaked into the wrong lot.
+//
+// Single targeted request to admin/edit_item_3.php, grab the
+// <textarea name="auction_description"> value. Returns null on login
+// bounce / timeout / missing textarea so the caller can proceed with
+// an empty description rather than aborting the whole import.
+export async function fetchLotDescriptionAuthed(
   af_item_id: number,
   cookie: string,
-): Promise<ScrapedLotFull | null> {
-  // Probe admin edit-item pages + public detail IN PARALLEL. The
-  // previous sequential version did up to 4 × 15s = 60s per item,
-  // which blew past Vercel's 60s function cap on a 10-lot batch and
-  // truncated the JSON response (surfaced on iOS Safari as "The
-  // string did not match the expected pattern"). Parallel means the
-  // slowest single URL caps total per-item latency at ~15s.
-  const candidateUrls = [
+): Promise<string | null> {
+  const html = await fetchAuthedHtml(
     `${AF_ORIGIN}/admin/edit_item_3.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/edit_item_2.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/edit_item.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/item_detail.php?item=${af_item_id}`,
-  ];
-
-  const htmls = await Promise.all(candidateUrls.map((u) => fetchAuthedHtml(u, cookie)));
-
-  let bestHtml: string | null = null;
-  let bestImgs: string[] = [];
-  for (const html of htmls) {
-    if (!html) continue;
-    const imgs = extractAllItemImageUrls(html, af_item_id);
-    if (imgs.length > bestImgs.length) {
-      bestHtml = html;
-      bestImgs = imgs;
-    }
-  }
-
-  if (!bestHtml) return null;
-  const html = bestHtml;
-  const image_urls = bestImgs;
-
-  // Item name — prefer the admin form's title/name input value when
-  // the page is an edit form; otherwise fall back to <h1> / <title>.
-  let item_name: string | null = null;
-  const titleInput = html.match(/<input\b[^>]*\bname=["'](?:title|name)["'][^>]*\bvalue=["']([^"']+)["']/i)
-    || html.match(/\bvalue=["']([^"']+)["'][^>]*\bname=["'](?:title|name)["']/i);
-  if (titleInput) item_name = cleanText(titleInput[1]);
-  if (!item_name) {
-    const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-    if (h1) item_name = cleanText(h1[1]);
-  }
-  if (!item_name) {
-    const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    if (t) item_name = cleanText(t[1]);
-  }
-
-  // Spec fields — prefer admin-form input values (name/make, model,
-  // original_price, condition select, width/depth/height), then fall
-  // back to the label-based extractor used for the public page.
-  const inputVal = (names: string[]): string | null => {
-    for (const nm of names) {
-      // value=X name=Y OR name=Y value=X — try both orderings.
-      const a = html.match(new RegExp(`<input\\b[^>]*\\bname=["']${nm}["'][^>]*\\bvalue=["']([^"']*)["']`, 'i'));
-      if (a?.[1]) return cleanText(a[1]);
-      const b = html.match(new RegExp(`\\bvalue=["']([^"']*)["'][^>]*\\bname=["']${nm}["']`, 'i'));
-      if (b?.[1]) return cleanText(b[1]);
-    }
-    return null;
-  };
-  const selectedOpt = (names: string[]): string | null => {
-    for (const nm of names) {
-      // Isolate the <select name="X"> block, then its <option selected>.
-      const sel = html.match(new RegExp(`<select\\b[^>]*\\bname=["']${nm}["'][^>]*>([\\s\\S]*?)<\\/select>`, 'i'));
-      if (!sel) continue;
-      const opt = sel[1].match(/<option\b[^>]*\bselected[^>]*(?:\bvalue=["']([^"']*)["'])?[^>]*>([\s\S]*?)<\/option>/i);
-      if (opt) return cleanText(opt[1] || opt[2] || '');
-    }
-    return null;
-  };
-
-  const brand =
-    inputVal(['make', 'brand']) || extractField(html, 'MAKE');
-  const model =
-    inputVal(['model']) || extractField(html, 'MODEL');
-  const condText =
-    selectedOpt(['condition', 'condition_rating']) || extractField(html, 'CONDITION');
-  const retailRaw =
-    inputVal(['original_price', 'retail_new']) || extractField(html, 'ORIGINAL PRICE NEW');
-  const widthRaw =
-    inputVal(['width']) || extractField(html, 'WIDTH');
-  const depthRaw =
-    inputVal(['depth']) || extractField(html, 'DEPTH');
-  const heightRaw =
-    inputVal(['height']) || extractField(html, 'HEIGHT');
-
-  // Condition "10 - NEW IN BOX" → 10. Clamp to 1–10.
-  let condition_rating: number | null = null;
-  if (condText) {
-    const m = condText.match(/(\d{1,2})/);
-    if (m) {
-      const n = Number(m[1]);
-      if (n >= 1 && n <= 10) condition_rating = n;
-    }
-  }
-
-  // Description — try the admin form's <textarea> first (that's where
-  // the full auction description lives on the edit page), then fall
-  // back to the public page's between-h1-and-table extraction.
-  let description: string | null = null;
-  const textareaRe =
-    /<textarea\b[^>]*\bname=["'](?:auction_description|description|detail|notes)["'][^>]*>([\s\S]*?)<\/textarea>/i;
-  const ta = html.match(textareaRe);
-  if (ta && ta[1]) {
-    const text = cleanText(ta[1]);
-    if (text && text.length >= 20) description = text;
-  }
-  if (!description) {
-    const descRegion = html.match(/<\/h1>([\s\S]*?)<table/i);
-    if (descRegion) {
-      const text = cleanText(descRegion[1]);
-      if (text && text.length >= 20) description = text;
-    }
-  }
-
-  return {
-    af_item_id,
-    item_name,
-    brand,
-    model,
-    condition_rating,
-    retail_new: parsePrice(retailRaw),
-    description,
-    width: widthRaw || null,
-    depth: depthRaw || null,
-    height: heightRaw || null,
-    image_urls,
-  };
+    cookie,
+  );
+  if (!html) return null;
+  const ta = html.match(
+    /<textarea\b[^>]*\bname=["'](?:auction_description|description|detail)["'][^>]*>([\s\S]*?)<\/textarea>/i,
+  );
+  if (!ta?.[1]) return null;
+  const text = cleanText(ta[1]);
+  return text && text.length >= 10 ? text : null;
 }
 
 export interface ReindexOptions {
