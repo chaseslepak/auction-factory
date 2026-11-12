@@ -243,23 +243,15 @@ export async function fetchAuctionLots(af_auction_id: number): Promise<ScrapedLo
   return all;
 }
 
-// Fetch an individual lot's full detail from AF's authenticated
-// item_detail.php page. The public page is login-gated on closed
-// auctions, so we pass the stored admin session cookie. Returns the
-// full image set, description, dimensions and item fields in a shape
-// the import executor can hand to the lots-insert path.
-//
-// Falls back gracefully: if the authed fetch 302s to login or returns
-// no parseable detail, returns null and the executor uses the primary
-// thumbnail from the archive listing instead.
-export async function fetchLotFullDetailAuthed(
-  af_item_id: number,
-  cookie: string,
-): Promise<ScrapedLotFull | null> {
-  const url = `${AF_ORIGIN}/item_detail.php?item=${af_item_id}`;
+// Fetch an individual lot's full detail from AF. Tries both admin and
+// public pages in order (admin pages carry the full photo set + raw
+// description; the public item_detail page is login-gated on closed
+// auctions). Picks whichever URL returns the most unique
+// /uploaded_files/ photos. Returns null if none of them produces a
+// parseable detail — caller should fall back to the archive thumbnail.
+async function fetchAuthedHtml(url: string, cookie: string): Promise<string | null> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-  let html: string;
   try {
     const res = await fetch(url, {
       headers: {
@@ -272,48 +264,129 @@ export async function fetchLotFullDetailAuthed(
     });
     if (res.status === 302 || res.status === 301) return null;
     if (!res.ok) return null;
-    html = await res.text();
+    const html = await res.text();
+    // Skip pages that bounced to the login form.
+    if (/name=["']psEmail["']|name=["']psPassword["']/i.test(html.substring(0, 5000))) {
+      return null;
+    }
+    return html;
+  } catch {
+    return null;
   } finally {
     clearTimeout(t);
   }
-  // Login-marker check (same signature the admin scraper uses).
-  if (/name=["']psEmail["']|name=["']psPassword["']/i.test(html.substring(0, 5000))) {
-    return null;
-  }
+}
 
-  // All full-size photo URLs. AF's detail page renders the primary +
-  // thumbnails as <img src="/uploaded_files*/item_*.jpg">. Dedupe
-  // preserving order so the primary stays first.
-  const image_urls: string[] = [];
-  const seenImg = new Set<string>();
-  const imgRe = /<img\b[^>]*\bsrc=["'](\/uploaded_files[^"']+)["']/gi;
-  let im: RegExpExecArray | null;
-  while ((im = imgRe.exec(html)) !== null) {
-    const u = `${AF_ORIGIN}${im[1]}`;
-    if (!seenImg.has(u)) {
-      seenImg.add(u);
-      image_urls.push(u);
+// Scan an HTML blob for every /uploaded_files*/item_* image reference,
+// regardless of attribute (src, data-src, data-full, href). Dedupes
+// preserving order so whichever appears first (usually the primary)
+// stays first.
+function extractAllItemImageUrls(html: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  // Match /uploaded_files<N>/item_<timestamp>_<id>.<ext> anywhere in
+  // the HTML — covers <img src>, <img data-src>, <a href>, inline
+  // JS arrays, srcset tokens, etc. Stops at a quote, whitespace or ).
+  const re = /\/uploaded_files\d*\/item_[^\s"'<>)]+\.(?:jpg|jpeg|png|webp|gif)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const u = `${AF_ORIGIN}${m[0]}`;
+    if (!seen.has(u)) {
+      seen.add(u);
+      out.push(u);
     }
   }
+  return out;
+}
 
-  // Item name — try <h1> first (common pattern), fall back to <title>.
+export async function fetchLotFullDetailAuthed(
+  af_item_id: number,
+  cookie: string,
+): Promise<ScrapedLotFull | null> {
+  // Try the admin edit-item pages first (those carry the full gallery
+  // + raw description Chase sees when he edits a lot), then fall back
+  // to the public item_detail page served with the admin cookie.
+  // Picks the one that yields the most unique images; if any yields
+  // a non-empty parse we return it.
+  const candidateUrls = [
+    `${AF_ORIGIN}/admin/edit_item_3.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item_2.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/item_detail.php?item=${af_item_id}`,
+  ];
+
+  let bestHtml: string | null = null;
+  let bestImgs: string[] = [];
+  for (const url of candidateUrls) {
+    const html = await fetchAuthedHtml(url, cookie);
+    if (!html) continue;
+    const imgs = extractAllItemImageUrls(html);
+    if (imgs.length > bestImgs.length) {
+      bestHtml = html;
+      bestImgs = imgs;
+    }
+    // Any admin edit page with ≥2 images is already a strong source;
+    // skip the fallback probes to save time.
+    if (imgs.length >= 2) break;
+  }
+
+  if (!bestHtml) return null;
+  const html = bestHtml;
+  const image_urls = bestImgs;
+
+  // Item name — prefer the admin form's title/name input value when
+  // the page is an edit form; otherwise fall back to <h1> / <title>.
   let item_name: string | null = null;
-  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  if (h1) item_name = cleanText(h1[1]);
+  const titleInput = html.match(/<input\b[^>]*\bname=["'](?:title|name)["'][^>]*\bvalue=["']([^"']+)["']/i)
+    || html.match(/\bvalue=["']([^"']+)["'][^>]*\bname=["'](?:title|name)["']/i);
+  if (titleInput) item_name = cleanText(titleInput[1]);
+  if (!item_name) {
+    const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    if (h1) item_name = cleanText(h1[1]);
+  }
   if (!item_name) {
     const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     if (t) item_name = cleanText(t[1]);
   }
 
-  // Spec fields — same labels as the listing page.
-  const specHay = html;
-  const brand = extractField(specHay, 'MAKE');
-  const model = extractField(specHay, 'MODEL');
-  const condText = extractField(specHay, 'CONDITION');
-  const retailRaw = extractField(specHay, 'ORIGINAL PRICE NEW');
-  const widthRaw = extractField(specHay, 'WIDTH');
-  const depthRaw = extractField(specHay, 'DEPTH');
-  const heightRaw = extractField(specHay, 'HEIGHT');
+  // Spec fields — prefer admin-form input values (name/make, model,
+  // original_price, condition select, width/depth/height), then fall
+  // back to the label-based extractor used for the public page.
+  const inputVal = (names: string[]): string | null => {
+    for (const nm of names) {
+      // value=X name=Y OR name=Y value=X — try both orderings.
+      const a = html.match(new RegExp(`<input\\b[^>]*\\bname=["']${nm}["'][^>]*\\bvalue=["']([^"']*)["']`, 'i'));
+      if (a?.[1]) return cleanText(a[1]);
+      const b = html.match(new RegExp(`\\bvalue=["']([^"']*)["'][^>]*\\bname=["']${nm}["']`, 'i'));
+      if (b?.[1]) return cleanText(b[1]);
+    }
+    return null;
+  };
+  const selectedOpt = (names: string[]): string | null => {
+    for (const nm of names) {
+      // Isolate the <select name="X"> block, then its <option selected>.
+      const sel = html.match(new RegExp(`<select\\b[^>]*\\bname=["']${nm}["'][^>]*>([\\s\\S]*?)<\\/select>`, 'i'));
+      if (!sel) continue;
+      const opt = sel[1].match(/<option\b[^>]*\bselected[^>]*(?:\bvalue=["']([^"']*)["'])?[^>]*>([\s\S]*?)<\/option>/i);
+      if (opt) return cleanText(opt[1] || opt[2] || '');
+    }
+    return null;
+  };
+
+  const brand =
+    inputVal(['make', 'brand']) || extractField(html, 'MAKE');
+  const model =
+    inputVal(['model']) || extractField(html, 'MODEL');
+  const condText =
+    selectedOpt(['condition', 'condition_rating']) || extractField(html, 'CONDITION');
+  const retailRaw =
+    inputVal(['original_price', 'retail_new']) || extractField(html, 'ORIGINAL PRICE NEW');
+  const widthRaw =
+    inputVal(['width']) || extractField(html, 'WIDTH');
+  const depthRaw =
+    inputVal(['depth']) || extractField(html, 'DEPTH');
+  const heightRaw =
+    inputVal(['height']) || extractField(html, 'HEIGHT');
 
   // Condition "10 - NEW IN BOX" → 10. Clamp to 1–10.
   let condition_rating: number | null = null;
@@ -325,16 +398,23 @@ export async function fetchLotFullDetailAuthed(
     }
   }
 
-  // Description: AF shows the long listing text inside an area the
-  // template labels with the item name near the top. Grab the longest
-  // block of plain text between the first <h1> and the first <table>
-  // (specs table), then strip tags. Best-effort — if we can't find
-  // anything sensible, leave null.
+  // Description — try the admin form's <textarea> first (that's where
+  // the full auction description lives on the edit page), then fall
+  // back to the public page's between-h1-and-table extraction.
   let description: string | null = null;
-  const descRegion = html.match(/<\/h1>([\s\S]*?)<table/i);
-  if (descRegion) {
-    const text = cleanText(descRegion[1]);
+  const textareaRe =
+    /<textarea\b[^>]*\bname=["'](?:auction_description|description|detail|notes)["'][^>]*>([\s\S]*?)<\/textarea>/i;
+  const ta = html.match(textareaRe);
+  if (ta && ta[1]) {
+    const text = cleanText(ta[1]);
     if (text && text.length >= 20) description = text;
+  }
+  if (!description) {
+    const descRegion = html.match(/<\/h1>([\s\S]*?)<table/i);
+    if (descRegion) {
+      const text = cleanText(descRegion[1]);
+      if (text && text.length >= 20) description = text;
+    }
   }
 
   return {
