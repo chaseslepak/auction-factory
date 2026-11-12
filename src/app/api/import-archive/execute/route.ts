@@ -63,14 +63,14 @@ export async function POST(req: NextRequest) {
   if (af_item_ids.length === 0) {
     return NextResponse.json({ error: 'af_item_ids required' }, { status: 400 });
   }
-  // Server-side cap so one call stays inside the Vercel 60s function
-  // timeout even on photo-heavy lots. 5 lots × (~8s detail scrape + 5s
-  // photo downloads + inserts) leaves comfortable headroom vs. the
-  // previous 10-cap that occasionally got truncated and surfaced in
-  // iOS Safari as "The string did not match the expected pattern."
-  if (af_item_ids.length > 5) {
+  // Server-side cap: 3 lots per call keeps the whole function well
+  // under Vercel's 60s cap even for photo-heavy lots. With per-lot
+  // detail scraped in parallel (~8s) and photos downloaded in parallel
+  // (~3s per lot), 3 × ~12s ≈ 36s with headroom for AF slowness.
+  // Previously 5 and 10 both occasionally 504'd.
+  if (af_item_ids.length > 3) {
     return NextResponse.json(
-      { error: 'Max 5 lots per import batch — split into multiple calls.' },
+      { error: 'Max 3 lots per import batch — split into multiple calls.' },
       { status: 400 },
     );
   }
@@ -222,33 +222,42 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // Download each photo and attach as a lot_photos row. First one
-      // becomes display_order=0 (primary), rest append.
-      let photos_uploaded = 0;
-      for (let p = 0; p < image_urls.length; p++) {
-        const url = image_urls[p];
-        try {
-          const res = await fetch(url, {
-            headers: { 'User-Agent': UA, Cookie: cookie },
-          });
-          if (!res.ok) continue;
-          const buf = await res.arrayBuffer();
-          if (buf.byteLength < 500) continue; // skip 1x1 placeholders
-          const storagePath = `${auction_id}/${lotRow.id}/${p}.jpg`;
-          const { error: upErr } = await supabase.storage
-            .from('lot-photos')
-            .upload(storagePath, Buffer.from(buf), { contentType: 'image/jpeg', upsert: true });
-          if (upErr) continue;
-          const { error: lpErr } = await supabase.from('lot_photos').insert({
-            lot_id: lotRow.id,
-            storage_path: storagePath,
-            display_order: p,
-          });
-          if (!lpErr) photos_uploaded++;
-        } catch {
-          // Single-photo failure is non-fatal; try the rest.
-        }
-      }
+      // Download + upload every photo IN PARALLEL within one lot.
+      // Previous sequential loop meant a 10-photo lot took 10-20s of
+      // wall-clock just on photos, enough to push a 5-lot batch past
+      // Vercel's 60s function cap (504). Parallel caps per-lot photo
+      // time at the slowest single photo (~2s).
+      const photoResults = await Promise.all(
+        image_urls.map(async (url, p) => {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 8000);
+          try {
+            const res = await fetch(url, {
+              headers: { 'User-Agent': UA, Cookie: cookie },
+              signal: ctrl.signal,
+            });
+            if (!res.ok) return false;
+            const buf = await res.arrayBuffer();
+            if (buf.byteLength < 500) return false; // skip 1x1 placeholders
+            const storagePath = `${auction_id}/${lotRow.id}/${p}.jpg`;
+            const { error: upErr } = await supabase.storage
+              .from('lot-photos')
+              .upload(storagePath, Buffer.from(buf), { contentType: 'image/jpeg', upsert: true });
+            if (upErr) return false;
+            const { error: lpErr } = await supabase.from('lot_photos').insert({
+              lot_id: lotRow.id,
+              storage_path: storagePath,
+              display_order: p,
+            });
+            return !lpErr;
+          } catch {
+            return false;
+          } finally {
+            clearTimeout(timer);
+          }
+        }),
+      );
+      const photos_uploaded = photoResults.filter(Boolean).length;
 
       results.push({
         af_item_id,

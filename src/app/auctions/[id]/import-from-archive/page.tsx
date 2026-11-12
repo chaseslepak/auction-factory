@@ -158,10 +158,10 @@ export default function ImportFromArchivePage() {
     setImporting(true);
     setResultMsg(null);
     setResultIsError(false);
-    // Server caps at 5 per batch to stay under Vercel's 60s function
+    // Server caps at 3 per batch to stay under Vercel's 60s function
     // timeout on photo-heavy lots. Chunk the selection and submit
     // sequentially — UI shows progress across the whole selection.
-    const BATCH = 5;
+    const BATCH = 3;
     const idsAll = orderedSelection.map((l) => l.af_item_id);
     setProgress({ current: 0, total: idsAll.length });
     let created = 0;
