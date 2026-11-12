@@ -329,7 +329,7 @@ export async function fetchLotImagesAuthed(
     candidateUrls.map(async (url) => {
       const html = await fetchAuthedHtml(url, cookie);
       if (!html) return { url, urls: [], htmlLen: 0 };
-      const urls = extractImagesAroundAnchor(html, anchorText, otherLotsThumbs);
+      const urls = extractImagesAroundAnchor(html, af_item_id, anchorText, otherLotsThumbs);
       return { url, urls, htmlLen: html.length };
     }),
   );
@@ -352,34 +352,65 @@ export async function fetchLotImagesAuthed(
 }
 
 // Pull /uploaded_files/item_* image URLs that sit WITHIN a bounded
-// window of one of the given anchor strings in the HTML. Anchor
-// strings are the lot's own brand/model/title — any image near text
-// we know belongs to this item almost certainly belongs to it too.
-// Also filters out any URL that matches another lot's archive
-// thumbnail as a secondary defense.
+// window of a HIGH-CONFIDENCE anchor for this specific item. The
+// anchor hierarchy, strongest first:
+//
+//   1. 'item=<af_item_id>' — a URL/data-attribute pattern that is
+//      structurally tied to this item and never appears for another.
+//      This is the strongest signal; if it hits we use it alone.
+//   2. Full item_name text — reasonably unique per lot.
+//   3. model + brand — least unique, used only if nothing stronger
+//      matched.
+//
+// Matches in the first 1500 or last 1500 chars of the document are
+// discarded on the assumption that header/nav/footer live there. We
+// also hard-filter any URL that is another lot's archive thumbnail.
 function extractImagesAroundAnchor(
   html: string,
+  af_item_id: number,
   anchorText: string[],
   otherLotsThumbs: Set<string>,
 ): string[] {
-  // Normalize anchor candidates — strip the "($N)" suffix AF adds and
-  // drop short or empty entries that would false-match. Need at least
-  // 4 chars so we don't anchor on common substrings.
-  const anchors = anchorText
-    .map((s) => (s || '')
-      .replace(/\s*\(\s*\$[\d,]+(?:\.\d{2})?\s*\)\s*$/i, '')
-      .trim())
-    .filter((s) => s.length >= 4);
+  const WINDOW = 2500; // chars either side of anchor (was 6000 — too wide, bled sidebars)
+  const HEAD = 1500;    // skip nav/header region
+  const TAIL = 1500;    // skip footer region
+  const minIdx = Math.min(HEAD, Math.max(0, html.length - TAIL));
+  const maxIdx = Math.max(minIdx, html.length - TAIL);
 
-  const WINDOW = 6000; // chars either side of anchor
-  const spans: Array<[number, number]> = [];
-  for (const needle of anchors) {
+  const findAll = (needle: string): Array<[number, number]> => {
+    if (!needle || needle.length < 3) return [];
+    const spans: Array<[number, number]> = [];
     let idx = 0;
     while (idx < html.length) {
       const found = html.indexOf(needle, idx);
       if (found < 0) break;
-      spans.push([Math.max(0, found - WINDOW), Math.min(html.length, found + WINDOW)]);
+      // Reject hits inside nav/footer regions.
+      if (found >= minIdx && found <= maxIdx) {
+        spans.push([Math.max(0, found - WINDOW), Math.min(html.length, found + WINDOW)]);
+      }
       idx = found + needle.length;
+    }
+    return spans;
+  };
+
+  // Tier 1: structural URL pattern unique to this item.
+  let spans = findAll(`item=${af_item_id}`);
+  // Tier 2: item_name (first non-empty anchor that is reasonably long).
+  if (spans.length === 0) {
+    const nameCandidates = anchorText
+      .map((s) => (s || '').replace(/\s*\(\s*\$[\d,]+(?:\.\d{2})?\s*\)\s*$/i, '').trim())
+      .filter((s) => s.length >= 10);
+    for (const needle of nameCandidates) {
+      spans = spans.concat(findAll(needle));
+    }
+  }
+  // Tier 3: brand+model + anything else short but still ≥4 chars.
+  if (spans.length === 0) {
+    const shortCandidates = anchorText
+      .map((s) => (s || '').replace(/\s*\(\s*\$[\d,]+(?:\.\d{2})?\s*\)\s*$/i, '').trim())
+      .filter((s) => s.length >= 4);
+    for (const needle of shortCandidates) {
+      spans = spans.concat(findAll(needle));
     }
   }
 
