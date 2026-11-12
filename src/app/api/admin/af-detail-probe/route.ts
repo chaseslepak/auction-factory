@@ -24,13 +24,18 @@ const AF_ORIGIN = 'https://auctionfactory.com';
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 AuctionFactoryLotter/1.0';
 
-async function fetchAuthed(url: string, cookie: string): Promise<{ status: number; html: string | null }> {
+async function fetchAuthed(
+  url: string,
+  cookie: string,
+): Promise<{ status: number; html: string | null; location?: string | null }> {
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': UA, Accept: 'text/html', Cookie: cookie },
       redirect: 'manual',
     });
-    if (res.status === 302 || res.status === 301) return { status: res.status, html: null };
+    if (res.status === 302 || res.status === 301) {
+      return { status: res.status, html: null, location: res.headers.get('location') };
+    }
     const html = await res.text();
     return { status: res.status, html };
   } catch (err: any) {
@@ -66,6 +71,31 @@ function analyze(html: string, af_item_id: number) {
     return html.substring(s, e);
   };
 
+  // Harvest every link / form-action URL on the page that carries an
+  // item-looking query param. From the "All items" listing we can
+  // then infer how admin pages reference a single item's edit view.
+  const linkParamRe =
+    /\b(?:href|action|data-url|data-href)=["']([^"']*(?:item|lot|product|id)[^"']*=\d+[^"']*)["']/gi;
+  const linkSet = new Set<string>();
+  let lm: RegExpExecArray | null;
+  while ((lm = linkParamRe.exec(html)) !== null) {
+    linkSet.add(lm[1]);
+    if (linkSet.size >= 25) break;
+  }
+
+  // Also pull every URL that references OUR af_item_id anywhere, in any
+  // attribute. If AF uses a non-standard param name (?id=X, ?i=X, etc.)
+  // we'll see it here.
+  const ourIdRe = new RegExp(`["']([^"']*\\b${af_item_id}\\b[^"']*)["']`, 'g');
+  const ourIdLinks = new Set<string>();
+  let om: RegExpExecArray | null;
+  while ((om = ourIdRe.exec(html)) !== null) {
+    const v = om[1];
+    // Filter to URL-shaped values (contain a / or ? or .php)
+    if (/[/?]|\.php/.test(v) && v.length < 300) ourIdLinks.add(v);
+    if (ourIdLinks.size >= 15) break;
+  }
+
   return {
     htmlLen: html.length,
     isLoginPage: /name=["']psEmail["']|name=["']psPassword["']/i.test(html.substring(0, 5000)),
@@ -76,8 +106,8 @@ function analyze(html: string, af_item_id: number) {
     imageUrls: imgs.map((x) => x.url),
     imagePositions: imgs.map((x) => x.pos),
     imageFirstContext: imgs.length > 0 ? sample(imgs[0].pos) : null,
-    // Cheap heuristic for whether images and anchor cluster together.
-    // Distance from first anchor to nearest image.
+    linkParamsSample: Array.from(linkSet).slice(0, 25),
+    linksReferencingOurId: Array.from(ourIdLinks).slice(0, 15),
     distanceAnchorToNearestImage: (anchorIdx.length > 0 && imgs.length > 0)
       ? Math.min(...imgs.map((x) => Math.abs(x.pos - anchorIdx[0])))
       : null,
@@ -115,27 +145,55 @@ export async function GET(req: NextRequest) {
     `${AF_ORIGIN}/item_detail.php?item=${af_item_id}${af_auction_id ? `&auction=${af_auction_id}` : ''}`,
     `${AF_ORIGIN}/item_detail.php?item=${af_item_id}`,
     `${AF_ORIGIN}/admin/edit_item.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/edit_item_1.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/edit_item_2.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/edit_item_3.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/item_photos.php?item=${af_item_id}`,
-    `${AF_ORIGIN}/admin/photos.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item.php?id=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item.php?i=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item.php?lot=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item_photos.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/edit_item_photos.php?id=${af_item_id}`,
+    `${AF_ORIGIN}/admin/item.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/view_item.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/photo_manage.php?item=${af_item_id}`,
+    `${AF_ORIGIN}/admin/upload_photos.php?item=${af_item_id}`,
   ];
 
   const results = await Promise.all(
     candidates.map(async (url) => {
       const r = await fetchAuthed(url, cookie);
       if (r.status !== 200 || !r.html) {
-        return { url, status: r.status, error: r.html?.startsWith('FETCH_ERROR') ? r.html : 'non-200 or no body' };
+        return {
+          url,
+          status: r.status,
+          redirect_location: r.location ?? null,
+          error: r.html?.startsWith('FETCH_ERROR') ? r.html : 'non-200 or no body',
+        };
       }
       return { url, status: r.status, ...analyze(r.html, af_item_id) };
     }),
   );
+
+  // Also follow the first 301/302 redirect (from item_detail) to see
+  // where AF is sending us.
+  let redirectedFetch: any = null;
+  for (const r of results) {
+    if ((r as any).redirect_location) {
+      const loc = (r as any).redirect_location as string;
+      const absolute = loc.startsWith('http') ? loc : `${AF_ORIGIN}${loc.startsWith('/') ? loc : '/' + loc}`;
+      const f = await fetchAuthed(absolute, cookie);
+      redirectedFetch = {
+        from_url: (r as any).url,
+        to_url: absolute,
+        status: f.status,
+        ...(f.html && f.status === 200 ? analyze(f.html, af_item_id) : { error: 'non-200 on redirect follow' }),
+      };
+      break;
+    }
+  }
 
   return NextResponse.json({
     af_item_id,
     af_auction_id,
     cookie_preview: cookie.substring(0, 40) + '...',
     results,
+    redirectedFetch,
   });
 }
