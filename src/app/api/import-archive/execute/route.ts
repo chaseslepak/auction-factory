@@ -164,13 +164,25 @@ export async function POST(req: NextRequest) {
 
       // Photo URL list: prefer the authed detail scrape (full set);
       // fall back to the archive thumbnail if the detail page gave
-      // nothing.
-      const image_urls = detail?.image_urls?.length
+      // nothing. Then filter out any image URL that is clearly ANOTHER
+      // lot's archive thumbnail — a second defense against the admin
+      // page bleeding nav/sidebar/related-items thumbnails into this
+      // lot's gallery. A URL equal to this lot's own thumbnail stays.
+      const otherLotsThumbs = new Set<string>();
+      if (archiveIndex) {
+        archiveIndex.forEach((otherLot, otherAfItemId) => {
+          if (otherAfItemId === af_item_id) return;
+          if (otherLot.image_url) otherLotsThumbs.add(otherLot.image_url);
+        });
+      }
+      const rawUrls = detail?.image_urls?.length
         ? detail.image_urls
         : archiveLot?.image_url ? [archiveLot.image_url] : [];
+      const image_urls = rawUrls.filter((u) => !otherLotsThumbs.has(u));
       console.log(
         `[IMPORT-ARCHIVE] lot af_item_id=${af_item_id} → dest #${destination_lot_number} ` +
-        `images=${image_urls.length} desc_len=${description.length} retail=${retail}`,
+        `images=${image_urls.length} (filtered ${rawUrls.length - image_urls.length} other-lot thumbs) ` +
+        `desc_len=${description.length} retail=${retail}`,
       );
 
       // Hard-delete any soft-deleted lot at the destination slot so the
