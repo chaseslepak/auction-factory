@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { fetchLotFullDetailAuthed, fetchAuctionLots, ScrapedLot } from '@/lib/af-archive';
-import { computeListedPrice, formatLotTitle, syncRetailLine } from '@/lib/listing-price';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -128,14 +127,15 @@ export async function POST(req: NextRequest) {
       const detail = await fetchLotFullDetailAuthed(af_item_id, cookie);
       const archiveLot = archiveIndex?.get(af_item_id) ?? null;
 
-      // Fall back to archive-page fields when the authed detail scrape
-      // comes back empty (e.g. session expired). We still get an
-      // importable lot, just with one photo and lighter metadata.
-      const baseName = detail?.item_name || archiveLot?.item_name || `Imported lot ${af_item_id}`;
+      // Mirror the source lot as-is — no title reformatting, no
+      // description rewrite, no listed_price recomputation. Chase's
+      // intent: the imported lot should be identical to the source,
+      // with only the destination lot number reassigned.
+      const item_name = detail?.item_name || archiveLot?.item_name || `Imported lot ${af_item_id}`;
       const brand = detail?.brand || archiveLot?.brand || '';
       const model = detail?.model || archiveLot?.model || '';
       const retail = detail?.retail_new ?? archiveLot?.retail_new ?? 0;
-      let description = detail?.description || '';
+      const description = detail?.description || '';
       // Condition rating from authed detail (parsed int); otherwise
       // parse the archive page's "N - Label" string; otherwise null.
       let condition_rating: number | null = detail?.condition_rating ?? null;
@@ -150,17 +150,15 @@ export async function POST(req: NextRequest) {
       const depth = detail?.depth || null;
       const height = detail?.height || null;
 
-      // Apply the lotter's listing conventions so an imported lot looks
-      // identical to one Chase would create from the review page:
-      // compute listed_price from retail, synchronize the "Retail
-      // Price: $N" line inside the description, and run the item_name
-      // through the title formatter so the "NEW ... ($price)" suffix
-      // gets applied when condition is new-in-box.
-      const listedPrice = computeListedPrice(retail || 0);
-      if (description) {
-        description = syncRetailLine(description, listedPrice);
+      // listed_price: pull from the source title's "($N)" suffix when
+      // present (that's what the source auction actually listed at);
+      // otherwise fall back to retail. Avoids 0 showing up on imports.
+      let listedPrice = 0;
+      const priceInTitle = item_name.match(/\$\s*([\d,]+(?:\.\d{2})?)\s*\)/);
+      if (priceInTitle) {
+        listedPrice = Number(priceInTitle[1].replace(/,/g, '')) || 0;
       }
-      const item_name = formatLotTitle(baseName, condition_rating, listedPrice);
+      if (!listedPrice && retail > 0) listedPrice = retail;
 
       // Photo URL list: prefer the authed detail scrape (full set);
       // fall back to the archive thumbnail if the detail page gave
