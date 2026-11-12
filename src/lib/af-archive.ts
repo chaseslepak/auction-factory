@@ -277,23 +277,46 @@ async function fetchAuthedHtml(url: string, cookie: string): Promise<string | nu
   }
 }
 
-// Scan an HTML blob for every /uploaded_files*/item_* image reference,
-// regardless of attribute (src, data-src, data-full, href). Dedupes
-// preserving order so whichever appears first (usually the primary)
-// stays first.
-function extractAllItemImageUrls(html: string): string[] {
+// Scan an HTML blob for /uploaded_files*/item_* image references that
+// belong to THIS item — not thumbnails of other items sitting in nav
+// bars, sidebars or related-items strips. Scopes the search to a
+// bounded region: starts at the first form/section that references
+// item=<af_item_id> (admin edit form's hidden input, or an action URL
+// targeting this item) and ends at the next </form> or </section>.
+// Falls back to the full HTML if that anchor can't be found, but with
+// a hard cap of 20 images and ordering preserved — the first few
+// occurrences of /uploaded_files/ tend to be the lot's own gallery.
+function extractAllItemImageUrls(html: string, af_item_id: number): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  // Match /uploaded_files<N>/item_<timestamp>_<id>.<ext> anywhere in
-  // the HTML — covers <img src>, <img data-src>, <a href>, inline
-  // JS arrays, srcset tokens, etc. Stops at a quote, whitespace or ).
   const re = /\/uploaded_files\d*\/item_[^\s"'<>)]+\.(?:jpg|jpeg|png|webp|gif)/gi;
+
+  // Try to locate a region of the HTML that is clearly scoped to this
+  // item. Admin edit forms generally include <input type="hidden"
+  // name="id" value="<af_item_id>"> or an action URL carrying the id;
+  // the item's photo gallery lives inside that same form.
+  const anchorRes = [
+    new RegExp(`<form\\b[^>]*action=["'][^"']*item=${af_item_id}\\b[^>]*>([\\s\\S]*?)<\\/form>`, 'i'),
+    new RegExp(`<form\\b[^>]*>([\\s\\S]*?<input[^>]*name=["'](?:id|item)["'][^>]*value=["']${af_item_id}["'][\\s\\S]*?)<\\/form>`, 'i'),
+    new RegExp(`<input[^>]*name=["'](?:id|item)["'][^>]*value=["']${af_item_id}["'][^>]*>([\\s\\S]*?)<\\/form>`, 'i'),
+  ];
+  let scope: string | null = null;
+  for (const r of anchorRes) {
+    const m = html.match(r);
+    if (m) { scope = m[1]; break; }
+  }
+  if (!scope) scope = html;
+
   let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
+  while ((m = re.exec(scope)) !== null) {
     const u = `${AF_ORIGIN}${m[0]}`;
     if (!seen.has(u)) {
       seen.add(u);
       out.push(u);
+      // Hard cap so if we ever fail to find the scope anchor and fall
+      // back to the full HTML, we can't pull dozens of unrelated
+      // sidebar thumbnails into one lot.
+      if (out.length >= 20) break;
     }
   }
   return out;
@@ -322,7 +345,7 @@ export async function fetchLotFullDetailAuthed(
   let bestImgs: string[] = [];
   for (const html of htmls) {
     if (!html) continue;
-    const imgs = extractAllItemImageUrls(html);
+    const imgs = extractAllItemImageUrls(html, af_item_id);
     if (imgs.length > bestImgs.length) {
       bestHtml = html;
       bestImgs = imgs;
